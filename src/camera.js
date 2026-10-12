@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-// Dynamic Multi-Mode Camera Controller with Nitro Speed Warp & Impact Shake
+// Dynamic Multi-Mode Camera Controller with Smooth Damped Follow and Impact Shake
 export class MarsCameraController {
   constructor(camera, domElement) {
     this.camera = camera;
@@ -13,6 +13,9 @@ export class MarsCameraController {
     this.targetLook = new THREE.Vector3();
     this.currentPos = new THREE.Vector3();
     this.currentLook = new THREE.Vector3();
+
+    this.cameraYaw = 0;
+    this.initialized = false;
 
     this.baseFov = 65;
     this.camera.fov = this.baseFov;
@@ -30,75 +33,117 @@ export class MarsCameraController {
   }
 
   update(dt, physics) {
+    if (dt <= 0) return;
     const roverPos = physics.position;
-    const forward = physics._vForward;
-    const up = physics._vUp;
     const mode = this.modes[this.modeIndex];
 
     const speedRatio = Math.min(1.0, physics.speedKmh / 140.0);
     const nitroFactor = physics.isNitroActive ? 1.0 : 0.0;
 
     // Dynamic FOV widening during high speed & nitro
-    const targetFov = this.baseFov + speedRatio * 15 + nitroFactor * 12;
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * 5);
+    const targetFov = this.baseFov + speedRatio * 14 + nitroFactor * 10;
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * 6);
     this.camera.updateProjectionMatrix();
 
+    // Smoothly follow rover yaw
+    let angleDiff = physics.yaw - this.cameraYaw;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    this.cameraYaw += angleDiff * Math.min(1.0, dt * 5.0);
+
+    const cosY = Math.cos(this.cameraYaw);
+    const sinY = Math.sin(this.cameraYaw);
+
     if (mode === 'CHASE') {
-      // Smooth behind and above rover
-      const distBehind = 9.5 + speedRatio * 2.5;
-      const heightAbove = 4.2;
+      const distBehind = 8.5 + speedRatio * 2.0;
+      const heightAbove = 3.8;
 
-      this.targetPos.copy(roverPos)
-        .sub(forward.clone().multiplyScalar(distBehind))
-        .add(new THREE.Vector3(0, heightAbove, 0));
+      this.targetPos.set(
+        roverPos.x - sinY * distBehind,
+        roverPos.y + heightAbove,
+        roverPos.z - cosY * distBehind
+      );
 
-      this.targetLook.copy(roverPos).add(new THREE.Vector3(0, 1.2, 0)).add(forward.clone().multiplyScalar(6.0));
+      this.targetLook.set(
+        roverPos.x + sinY * 4.0,
+        roverPos.y + 1.2,
+        roverPos.z + cosY * 4.0
+      );
 
-      const lerpFactor = dt * 6.5;
-      this.currentPos.lerp(this.targetPos, lerpFactor);
-      this.currentLook.lerp(this.targetLook, lerpFactor * 1.2);
+      const lerpPos = Math.min(1.0, dt * 8.0);
+      const lerpLook = Math.min(1.0, dt * 10.0);
+
+      if (!this.initialized) {
+        this.currentPos.copy(this.targetPos);
+        this.currentLook.copy(this.targetLook);
+        this.initialized = true;
+      } else {
+        this.currentPos.lerp(this.targetPos, lerpPos);
+        this.currentLook.lerp(this.targetLook, lerpLook);
+      }
 
     } else if (mode === 'CLOSE') {
-      const distBehind = 6.0;
-      const heightAbove = 2.4;
+      const distBehind = 5.5;
+      const heightAbove = 2.2;
 
-      this.targetPos.copy(roverPos)
-        .sub(forward.clone().multiplyScalar(distBehind))
-        .add(new THREE.Vector3(0, heightAbove, 0));
+      this.targetPos.set(
+        roverPos.x - sinY * distBehind,
+        roverPos.y + heightAbove,
+        roverPos.z - cosY * distBehind
+      );
 
-      this.targetLook.copy(roverPos).add(new THREE.Vector3(0, 1.0, 0)).add(forward.clone().multiplyScalar(8.0));
+      this.targetLook.set(
+        roverPos.x + sinY * 5.0,
+        roverPos.y + 0.9,
+        roverPos.z + cosY * 5.0
+      );
 
-      const lerpFactor = dt * 10.0;
-      this.currentPos.lerp(this.targetPos, lerpFactor);
-      this.currentLook.lerp(this.targetLook, lerpFactor);
+      this.currentPos.lerp(this.targetPos, Math.min(1.0, dt * 12.0));
+      this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 14.0));
 
     } else if (mode === 'COCKPIT') {
-      // Mount near windshield visor
-      this.targetPos.copy(roverPos).add(new THREE.Vector3(0, 1.4, 0)).add(forward.clone().multiplyScalar(0.9));
-      this.targetLook.copy(this.targetPos).add(forward.clone().multiplyScalar(20.0));
+      // Mount in front cabin visor
+      this.targetPos.set(
+        roverPos.x + sinY * 0.8,
+        roverPos.y + 1.2,
+        roverPos.z + cosY * 0.8
+      );
+      this.targetLook.set(
+        roverPos.x + sinY * 20.0,
+        roverPos.y + 1.0,
+        roverPos.z + cosY * 20.0
+      );
 
       this.currentPos.copy(this.targetPos);
-      this.currentLook.lerp(this.targetLook, dt * 18.0);
+      this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 20.0));
 
     } else if (mode === 'DRONE') {
-      // High-altitude bird's eye view
-      this.targetPos.copy(roverPos).add(new THREE.Vector3(0, 32.0, -18.0));
+      // High bird's eye view
+      this.targetPos.set(
+        roverPos.x - sinY * 18.0,
+        roverPos.y + 26.0,
+        roverPos.z - cosY * 18.0
+      );
       this.targetLook.copy(roverPos);
 
-      this.currentPos.lerp(this.targetPos, dt * 4.0);
-      this.currentLook.lerp(this.targetLook, dt * 6.0);
+      this.currentPos.lerp(this.targetPos, Math.min(1.0, dt * 4.0));
+      this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 6.0));
     }
 
-    // Camera impact & nitro vibration shake
+    // Camera impact shake
     if (physics.isNitroActive) {
-      this.shakeIntensity = Math.max(this.shakeIntensity, 0.18);
+      this.shakeIntensity = Math.max(this.shakeIntensity, 0.12);
     }
 
     if (this.shakeIntensity > 0.001) {
-      const sx = (Math.random() - 0.5) * this.shakeIntensity * 0.35;
-      const sy = (Math.random() - 0.5) * this.shakeIntensity * 0.35;
-      const sz = (Math.random() - 0.5) * this.shakeIntensity * 0.35;
-      this.camera.position.copy(this.currentPos).add(new THREE.Vector3(sx, sy, sz));
+      const sx = (Math.random() - 0.5) * this.shakeIntensity * 0.25;
+      const sy = (Math.random() - 0.5) * this.shakeIntensity * 0.25;
+      const sz = (Math.random() - 0.5) * this.shakeIntensity * 0.25;
+      this.camera.position.set(
+        this.currentPos.x + sx,
+        this.currentPos.y + sy,
+        this.currentPos.z + sz
+      );
       this.shakeIntensity = Math.max(0, this.shakeIntensity - dt * 2.5);
     } else {
       this.camera.position.copy(this.currentPos);
