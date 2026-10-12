@@ -1,0 +1,493 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #2b1712;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  touch-action: none;
+}
+
+#canvas-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+#hud-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Top-Left Branding */
+.top-left-brand {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+
+.brand-text {
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.5px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+.sub-brand {
+  font-size: 10px;
+  font-weight: 700;
+  color: #ff9166;
+  letter-spacing: 2.2px;
+  margin-top: 1px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Top-Right Settings Gear */
+.top-right-bar {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  pointer-events: auto;
+}
+
+.hud-pill-btn {
+  background: rgba(20, 20, 24, 0.65);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hud-pill-btn:hover {
+  background: rgba(40, 40, 48, 0.85);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+/* 3D Floating Waypoint Badges (drune.io style!) */
+#waypoint-badges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.waypoint-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: rgba(18, 16, 20, 0.72);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform-origin: center center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Bottom Left Desktop Hints */
+.bottom-left-hints {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.hint-row {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow:
+    -1px -1px 0 rgba(0,0,0,0.8),
+     1px -1px 0 rgba(0,0,0,0.8),
+    -1px  1px 0 rgba(0,0,0,0.8),
+     1px  1px 0 rgba(0,0,0,0.8),
+     0 2px 4px rgba(0,0,0,0.7);
+}
+
+.key-label {
+  color: #e0d0c5;
+}
+
+/* Bottom Center Telemetry & Speedometer */
+.bottom-center-telemetry {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* Nitro Bar */
+.nitro-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.nitro-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: #00f0ff;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+}
+
+.nitro-track {
+  width: 140px;
+  height: 6px;
+  background: rgba(10, 20, 25, 0.7);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+}
+
+.nitro-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00b4d8, #00f0ff);
+  box-shadow: 0 0 10px #00f0ff;
+  transition: width 0.05s linear;
+}
+
+.nitro-fill.active {
+  background: linear-gradient(90deg, #ff0055, #00f0ff);
+  animation: pulse-nitro 0.2s infinite alternate;
+}
+
+@keyframes pulse-nitro {
+  from { opacity: 0.8; }
+  to { opacity: 1.0; }
+}
+
+/* Speedometer */
+.speedometer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.speed-number {
+  font-size: 32px;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: -0.5px;
+  text-shadow:
+    -2px -2px 0 rgba(0,0,0,0.9),
+     2px -2px 0 rgba(0,0,0,0.9),
+    -2px  2px 0 rgba(0,0,0,0.9),
+     2px  2px 0 rgba(0,0,0,0.9),
+     0 3px 6px rgba(0,0,0,0.8);
+}
+
+.speed-unit {
+  font-size: 18px;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.speed-bar-container {
+  width: 160px;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.85);
+  border-radius: 3px;
+  margin-top: 2px;
+  overflow: hidden;
+}
+
+.speed-bar {
+  height: 100%;
+  width: 0%;
+  background: #ffffff;
+  border-radius: 3px;
+  transition: width 0.08s ease-out;
+}
+
+/* Mobile Touch Controls */
+#mobile-controls {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.touch-cluster {
+  position: absolute;
+  bottom: 24px;
+  display: flex;
+  gap: 16px;
+  pointer-events: auto;
+}
+
+.left-cluster {
+  left: 20px;
+}
+
+.right-cluster {
+  right: 20px;
+}
+
+.touch-btn {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(24, 20, 22, 0.65);
+  backdrop-filter: blur(8px);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  transition: transform 0.08s ease, background 0.08s ease;
+  touch-action: none;
+}
+
+.touch-btn:active, .touch-btn.active {
+  background: rgba(220, 100, 50, 0.85);
+  border-color: #ffaa77;
+  transform: scale(0.92);
+}
+
+.pedal-btn {
+  width: 74px;
+  height: 74px;
+  font-size: 14px;
+  border-radius: 20px;
+}
+
+.gas-btn {
+  background: rgba(30, 90, 60, 0.7);
+  border-color: rgba(70, 210, 140, 0.6);
+}
+
+.gas-btn:active, .gas-btn.active {
+  background: rgba(40, 180, 100, 0.9);
+}
+
+.brake-btn {
+  background: rgba(90, 30, 30, 0.7);
+  border-color: rgba(240, 80, 80, 0.6);
+}
+
+.brake-btn:active, .brake-btn.active {
+  background: rgba(210, 40, 40, 0.9);
+}
+
+/* Touch Action Bar */
+.touch-action-bar {
+  position: absolute;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.touch-pill-btn {
+  background: rgba(20, 20, 26, 0.75);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  padding: 8px 14px;
+  border-radius: 24px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  touch-action: none;
+}
+
+.nitro-pill {
+  background: rgba(0, 120, 160, 0.8);
+  border-color: #00f0ff;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+}
+
+.touch-pill-btn:active, .touch-pill-btn.active {
+  transform: scale(0.92);
+  background: #ff7733;
+}
+
+/* Settings Modal */
+.modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(12, 10, 14, 0.75);
+  backdrop-filter: blur(12px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.modal-backdrop.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-card {
+  width: 90%;
+  max-width: 440px;
+  background: #1e191d;
+  border: 1px solid rgba(255, 120, 70, 0.35);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
+  color: #ffffff;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-header h2 {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  color: #ff9d73;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 26px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.setting-item select {
+  background: #2a2228;
+  border: 1px solid #483944;
+  color: #ffffff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+}
+
+.setting-item input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: #ff7033;
+  cursor: pointer;
+}
+
+.btn-action {
+  background: #c95e3a;
+  border: none;
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-action:hover {
+  background: #e06d45;
+}
+
+.modal-footer {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  color: #8c8288;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .bottom-left-hints {
+    display: none;
+  }
+  .speed-number {
+    font-size: 26px;
+  }
+  .speed-bar-container {
+    width: 120px;
+  }
+  .nitro-track {
+    width: 100px;
+  }
+  .top-left-brand .brand-text {
+    font-size: 16px;
+  }
+}

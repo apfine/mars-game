@@ -1,0 +1,14 @@
+# Node & Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+.npm/
+
+# Hidden files & environment files rule
+.*
+!/.gitignore
+.env
+.env.*
+.deployment_directive.md
