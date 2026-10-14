@@ -39,8 +39,8 @@ export class MarsAtmosphere {
       uniforms: {
         uTime: { value: 0 },
         uSunPos: { value: SUN_DIR.clone() },
-        uSkyZenith: { value: new THREE.Color(0xa24d36) },     // Deep dusty terracotta overhead
-        uSkyHorizon: { value: new THREE.Color(0xda8e6c) },    // Matching terrain horizon dust haze
+        uSkyZenith: { value: new THREE.Color(0xb8795a) },     // Butterscotch overhead
+        uSkyHorizon: { value: new THREE.Color(0xd9a07e) },    // Pale dusty tan horizon (matches terrain haze + scene fog)
         uSunColor: { value: new THREE.Color(0xfff5e6) },      // Brilliant Martian sun
         uSunHaloBlue: { value: new THREE.Color(0x5ca0d3) }    // Signature Mars twilight blue scattering halo
       },
@@ -69,36 +69,51 @@ export class MarsAtmosphere {
                      mix(h11(i + vec2(0.0, 1.0)), h11(i + vec2(1.0, 1.0)), f.x), f.y);
         }
 
+        float fbm2(vec2 p) {
+          float a = 0.5; float s = 0.0;
+          for (int i = 0; i < 4; i++) { s += a * vn(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; }
+          return s;
+        }
+
         void main() {
           vec3 dir = normalize(vWorldPosition);
           float e = max(dir.y, 0.0);
+          vec3 sunDir = normalize(uSunPos);
 
-          // Base gradient: dusty horizon to darker zenith
-          vec3 sky = mix(uSkyHorizon, uSkyZenith, pow(e, 0.5));
+          // Base gradient: pale dusty tan horizon rising to a deeper butterscotch zenith
+          vec3 sky = mix(uSkyHorizon, uSkyZenith, pow(e, 0.42));
 
           // Suspended-dust haze band hugging the horizon
-          float band = exp(-e * 9.0);
-          sky = mix(sky, uSkyHorizon * 1.1, band * 0.55);
-          sky *= 1.0 - 0.16 * smoothstep(0.5, 1.0, e);
+          float band = exp(-e * 7.0);
+          sky = mix(sky, uSkyHorizon * 1.08, band * 0.6);
+          sky *= 1.0 - 0.12 * smoothstep(0.55, 1.0, e);
 
-          // High-altitude dust streaks (subtle, slowly drifting)
-          vec2 sp = dir.xz / (dir.y + 0.4) * 1.6;
-          float streak = vn(sp * vec2(1.0, 3.2) + vec2(uTime * 0.012, 0.0)) * 0.6
-                       + vn(sp * vec2(2.3, 6.0) - vec2(uTime * 0.02, 0.0)) * 0.4;
-          sky *= 1.0 + (streak - 0.5) * 0.14 * smoothstep(0.04, 0.45, e);
+          // Sun-side brightening (dust forward scatters sunlight over a wide area)
+          float sc = max(dot(dir, sunDir), 0.0);
+          sky += vec3(0.30, 0.20, 0.12) * pow(sc, 3.0) * 0.45;
+
+          // Wispy water-ice cirrus clouds streaked by high winds
+          vec2 cp = dir.xz / (dir.y + 0.28);
+          vec2 wind = vec2(uTime * 0.010, uTime * 0.004);
+          vec2 q = cp * vec2(0.9, 2.6) + wind;
+          float c1 = fbm2(q + fbm2(q * 0.7) * 1.2);
+          float cloud = smoothstep(0.50, 0.78, c1) * smoothstep(0.05, 0.30, e) * (1.0 - smoothstep(0.7, 1.0, e) * 0.5);
+          float thin = smoothstep(0.42, 0.62, fbm2(cp * vec2(0.5, 5.0) - wind * 1.5)) * smoothstep(0.08, 0.4, e) * 0.35;
+          vec3 cloudCol = mix(vec3(0.95, 0.74, 0.62), vec3(1.0, 0.92, 0.84), pow(sc, 2.0));
+          sky = mix(sky, cloudCol, clamp(cloud * 0.55 + thin, 0.0, 0.7));
 
           // Mars forward-scattering: blue corona around the sun + warm glare lobes
-          float sc = max(dot(dir, normalize(uSunPos)), 0.0);
-          float blueHalo = pow(sc, 10.0) * 0.5 * (1.0 - band * 0.35);
+          float blueHalo = pow(sc, 14.0) * 0.55 * (1.0 - band * 0.3);
           sky = mix(sky, uSunHaloBlue, blueHalo);
-          float glare = pow(sc, 5.0) * 0.28 + pow(sc, 36.0) * 0.55 + pow(sc, 380.0) * 1.6;
+          float glare = pow(sc, 6.0) * 0.30 + pow(sc, 40.0) * 0.6 + pow(sc, 420.0) * 1.8;
           sky += uSunColor * glare * 0.6;
 
           // Sharp Sun disk (Mars sun appears ~2/3 size of Earth sun)
-          float sunDisk = smoothstep(0.9988, 0.9995, dot(dir, normalize(uSunPos)));
+          float sunDisk = smoothstep(0.9988, 0.9995, sc);
           vec3 col = sky + uSunColor * sunDisk * 3.0;
 
           gl_FragColor = vec4(col, 1.0);
+          #include <colorspace_fragment>
         }
       `
     });
@@ -125,8 +140,40 @@ export class MarsAtmosphere {
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
-    this.ambientLight = new THREE.AmbientLight(0x4a2a22, 1.2);
+    this.ambientLight = new THREE.AmbientLight(0x6a4034, 0.5);
     this.scene.add(this.ambientLight);
+
+    // Warm sky fill / sand bounce light (soft, realistic shadow fill)
+    this.hemiLight = new THREE.HemisphereLight(0xd9a98a, 0x8a4a30, 0.7);
+    this.scene.add(this.hemiLight);
+
+    // Atmospheric perspective for all standard-lit objects (terrain has its own matching fog)
+    this.scene.fog = new THREE.Fog(0xd9a07e, 110, 520);
+  }
+
+  // Build an image-based lighting environment from the sky shader so metals, glass and paint reflect
+  // the Martian sky and sand instead of looking flat and black.
+  buildEnvironment(renderer) {
+    const envScene = new THREE.Scene();
+    const skyClone = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 24), this.skyMat.clone());
+    skyClone.material.uniforms.uTime.value = 0;
+    skyClone.renderOrder = -10;
+    envScene.add(skyClone);
+
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(95, 32).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x9c5a3c })
+    );
+    ground.position.y = -1.0;
+    envScene.add(ground);
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const rt = pmrem.fromScene(envScene, 0.015);
+    this.scene.environment = rt.texture;
+    this.scene.environmentIntensity = 0.85;
+    pmrem.dispose();
+    skyClone.geometry.dispose();
+    ground.geometry.dispose();
   }
 
   createDistantMountains() {
@@ -163,8 +210,8 @@ export class MarsAtmosphere {
       side: THREE.DoubleSide,
       fog: false,
       uniforms: {
-        uHaze: { value: new THREE.Color(0xda8e6c) },
-        uPeak: { value: new THREE.Color(0xa86448) }
+        uHaze: { value: new THREE.Color(0xd9a07e) },
+        uPeak: { value: new THREE.Color(0xb27a5e) }
       },
       vertexShader: `
         varying float vY;
@@ -181,6 +228,7 @@ export class MarsAtmosphere {
           // Atmospheric perspective: bases dissolve into haze, ridges stay slightly darker
           float t = smoothstep(-5.0, 120.0, vY);
           gl_FragColor = vec4(mix(uHaze, uPeak, t * 0.7), 1.0);
+          #include <colorspace_fragment>
         }
       `
     });
@@ -585,7 +633,7 @@ export class MarsAtmosphere {
       p.outer.visible = vis;
       p.inner.visible = vis;
       if (!vis) continue;
-      const nozzle = new THREE.Vector3(p.x, 0.55, -2.75).applyQuaternion(physics.quaternion).add(playerPos);
+      const nozzle = new THREE.Vector3(p.x, -0.25, -2.75).applyQuaternion(physics.quaternion).add(playerPos);
       const len = (2.2 + 6.5 * level + speed * 0.05) * flicker;
       for (const [m, lenMul, widMul] of [[p.outer, 1.0, 1.0], [p.inner, 0.68, 1.0]]) {
         m.position.copy(nozzle);
@@ -597,7 +645,7 @@ export class MarsAtmosphere {
     }
 
     // Exhaust glow light
-    const lp = new THREE.Vector3(0, 0.9, -4.5).applyQuaternion(physics.quaternion).add(playerPos);
+    const lp = new THREE.Vector3(0, 0.0, -4.5).applyQuaternion(physics.quaternion).add(playerPos);
     this.nitroLight.position.copy(lp);
     this.nitroLight.intensity = level * (7 + Math.random() * 5);
 
@@ -605,7 +653,7 @@ export class MarsAtmosphere {
       // Hot sparks (blue-white core fading to orange) and slow glowing embers
       this.nitroAcc += 140 * this.dustDensity * dt;
       this.emberAcc += 50 * this.dustDensity * dt;
-      const nozzles = [-0.55, 0.55].map((x) => new THREE.Vector3(x, 0.55, -2.75).applyQuaternion(physics.quaternion).add(playerPos));
+      const nozzles = [-0.55, 0.55].map((x) => new THREE.Vector3(x, -0.25, -2.75).applyQuaternion(physics.quaternion).add(playerPos));
 
       while (this.nitroAcc >= 1.0) {
         this.nitroAcc -= 1.0;
@@ -644,7 +692,7 @@ export class MarsAtmosphere {
         this.tailAcc = (this.tailAcc || 0) + extra;
         while (this.tailAcc >= 1.0) {
           this.tailAcc -= 1.0;
-          const rear = new THREE.Vector3((Math.random() - 0.5) * 1.6, -0.1, -2.2).applyQuaternion(physics.quaternion).add(playerPos);
+          const rear = new THREE.Vector3((Math.random() - 0.5) * 1.6, -0.85, -2.2).applyQuaternion(physics.quaternion).add(playerPos);
           this.emitDust(
             rear.x, rear.y, rear.z,
             -forward.x * speed * 0.3 + (Math.random() - 0.5) * 3, 2.5 + Math.random() * 3.0, -forward.z * speed * 0.3 + (Math.random() - 0.5) * 3,

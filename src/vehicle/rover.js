@@ -1,10 +1,127 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-// Highly Detailed, Sleek, Cybernetic Mars Expedition Rover
-// Features: Wide-stance aggressive silhouette, double-wishbone suspension arms with shock springs,
-// deep directional off-road tires with alloy rims, panoramic tinted visor canopy,
-// glowing full-width cyber rear taillight strip, dual vectoring ion thrusters with plasma glow,
-// carbon-fiber aero spoiler, articulating communications dish, sensor mast, and RTG power core.
+// Ground level in model space (physics keeps the model origin this far above the dune surface)
+const GROUND = -0.95;
+const H = (h) => GROUND + h; // convert "height above ground" to model-space Y
+const UP = new THREE.Vector3(0, 1, 0);
+
+// ---------- Procedural textures (no external assets) ----------
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+function rand(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+// Painted, panelled, dust-weathered body texture
+function createBodyTexture() {
+  const S = 512;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const r = rand(77);
+
+  // Warm off-white paint
+  g.fillStyle = '#e6e3dc';
+  g.fillRect(0, 0, S, S);
+
+  // Subtle paint mottling
+  for (let i = 0; i < 2600; i++) {
+    const a = 0.02 + r() * 0.04;
+    g.fillStyle = r() > 0.5 ? `rgba(255,255,255,${a})` : `rgba(120,110,100,${a})`;
+    const sz = 2 + r() * 14;
+    g.fillRect(r() * S, r() * S, sz, sz);
+  }
+
+  // Panel seams and rivets
+  g.strokeStyle = 'rgba(70,64,58,0.55)';
+  g.lineWidth = 2;
+  for (let x = 0; x <= S; x += 128) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, S); g.stroke(); }
+  for (let y = 0; y <= S; y += 170) { g.beginPath(); g.moveTo(0, y); g.lineTo(S, y); g.stroke(); }
+  g.fillStyle = 'rgba(60,56,52,0.7)';
+  for (let x = 12; x < S; x += 32) {
+    for (const y of [10, 170 - 10, 170 + 10, 340 - 10, 340 + 10, S - 10]) {
+      g.beginPath(); g.arc(x, y, 1.6, 0, Math.PI * 2); g.fill();
+    }
+  }
+
+  // Dark scuffs and streaks
+  for (let i = 0; i < 60; i++) {
+    g.strokeStyle = `rgba(60,48,40,${0.05 + r() * 0.1})`;
+    g.lineWidth = 1 + r() * 2;
+    const x = r() * S, y = r() * S;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (r() - 0.5) * 30, y + 20 + r() * 80); g.stroke();
+  }
+
+  // Mars dust settled low and in a fine film everywhere
+  const dust = g.createLinearGradient(0, 0, 0, S);
+  dust.addColorStop(0.0, 'rgba(176,108,72,0.62)');
+  dust.addColorStop(0.35, 'rgba(176,108,72,0.22)');
+  dust.addColorStop(1.0, 'rgba(176,108,72,0.10)');
+  g.fillStyle = dust;
+  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 900; i++) {
+    g.fillStyle = `rgba(150,92,60,${0.04 + r() * 0.08})`;
+    g.fillRect(r() * S, S * 0.45 + r() * S * 0.55, 2 + r() * 8, 1 + r() * 6);
+  }
+
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+function createDecalTexture() {
+  const c = makeCanvas(512, 128);
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 512, 128);
+  g.fillStyle = '#d4521c';
+  g.fillRect(0, 54, 512, 6);
+  g.fillStyle = '#3a3a3e';
+  g.font = '800 64px Arial, sans-serif';
+  g.textBaseline = 'middle';
+  g.fillText('DUNES', 8, 28);
+  g.font = '600 20px Arial, sans-serif';
+  g.fillStyle = '#5a5a60';
+  g.fillText('MARS EXPEDITION ROVER   //   DX-01', 10, 94);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+function createShadowTexture() {
+  const c = makeCanvas(128, 128);
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 4, 64, 64, 62);
+  grad.addColorStop(0.0, 'rgba(0,0,0,0.9)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.55)');
+  grad.addColorStop(1.0, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+function nonIndexed(g) {
+  const out = g.index ? g.toNonIndexed() : g;
+  for (const name of Object.keys(out.attributes)) {
+    if (name !== 'position' && name !== 'normal' && name !== 'uv') out.deleteAttribute(name);
+  }
+  return out;
+}
+
+// Realistic Mars expedition rover: warm-white painted panelled body, gold thermal blankets,
+// mast camera head, high-gain antenna, folded instrument arm, RTG, coil-over wishbone suspension and
+// machined aluminium cleated wheels (Perseverance-style) with flex spokes.
 export class MarsRoverModel {
   constructor() {
     this.group = new THREE.Group();
@@ -18,412 +135,404 @@ export class MarsRoverModel {
     this.buildRover();
   }
 
+  strut(a, b, r, mat, parent = this.chassisGroup, seg = 10) {
+    const d = new THREE.Vector3().subVectors(b, a);
+    const len = d.length();
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, seg), mat);
+    m.position.copy(a).addScaledVector(d, 0.5);
+    m.quaternion.setFromUnitVectors(UP, d.normalize());
+    m.castShadow = true;
+    parent.add(m);
+    return m;
+  }
+
+  box(w, h, d, rad, mat, x, y, z, parent = this.chassisGroup) {
+    const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 4, rad), mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  }
+
   buildRover() {
-    // --- High Quality PBR Materials ---
-    const armorTealMat = new THREE.MeshStandardMaterial({
-      color: 0x2e6f65, // Rich expedition teal
-      roughness: 0.35,
-      metalness: 0.75
-    });
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const bodyTex = createBodyTexture();
 
-    const darkCarbonMat = new THREE.MeshStandardMaterial({
-      color: 0x181a1d, // Matte carbon composite
-      roughness: 0.6,
-      metalness: 0.8
-    });
+    // --- PBR materials ---
+    const paint = new THREE.MeshStandardMaterial({ map: bodyTex, roughness: 0.55, metalness: 0.12 });
+    const darkMetal = new THREE.MeshStandardMaterial({ color: 0x2a2c31, roughness: 0.45, metalness: 0.85 });
+    const aluminum = new THREE.MeshStandardMaterial({ color: 0xb9b5ae, roughness: 0.38, metalness: 0.92 });
+    const dustyAlu = new THREE.MeshStandardMaterial({ color: 0xa79b90, roughness: 0.5, metalness: 0.85, side: THREE.DoubleSide });
+    const gold = new THREE.MeshStandardMaterial({ color: 0xd9a52e, roughness: 0.3, metalness: 1.0 });
+    const lensGlass = new THREE.MeshStandardMaterial({ color: 0x07101a, roughness: 0.05, metalness: 0.95 });
+    const rubber = new THREE.MeshStandardMaterial({ color: 0x1b1b1d, roughness: 0.9, metalness: 0.05 });
+    const springRed = new THREE.MeshStandardMaterial({ color: 0xcf3a1c, roughness: 0.4, metalness: 0.5 });
+    const caliperMat = new THREE.MeshStandardMaterial({ color: 0xd4521c, roughness: 0.45, metalness: 0.5 });
+    const lampLens = new THREE.MeshBasicMaterial({ color: 0xfff2d8 });
+    const tailLens = new THREE.MeshStandardMaterial({ color: 0xff1a1a, emissive: 0xff1a1a, emissiveIntensity: 1.6, roughness: 0.3 });
+    const nozzleBronze = new THREE.MeshStandardMaterial({ color: 0x6d4a39, roughness: 0.5, metalness: 0.9, emissive: 0x1a0a04 });
 
-    const brushedTitaniumMat = new THREE.MeshStandardMaterial({
-      color: 0x8a929a,
-      roughness: 0.25,
-      metalness: 0.95
-    });
-
-    const goldFoilMat = new THREE.MeshStandardMaterial({
-      color: 0xf5b800,
-      roughness: 0.2,
-      metalness: 0.9
-    });
-
-    const cockpitGlassMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a1c24,
-      metalness: 0.9,
-      roughness: 0.08,
-      transparent: true,
-      opacity: 0.88,
-      reflectivity: 0.95,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.1
-    });
-
-    const tireRubberMat = new THREE.MeshStandardMaterial({
-      color: 0x141416,
-      roughness: 0.85,
-      metalness: 0.15
-    });
-
-    const copperRimMat = new THREE.MeshStandardMaterial({
-      color: 0xe07a38, // High-visibility Mars copper-orange anodized alloy
-      roughness: 0.25,
-      metalness: 0.9
-    });
-
-    const neonCyanMat = new THREE.MeshBasicMaterial({
-      color: 0x00f0ff
-    });
-
-    const neonRedLightbarMat = new THREE.MeshBasicMaterial({
-      color: 0xff1e44
-    });
-
-    const chromeMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.1,
-      metalness: 1.0
-    });
+    const C = this.chassisGroup;
 
     // ==========================================
-    // 1. CHASSIS & ARMOR HULL
+    // 1. BODY (painted aluminium monocoque)
     // ==========================================
-    // Lower structural tub
-    const tubGeo = new THREE.BoxGeometry(2.1, 0.4, 4.2);
-    const tub = new THREE.Mesh(tubGeo, darkCarbonMat);
-    tub.position.y = 0.42;
-    tub.castShadow = true;
-    tub.receiveShadow = true;
-    this.chassisGroup.add(tub);
+    this.box(1.7, 0.56, 3.1, 0.12, paint, 0, H(1.08), 0);                 // main body
+    this.box(1.5, 0.36, 0.62, 0.12, paint, 0, H(0.96), 1.62);              // nose cowl
+    this.box(1.56, 0.16, 3.0, 0.05, darkMetal, 0, H(0.76), 0);             // belly armour plate
+    this.box(1.62, 0.05, 2.5, 0.02, darkMetal, 0, H(1.395), -0.1);         // top deck plate
 
-    // Sculpted angular upper cabin with chamfered look
-    const mainHullGeo = new THREE.BoxGeometry(1.95, 0.65, 3.2);
-    const mainHull = new THREE.Mesh(mainHullGeo, armorTealMat);
-    mainHull.position.set(0, 0.88, -0.15);
-    mainHull.castShadow = true;
-    this.chassisGroup.add(mainHull);
-
-    // Front aggressive wedge nose
-    const noseGeo = new THREE.ConeGeometry(1.15, 0.95, 4);
-    noseGeo.rotateY(Math.PI / 4);
-    noseGeo.rotateX(Math.PI / 2);
-    const nose = new THREE.Mesh(noseGeo, armorTealMat);
-    nose.position.set(0, 0.72, 1.85);
-    nose.scale.set(1.2, 0.5, 0.9);
-    nose.castShadow = true;
-    this.chassisGroup.add(nose);
-
-    // Front splitter / skid plate
-    const skidGeo = new THREE.BoxGeometry(1.9, 0.08, 0.75);
-    const skid = new THREE.Mesh(skidGeo, brushedTitaniumMat);
-    skid.position.set(0, 0.28, 2.15);
-    skid.rotation.x = -Math.PI * 0.12;
-    this.chassisGroup.add(skid);
-
-    // ==========================================
-    // 2. PANORAMIC COCKPIT CANOPY
-    // ==========================================
-    const visorGeo = new THREE.BoxGeometry(1.75, 0.48, 1.35);
-    const visor = new THREE.Mesh(visorGeo, cockpitGlassMat);
-    visor.position.set(0, 1.25, 0.45);
-    visor.rotation.x = -Math.PI * 0.1;
-    this.chassisGroup.add(visor);
-
-    // Cockpit interior HUD glow strip
-    const hudBarGeo = new THREE.BoxGeometry(1.2, 0.04, 0.04);
-    const hudBar = new THREE.Mesh(hudBarGeo, neonCyanMat);
-    hudBar.position.set(0, 1.15, 0.65);
-    this.chassisGroup.add(hudBar);
-
-    // Cockpit rollcage struts
-    const strutGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.2, 8);
-    const leftStrut = new THREE.Mesh(strutGeo, brushedTitaniumMat);
-    leftStrut.position.set(-0.85, 1.2, 0.45);
-    leftStrut.rotation.x = -Math.PI * 0.1;
-    leftStrut.rotation.z = Math.PI * 0.08;
-    this.chassisGroup.add(leftStrut);
-
-    const rightStrut = new THREE.Mesh(strutGeo, brushedTitaniumMat);
-    rightStrut.position.set(0.85, 1.2, 0.45);
-    rightStrut.rotation.x = -Math.PI * 0.1;
-    rightStrut.rotation.z = -Math.PI * 0.08;
-    this.chassisGroup.add(rightStrut);
-
-    // ==========================================
-    // 3. REAR DECK, SPOILER & AERO
-    // ==========================================
-    // Thermal insulation gold deck for life-support instruments
-    const goldPackGeo = new THREE.BoxGeometry(1.5, 0.22, 1.1);
-    const goldPack = new THREE.Mesh(goldPackGeo, goldFoilMat);
-    goldPack.position.set(0, 1.05, -1.25);
-    this.chassisGroup.add(goldPack);
-
-    // RTG (Radioisotope Thermoelectric Generator) with cooling fin array
-    const rtgCoreGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.7, 12);
-    rtgCoreGeo.rotateZ(Math.PI / 2);
-    const rtgCore = new THREE.Mesh(rtgCoreGeo, brushedTitaniumMat);
-    rtgCore.position.set(0, 1.25, -1.35);
-    this.chassisGroup.add(rtgCore);
-
-    for (let f = -3; f <= 3; f++) {
-      const finGeo = new THREE.BoxGeometry(0.03, 0.38, 0.38);
-      const fin = new THREE.Mesh(finGeo, darkCarbonMat);
-      fin.position.set(f * 0.08, 1.25, -1.35);
-      this.chassisGroup.add(fin);
+    // Warm electronics box with raised vents
+    this.box(1.0, 0.26, 0.9, 0.06, paint, 0, H(1.55), 0.62);
+    for (let i = 0; i < 6; i++) {
+      this.box(0.8, 0.012, 0.025, 0.004, darkMetal, 0, H(1.685), 0.34 + i * 0.1);
     }
 
-    // High-downforce carbon fiber rear wing
-    const wingGeo = new THREE.BoxGeometry(2.35, 0.06, 0.45);
-    const wing = new THREE.Mesh(wingGeo, darkCarbonMat);
-    wing.position.set(0, 1.55, -2.15);
-    wing.rotation.x = Math.PI * 0.04;
-    this.chassisGroup.add(wing);
+    // Gold thermal blanket over the avionics bay
+    const blanket = this.box(1.3, 0.12, 0.85, 0.05, gold, 0, H(1.48), -0.78);
+    blanket.rotation.x = -0.04;
 
-    // Wing vertical endplates with cyan edge highlights
-    const endplateGeo = new THREE.BoxGeometry(0.05, 0.35, 0.55);
-    const leftEndplate = new THREE.Mesh(endplateGeo, copperRimMat);
-    leftEndplate.position.set(-1.18, 1.55, -2.15);
-    this.chassisGroup.add(leftEndplate);
+    // Rock sliders along the sides
+    for (const sx of [-1, 1]) {
+      this.strut(V(sx * 0.93, H(0.64), 1.2), V(sx * 0.93, H(0.64), -1.2), 0.045, darkMetal);
+      this.strut(V(sx * 0.93, H(0.64), 0.7), V(sx * 0.82, H(0.86), 0.7), 0.03, darkMetal);
+      this.strut(V(sx * 0.93, H(0.64), -0.7), V(sx * 0.82, H(0.86), -0.7), 0.03, darkMetal);
+    }
 
-    const rightEndplate = new THREE.Mesh(endplateGeo, copperRimMat);
-    rightEndplate.position.set(1.18, 1.55, -2.15);
-    this.chassisGroup.add(rightEndplate);
-
-    // Wing support pylons
-    const pylonGeo = new THREE.BoxGeometry(0.06, 0.65, 0.2);
-    const leftPylon = new THREE.Mesh(pylonGeo, brushedTitaniumMat);
-    leftPylon.position.set(-0.65, 1.25, -2.05);
-    leftPylon.rotation.x = Math.PI * 0.15;
-    this.chassisGroup.add(leftPylon);
-
-    const rightPylon = new THREE.Mesh(pylonGeo, brushedTitaniumMat);
-    rightPylon.position.set(0.65, 1.25, -2.05);
-    rightPylon.rotation.x = Math.PI * 0.15;
-    this.chassisGroup.add(rightPylon);
-
-    // ==========================================
-    // 4. SEXY REAR CYBER LIGHTBAR & EXHAUST
-    // ==========================================
-    // Full-width continuous glowing cyberpunk neon lightbar across the rear
-    const lightbarGeo = new THREE.BoxGeometry(2.0, 0.08, 0.06);
-    const lightbar = new THREE.Mesh(lightbarGeo, neonRedLightbarMat);
-    lightbar.position.set(0, 0.76, -2.25);
-    this.chassisGroup.add(lightbar);
-
-    // Rear diffusor fins
-    for (let d = -2; d <= 2; d++) {
-      const diffGeo = new THREE.BoxGeometry(0.04, 0.22, 0.55);
-      const diff = new THREE.Mesh(diffGeo, darkCarbonMat);
-      diff.position.set(d * 0.35, 0.3, -2.2);
-      this.chassisGroup.add(diff);
+    // Side decals
+    const decalMat = new THREE.MeshBasicMaterial({ map: createDecalTexture(), transparent: true, polygonOffset: true, polygonOffsetFactor: -2 });
+    for (const sx of [-1, 1]) {
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.325), decalMat);
+      d.position.set(sx * 0.855, H(1.1), 0.1);
+      d.rotation.y = sx * Math.PI / 2;
+      C.add(d);
     }
 
     // ==========================================
-    // 5. TWIN HYPER-DRIVE NITRO THRUSTERS
+    // 2. MAST + CAMERA HEAD
     // ==========================================
-    const nozzleOuterGeo = new THREE.CylinderGeometry(0.28, 0.38, 0.8, 16);
+    const mastX = 0.55, mastZ = 0.1;
+    this.strut(V(mastX, H(1.42), mastZ), V(mastX, H(2.45), mastZ), 0.035, aluminum);
+    this.strut(V(mastX, H(1.42), mastZ), V(mastX, H(1.6), mastZ), 0.07, darkMetal);   // base collar
+    this.box(0.36, 0.2, 0.22, 0.05, paint, mastX, H(2.55), mastZ);
+    for (const ex of [-0.1, 0.1]) {
+      const bezel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 20), darkMetal);
+      bezel.rotation.x = Math.PI / 2;
+      bezel.position.set(mastX + ex, H(2.55), mastZ + 0.13);
+      C.add(bezel);
+      const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.04, 20), lensGlass);
+      glass.rotation.x = Math.PI / 2;
+      glass.position.set(mastX + ex, H(2.55), mastZ + 0.16);
+      C.add(glass);
+    }
+    // SuperCam style cylinder on top
+    const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.24, 20), aluminum);
+    sc.rotation.x = Math.PI / 2;
+    sc.position.set(mastX, H(2.7), mastZ + 0.02);
+    C.add(sc);
+    const scLens = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 20), lensGlass);
+    scLens.rotation.x = Math.PI / 2;
+    scLens.position.set(mastX, H(2.7), mastZ + 0.15);
+    C.add(scLens);
+
+    // ==========================================
+    // 3. ANTENNAS
+    // ==========================================
+    this.strut(V(-0.55, H(1.42), -0.5), V(-0.55, H(1.95), -0.5), 0.028, aluminum);
+    const hga = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.03, 6), dustyAlu);
+    hga.position.set(-0.55, H(2.02), -0.5);
+    hga.rotation.x = -0.9;
+    hga.castShadow = true;
+    C.add(hga);
+    const hgaBack = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.012, 6), darkMetal);
+    hgaBack.position.copy(hga.position);
+    hgaBack.rotation.x = -0.9;
+    hgaBack.translateY(0.02);
+    C.add(hgaBack);
+    this.strut(V(-0.2, H(1.42), -0.95), V(-0.2, H(2.15), -0.95), 0.012, darkMetal, C, 6);
+
+    // ==========================================
+    // 4. FRONT: HAZCAMS, FOLDED INSTRUMENT ARM, LAMPS
+    // ==========================================
+    for (const sx of [-1, 1]) {
+      this.box(0.16, 0.1, 0.08, 0.025, darkMetal, sx * 0.5, H(1.12), 1.93);
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 14), lensGlass);
+      lens.rotation.x = Math.PI / 2;
+      lens.position.set(sx * 0.5, H(1.12), 1.98);
+      C.add(lens);
+    }
+
+    // Folded instrument arm with turret
+    const armJ = new THREE.MeshStandardMaterial({ color: 0x3a3c42, roughness: 0.4, metalness: 0.9 });
+    const sh = V(0.38, H(1.0), 1.86);
+    const el = V(0.38, H(0.92), 2.2);
+    const wr = V(0.08, H(0.78), 2.1);
+    this.strut(sh, el, 0.045, aluminum);
+    this.strut(el, wr, 0.04, aluminum);
+    for (const p of [sh, el, wr]) {
+      const j = new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 10), armJ);
+      j.position.copy(p);
+      C.add(j);
+    }
+    const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.14, 20), darkMetal);
+    turret.rotation.x = Math.PI / 2;
+    turret.position.set(0.08, H(0.78), 2.2);
+    C.add(turret);
+    const drill = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.26, 10), aluminum);
+    drill.rotation.x = Math.PI / 2;
+    drill.position.set(0.08, H(0.78), 2.38);
+    C.add(drill);
+
+    // Headlamps: round LED housings with lenses
+    const spotMatCfg = { color: 0xfff6ea, intensity: 3.2, dist: 80 };
+    for (const sx of [-1, 1]) {
+      const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.1, 24), darkMetal);
+      housing.rotation.x = Math.PI / 2;
+      housing.position.set(sx * 0.66, H(0.96), 1.96);
+      C.add(housing);
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.085, 24), lampLens);
+      lens.position.set(sx * 0.66, H(0.96), 2.011);
+      C.add(lens);
+
+      const spot = new THREE.SpotLight(spotMatCfg.color, spotMatCfg.intensity, spotMatCfg.dist, Math.PI * 0.26, 0.45, 1.2);
+      spot.position.set(sx * 0.66, H(0.96), 2.05);
+      spot.target.position.set(sx * 0.66, H(0.2), 30);
+      C.add(spot);
+      C.add(spot.target);
+      this.headlights.push(spot);
+    }
+
+    // ==========================================
+    // 5. REAR: RTG, TAIL LIGHTS, NITRO THRUSTER POD FRAME
+    // ==========================================
+    const rtg = new THREE.Group();
+    rtg.position.set(0, H(1.3), -1.82);
+    rtg.rotation.x = 0.22;
+    const rtgBody = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.85, 20), paint);
+    rtgBody.rotation.x = Math.PI / 2;
+    rtg.add(rtgBody);
+    for (let i = 0; i < 8; i++) {
+      const fin = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.018, 20), aluminum);
+      fin.rotation.x = Math.PI / 2;
+      fin.position.z = -0.34 + i * 0.1;
+      fin.castShadow = true;
+      rtg.add(fin);
+    }
+    C.add(rtg);
+
+    for (const sx of [-1, 1]) {
+      this.box(0.22, 0.07, 0.04, 0.015, tailLens, sx * 0.62, H(1.0), -1.575);
+    }
+
+    // Thruster pods bolted to a rear sub-frame
+    const nozzleOuterGeo = new THREE.CylinderGeometry(0.26, 0.34, 0.8, 24);
     nozzleOuterGeo.rotateX(Math.PI / 2);
-
-    const nozzleInnerGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.82, 16);
+    const nozzleInnerGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.82, 24);
     nozzleInnerGeo.rotateX(Math.PI / 2);
+    const nozzleY = H(0.7);
+    for (const sx of [-1, 1]) {
+      const outer = new THREE.Mesh(nozzleOuterGeo, darkMetal);
+      outer.position.set(sx * 0.62, nozzleY, -2.4);
+      outer.castShadow = true;
+      C.add(outer);
+      const inner = new THREE.Mesh(nozzleInnerGeo, nozzleBronze);
+      inner.position.set(sx * 0.62, nozzleY, -2.4);
+      C.add(inner);
+      // Frame struts back to the body
+      this.strut(V(sx * 0.7, H(0.95), -1.55), V(sx * 0.62, nozzleY + 0.22, -2.15), 0.03, aluminum);
+      this.strut(V(sx * 0.7, H(0.62), -1.5), V(sx * 0.62, nozzleY - 0.22, -2.15), 0.03, aluminum);
+    }
+    this.strut(V(-0.62, nozzleY + 0.1, -2.05), V(0.62, nozzleY + 0.1, -2.05), 0.035, darkMetal);
 
-    // Left Thruster
-    const leftNozzle = new THREE.Mesh(nozzleOuterGeo, darkCarbonMat);
-    leftNozzle.position.set(-0.62, 0.58, -2.4);
-    this.chassisGroup.add(leftNozzle);
-
-    const leftNozzleInner = new THREE.Mesh(nozzleInnerGeo, brushedTitaniumMat);
-    leftNozzleInner.position.set(-0.62, 0.58, -2.4);
-    this.chassisGroup.add(leftNozzleInner);
-
-    // Right Thruster
-    const rightNozzle = new THREE.Mesh(nozzleOuterGeo, darkCarbonMat);
-    rightNozzle.position.set(0.62, 0.58, -2.4);
-    this.chassisGroup.add(rightNozzle);
-
-    const rightNozzleInner = new THREE.Mesh(nozzleInnerGeo, brushedTitaniumMat);
-    rightNozzleInner.position.set(0.62, 0.58, -2.4);
-    this.chassisGroup.add(rightNozzleInner);
-
-    // Thruster Plasma Glow Discs (Cyan/Blue ion plasma)
-    const glowGeo = new THREE.CircleGeometry(0.24, 16);
+    // Thruster exit glow discs (only visible while boosting)
+    const glowGeo = new THREE.CircleGeometry(0.2, 20);
     glowGeo.rotateY(Math.PI);
+    const mkGlow = (sx) => {
+      const m = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
+        color: 0xffa050, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false
+      }));
+      m.position.set(sx * 0.62, nozzleY, -2.82);
+      C.add(m);
+      return m;
+    };
+    this.thrusterGlows = [mkGlow(-1), mkGlow(1)];
 
-    const glowMatL = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.15 });
-    const glowL = new THREE.Mesh(glowGeo, glowMatL);
-    glowL.position.set(-0.62, 0.58, -2.82);
-    this.chassisGroup.add(glowL);
-
-    const glowMatR = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.15 });
-    const glowR = new THREE.Mesh(glowGeo, glowMatR);
-    glowR.position.set(0.62, 0.58, -2.82);
-    this.chassisGroup.add(glowR);
-
-    this.thrusterGlows = [glowL, glowR];
-
-    // Rear Thruster PointLight
-    this.thrusterLight = new THREE.PointLight(0x00e5ff, 0, 16);
-    this.thrusterLight.position.set(0, 0.58, -2.9);
-    this.chassisGroup.add(this.thrusterLight);
+    this.thrusterLight = new THREE.PointLight(0xff9a4a, 0, 14);
+    this.thrusterLight.position.set(0, nozzleY, -3.0);
+    C.add(this.thrusterLight);
 
     // ==========================================
-    // 6. EXPEDITION MAST & SOLAR PANELS
+    // 6. WHEELS + COIL-OVER WISHBONE SUSPENSION
     // ==========================================
-    // Sensor / Pancam optical mast
-    const mastGeo = new THREE.CylinderGeometry(0.05, 0.06, 1.25, 8);
-    const mast = new THREE.Mesh(mastGeo, brushedTitaniumMat);
-    mast.position.set(0.65, 1.65, -0.7);
-    this.chassisGroup.add(mast);
+    const R = 0.56;       // wheel radius
+    const W = 0.5;        // wheel width
 
-    // Triple optical lens sensor head
-    const headGeo = new THREE.BoxGeometry(0.35, 0.18, 0.22);
-    const head = new THREE.Mesh(headGeo, armorTealMat);
-    head.position.set(0.65, 2.25, -0.7);
-    this.chassisGroup.add(head);
+    // --- shared wheel geometry (axis = X) ---
+    const drumGeo = new THREE.CylinderGeometry(R, R, W, 64, 1, true);
+    drumGeo.rotateZ(Math.PI / 2);
 
-    const lensGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.08, 12);
-    lensGeo.rotateX(Math.PI / 2);
-    const lens1 = new THREE.Mesh(lensGeo, neonCyanMat);
-    lens1.position.set(0.58, 2.25, -0.58);
-    this.chassisGroup.add(lens1);
-    const lens2 = new THREE.Mesh(lensGeo, neonCyanMat);
-    lens2.position.set(0.72, 2.25, -0.58);
-    this.chassisGroup.add(lens2);
+    // Chevron grousers + rim flanges (merged)
+    const cleatParts = [];
+    const cleatBase = new THREE.BoxGeometry(W * 0.56, 0.055, 0.04);
+    const mA = new THREE.Matrix4(), mB = new THREE.Matrix4(), mC = new THREE.Matrix4();
+    const cleatCount = 34;
+    for (let i = 0; i < cleatCount; i++) {
+      const a = (i / cleatCount) * Math.PI * 2;
+      for (const s of [-1, 1]) {
+        mA.makeRotationX(a);
+        mB.makeTranslation(s * W * 0.25, R + 0.012, 0);
+        mC.makeRotationY(s * 0.55);
+        const g = cleatBase.clone();
+        g.applyMatrix4(mA.clone().multiply(mB).multiply(mC));
+        cleatParts.push(nonIndexed(g));
+      }
+    }
+    for (const s of [-1, 1]) {
+      const t = new THREE.TorusGeometry(R - 0.002, 0.024, 8, 64);
+      t.rotateY(Math.PI / 2);
+      t.translate(s * W * 0.5, 0, 0);
+      cleatParts.push(nonIndexed(t));
+    }
+    const cleatsGeo = mergeGeometries(cleatParts, false);
 
-    // Articulated Parabolic High-Gain Dish
-    const dishMastGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.6, 8);
-    const dishMast = new THREE.Mesh(dishMastGeo, brushedTitaniumMat);
-    dishMast.position.set(-0.65, 1.35, -0.7);
-    this.chassisGroup.add(dishMast);
+    // Flex spokes + hub (merged)
+    const spokeParts = [];
+    const spokeBase = new THREE.BoxGeometry(0.035, R * 0.8, 0.055);
+    const spokeCount = 10;
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < spokeCount; i++) {
+        const a = (i / spokeCount) * Math.PI * 2 + (s > 0 ? 0 : Math.PI / spokeCount);
+        const g = spokeBase.clone();
+        g.translate(0, 0.14 + R * 0.4, 0);
+        g.rotateX(a);
+        g.translate(s * 0.13, 0, 0);
+        spokeParts.push(nonIndexed(g));
+      }
+    }
+    const spokesGeo = mergeGeometries(spokeParts, false);
 
-    const dishGeo = new THREE.SphereGeometry(0.38, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.35);
-    const dish = new THREE.Mesh(dishGeo, goldFoilMat);
-    dish.position.set(-0.65, 1.65, -0.7);
-    dish.rotation.x = Math.PI * 0.35;
-    dish.rotation.y = -Math.PI * 0.2;
-    this.chassisGroup.add(dish);
-
-    // ==========================================
-    // 7. FRONT HIGH-OUTPUT LED LIGHTBARS
-    // ==========================================
-    const headlightBarGeo = new THREE.BoxGeometry(0.65, 0.1, 0.08);
-    const headlightMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-
-    const leftLightMesh = new THREE.Mesh(headlightBarGeo, headlightMat);
-    leftLightMesh.position.set(-0.65, 0.58, 2.15);
-    leftLightMesh.rotation.y = -0.15;
-    this.chassisGroup.add(leftLightMesh);
-
-    const rightLightMesh = new THREE.Mesh(headlightBarGeo, headlightMat);
-    rightLightMesh.position.set(0.65, 0.58, 2.15);
-    rightLightMesh.rotation.y = 0.15;
-    this.chassisGroup.add(rightLightMesh);
-
-    const spotLightL = new THREE.SpotLight(0xfff6ea, 2.8, 70, Math.PI * 0.28, 0.35);
-    spotLightL.position.set(-0.65, 0.58, 2.2);
-    spotLightL.target.position.set(-0.65, -0.5, 30);
-    this.chassisGroup.add(spotLightL);
-    this.chassisGroup.add(spotLightL.target);
-
-    const spotLightR = new THREE.SpotLight(0xfff6ea, 2.8, 70, Math.PI * 0.28, 0.35);
-    spotLightR.position.set(0.65, 0.58, 2.2);
-    spotLightR.target.position.set(0.65, -0.5, 30);
-    this.chassisGroup.add(spotLightR);
-    this.chassisGroup.add(spotLightR.target);
-
-    this.headlights = [spotLightL, spotLightR];
-
-    // ==========================================
-    // 8. HIGH-DETAIL 4-WHEEL SUSPENSION ASSEMBLIES
-    // ==========================================
-    const tireRadius = 0.58;
-    const tireWidth = 0.55;
-
-    // Heavy-duty off-road tire cylinder
-    const tireGeo = new THREE.CylinderGeometry(tireRadius, tireRadius, tireWidth, 24);
-    tireGeo.rotateZ(Math.PI / 2);
-
-    // Lightweight forged alloy rim
-    const rimGeo = new THREE.CylinderGeometry(tireRadius * 0.62, tireRadius * 0.62, tireWidth * 1.02, 16);
-    rimGeo.rotateZ(Math.PI / 2);
-
-    // Central hub nut
-    const hubGeo = new THREE.CylinderGeometry(0.12, 0.12, tireWidth * 1.08, 8);
+    const hubGeo = new THREE.CylinderGeometry(0.17, 0.17, W * 0.62, 24);
     hubGeo.rotateZ(Math.PI / 2);
+    const hubCapGeo = new THREE.SphereGeometry(0.13, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+    hubCapGeo.rotateZ(-Math.PI / 2);
+
+    const discGeo = new THREE.CylinderGeometry(0.27, 0.27, 0.02, 40);
+    discGeo.rotateZ(Math.PI / 2);
+
+    // Spring helix (unit height along Y, scaled per use)
+    const helixPts = [];
+    const turns = 7;
+    for (let i = 0; i <= turns * 18; i++) {
+      const t = i / (turns * 18);
+      const a = t * turns * Math.PI * 2;
+      helixPts.push(new THREE.Vector3(Math.cos(a) * 0.075, t - 0.5, Math.sin(a) * 0.075));
+    }
+    const springGeo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(helixPts), turns * 18 * 2, 0.012, 5, false);
 
     const wheelPositions = [
-      { x: -1.48, y: 0.55, z:  1.42, isFront: true,  isLeft: true },  // FL
-      { x:  1.48, y: 0.55, z:  1.42, isFront: true,  isLeft: false }, // FR
-      { x: -1.48, y: 0.55, z: -1.42, isFront: false, isLeft: true },  // RL
-      { x:  1.48, y: 0.55, z: -1.42, isFront: false, isLeft: false }  // RR
+      { x: -1.48, z:  1.42, isFront: true  },  // FL
+      { x:  1.48, z:  1.42, isFront: true  },  // FR
+      { x: -1.48, z: -1.42, isFront: false },  // RL
+      { x:  1.48, z: -1.42, isFront: false }   // RR
     ];
 
     this.wheelAssemblies = [];
+    const wy = H(0.55);
 
-    for (let i = 0; i < wheelPositions.length; i++) {
-      const wPos = wheelPositions[i];
+    for (const wp of wheelPositions) {
+      const sx = Math.sign(wp.x);
+      const sz = Math.sign(wp.z);
+      const z0 = wp.z;
 
-      // Steering & Suspension Pivot
-      const pivotGroup = new THREE.Group();
-      pivotGroup.position.set(wPos.x, wPos.y, wPos.z);
-      this.group.add(pivotGroup);
+      // Suspension: double wishbone from body to hub
+      const hubTop = V(sx * 1.2, wy + 0.2, z0);
+      const hubBot = V(sx * 1.2, wy - 0.22, z0);
+      this.strut(V(sx * 0.86, H(1.0), z0 - sz * 0.32), hubTop, 0.032, aluminum);
+      this.strut(V(sx * 0.86, H(1.0), z0 + sz * 0.1), hubTop, 0.032, aluminum);
+      this.strut(V(sx * 0.82, H(0.72), z0 - sz * 0.36), hubBot, 0.036, aluminum);
+      this.strut(V(sx * 0.82, H(0.72), z0 + sz * 0.12), hubBot, 0.036, aluminum);
+      // Knuckle / upright
+      this.strut(hubTop, hubBot, 0.045, darkMetal);
 
-      // Wishbone Suspension Arm linking chassis to wheel
-      const armGeo = new THREE.CylinderGeometry(0.04, 0.05, 0.65, 8);
-      armGeo.rotateZ(wPos.isLeft ? -Math.PI / 3 : Math.PI / 3);
-      const armMesh = new THREE.Mesh(armGeo, brushedTitaniumMat);
-      armMesh.position.set(wPos.isLeft ? 0.25 : -0.25, 0.12, 0);
-      pivotGroup.add(armMesh);
+      // Coil-over damper: body top -> lower arm
+      const top = V(sx * 0.78, H(1.3), z0 - sz * 0.06);
+      const bot = V(sx * 1.08, wy - 0.18, z0 - sz * 0.02);
+      this.strut(top, bot, 0.026, darkMetal, C, 8);
+      const spring = new THREE.Mesh(springGeo, springRed);
+      const d = new THREE.Vector3().subVectors(bot, top);
+      spring.position.copy(top).addScaledVector(d, 0.58);
+      spring.scale.set(1, d.length() * 0.62, 1);
+      spring.quaternion.setFromUnitVectors(UP, d.clone().normalize());
+      spring.castShadow = true;
+      C.add(spring);
 
-      // Hydraulic shock absorber cylinder
-      const shockGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.45, 8);
-      const shockMesh = new THREE.Mesh(shockGeo, chromeMat);
-      shockMesh.position.set(wPos.isLeft ? 0.22 : -0.22, 0.2, 0);
-      shockMesh.rotation.z = wPos.isLeft ? -0.3 : 0.3;
-      pivotGroup.add(shockMesh);
+      // Steering / wheel pivot at the wheel centre
+      const pivot = new THREE.Group();
+      pivot.position.set(wp.x, wy, z0);
+      this.group.add(pivot);
 
-      // Rotating Wheel Container
       const wheelContainer = new THREE.Group();
-      pivotGroup.add(wheelContainer);
+      pivot.add(wheelContainer);
 
-      const tireMesh = new THREE.Mesh(tireGeo, tireRubberMat);
-      tireMesh.castShadow = true;
-      wheelContainer.add(tireMesh);
+      const drum = new THREE.Mesh(drumGeo, dustyAlu);
+      drum.castShadow = true;
+      wheelContainer.add(drum);
+      const cleats = new THREE.Mesh(cleatsGeo, dustyAlu);
+      cleats.castShadow = true;
+      wheelContainer.add(cleats);
+      const spokes = new THREE.Mesh(spokesGeo, aluminum);
+      wheelContainer.add(spokes);
+      const hub = new THREE.Mesh(hubGeo, darkMetal);
+      wheelContainer.add(hub);
+      const cap = new THREE.Mesh(hubCapGeo, aluminum);
+      cap.position.x = sx * W * 0.31;
+      if (sx < 0) cap.rotation.y = Math.PI;
+      wheelContainer.add(cap);
 
-      const rimMesh = new THREE.Mesh(rimGeo, copperRimMat);
-      wheelContainer.add(rimMesh);
-
-      const hubMesh = new THREE.Mesh(hubGeo, brushedTitaniumMat);
-      wheelContainer.add(hubMesh);
-
-      // Aggressive chevron paddle treads
-      const treadCount = 10;
-      const treadGeo = new THREE.BoxGeometry(tireWidth * 0.95, 0.09, 0.11);
-      for (let t = 0; t < treadCount; t++) {
-        const tread = new THREE.Mesh(treadGeo, darkCarbonMat);
-        const theta = (t / treadCount) * Math.PI * 2;
-        tread.position.set(0, Math.sin(theta) * tireRadius, Math.cos(theta) * tireRadius);
-        tread.rotation.x = -theta;
-        wheelContainer.add(tread);
-      }
-
-      // Brake caliper accent (glowing orange)
-      const caliperGeo = new THREE.BoxGeometry(0.12, 0.24, 0.15);
-      const caliperMesh = new THREE.Mesh(caliperGeo, copperRimMat);
-      caliperMesh.position.set(wPos.isLeft ? 0.14 : -0.14, 0.18, 0);
-      pivotGroup.add(caliperMesh);
+      // Brake disc inside the wheel and a coloured caliper (do not spin with the steering knuckle)
+      const disc = new THREE.Mesh(discGeo, darkMetal);
+      disc.position.x = -sx * 0.14;
+      wheelContainer.add(disc);
+      const caliper = new THREE.Mesh(new RoundedBoxGeometry(0.07, 0.16, 0.12, 2, 0.02), caliperMat);
+      caliper.position.set(-sx * 0.16, 0.25, 0.0);
+      pivot.add(caliper);
 
       this.wheelAssemblies.push({
-        pivot: pivotGroup,
+        pivot,
         wheelContainer,
-        restPos: new THREE.Vector3(wPos.x, wPos.y, wPos.z),
-        isFront: wPos.isFront,
+        restPos: new THREE.Vector3(wp.x, wy, z0),
+        isFront: wp.isFront,
         rotation: 0
       });
     }
+
+    // ==========================================
+    // 7. CONTACT SHADOW (terrain does not receive real-time shadows)
+    // ==========================================
+    const shadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.0, 5.6).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        map: createShadowTexture(),
+        transparent: true,
+        opacity: 0.62,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -6,
+        polygonOffsetUnits: -6
+      })
+    );
+    shadow.position.set(0, GROUND + 0.04, -0.1);
+    shadow.renderOrder = 3;
+    this.group.add(shadow);
+    this.contactShadow = shadow;
   }
 
   setNitroVisuals(active, intensity = 1.0) {
-    const opacity = active ? THREE.MathUtils.clamp(intensity * 0.95, 0.4, 1.0) : 0.15;
+    const opacity = active ? THREE.MathUtils.clamp(intensity * 0.95, 0.35, 1.0) : 0.0;
     for (const glow of this.thrusterGlows) {
       glow.material.opacity = opacity;
     }
-    this.thrusterLight.intensity = active ? intensity * 9.0 : 0.4;
+    this.thrusterLight.intensity = active ? intensity * 4.0 : 0.0;
   }
 }

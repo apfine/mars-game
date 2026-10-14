@@ -59,6 +59,7 @@ export class MarsGameEngine {
   initSystems() {
     // 1. Atmosphere & Sky
     this.atmosphere = new MarsAtmosphere(this.scene);
+    this.atmosphere.buildEnvironment(this.renderer);
 
     // 2. Terrain & Dunes
     this.terrain = new MarsTerrainManager(this.scene, { gridEnabled: 1.0 });
@@ -221,6 +222,9 @@ export class MarsGameEngine {
     window.removeEventListener('keydown', this.startAudio);
     window.removeEventListener('touchstart', this.startAudio);
     window.removeEventListener('mousedown', this.startAudio);
+    if (this.scene.environment && typeof this.scene.environment.dispose === 'function') {
+      this.scene.environment.dispose();
+    }
     this.terrain.dispose();
     this.renderer.dispose();
   }
