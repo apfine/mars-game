@@ -107,6 +107,7 @@ export class MarsGameEngine {
 
   applyQuality(preset) {
     this.quality = preset;
+    this.atmosphere.setQuality(preset);
     const isLow = preset === 'Low';
     const isMed = preset === 'Medium';
     const isHigh = preset === 'High';
@@ -186,6 +187,7 @@ export class MarsGameEngine {
       if (impactSpeed > 4.0) {
         this.audio.playImpact(Math.min(2.0, impactSpeed / 8.0));
         this.cameraController.addShake(impactSpeed * 0.08);
+        this.atmosphere.burstDust(this.physics.position, Math.min(2.0, impactSpeed / 8.0));
       }
     }
     this.lastOnGround = this.physics.onGroundCount;
@@ -195,6 +197,7 @@ export class MarsGameEngine {
     this.scatter.update(this.physics.position);
 
     // 5. Update Atmosphere & Particles
+    this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
     this.atmosphere.update(dt, this.physics.position, this.physics);
 
     // 6. Update Audio

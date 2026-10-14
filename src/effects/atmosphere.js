@@ -1,14 +1,33 @@
 import * as THREE from 'three';
+import { getMarsHeight, getMarsNormal } from '../terrain/noise.js';
+import { SoftParticlePool } from './particles.js';
+
+const SUN_DIR = new THREE.Vector3(0.5, 0.65, 0.45).normalize();
 
 // Mars Atmospheric Skydome, Moons (Phobos/Deimos), Dust Devils, and Tire/Thruster Particles
 export class MarsAtmosphere {
   constructor(scene) {
     this.scene = scene;
+    this.time = 0;
+    this.wind = new THREE.Vector3(Math.cos(0.62) * 6.0, 0, Math.sin(0.62) * 6.0);
+    this.dustDensity = 1.0; // quality scaler for emission (mobile / Low reduces this)
+
     this.createSky();
     this.createDistantMountains();
     this.createMoons();
     this.createWindDust();
     this.createVehicleParticles();
+    this.createDustDevils();
+  }
+
+  setQuality(preset) {
+    this.dustDensity = preset === 'Low' ? 0.4 : preset === 'Medium' ? 0.7 : preset === 'Ultra' ? 1.3 : 1.0;
+  }
+
+  setViewScale(heightPx, fovDeg) {
+    this.dustPool.setViewScale(heightPx, fovDeg);
+    this.fxPool.setViewScale(heightPx, fovDeg);
+    this.devilPool.setViewScale(heightPx, fovDeg);
   }
 
   createSky() {
@@ -16,9 +35,11 @@ export class MarsAtmosphere {
     const skyGeo = new THREE.SphereGeometry(1200, 32, 24);
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
+      depthWrite: false,
       uniforms: {
-        uSunPos: { value: new THREE.Vector3(0.5, 0.45, 0.4).normalize() },
-        uSkyZenith: { value: new THREE.Color(0xb25d40) },     // Authentic Martian butterscotch/terracotta
+        uTime: { value: 0 },
+        uSunPos: { value: SUN_DIR.clone() },
+        uSkyZenith: { value: new THREE.Color(0xa24d36) },     // Deep dusty terracotta overhead
         uSkyHorizon: { value: new THREE.Color(0xda8e6c) },    // Matching terrain horizon dust haze
         uSunColor: { value: new THREE.Color(0xfff5e6) },      // Brilliant Martian sun
         uSunHaloBlue: { value: new THREE.Color(0x5ca0d3) }    // Signature Mars twilight blue scattering halo
@@ -32,6 +53,7 @@ export class MarsAtmosphere {
         }
       `,
       fragmentShader: `
+        uniform float uTime;
         uniform vec3 uSunPos;
         uniform vec3 uSkyZenith;
         uniform vec3 uSkyHorizon;
@@ -39,41 +61,61 @@ export class MarsAtmosphere {
         uniform vec3 uSunHaloBlue;
         varying vec3 vWorldPosition;
 
+        float h11(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float vn(vec2 p) {
+          vec2 i = floor(p); vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(h11(i), h11(i + vec2(1.0, 0.0)), f.x),
+                     mix(h11(i + vec2(0.0, 1.0)), h11(i + vec2(1.0, 1.0)), f.x), f.y);
+        }
+
         void main() {
           vec3 dir = normalize(vWorldPosition);
-          float elevation = clamp(dir.y, 0.0, 1.0);
+          float e = max(dir.y, 0.0);
 
-          // Base gradient: horizon to zenith
-          vec3 sky = mix(uSkyHorizon, uSkyZenith, pow(elevation, 0.45));
+          // Base gradient: dusty horizon to darker zenith
+          vec3 sky = mix(uSkyHorizon, uSkyZenith, pow(e, 0.5));
 
-          // Mars forward dust scattering creates a unique blueish glow around the sun
-          float sunCos = dot(dir, normalize(uSunPos));
-          float sunGlow = max(0.0, sunCos);
+          // Suspended-dust haze band hugging the horizon
+          float band = exp(-e * 9.0);
+          sky = mix(sky, uSkyHorizon * 1.1, band * 0.55);
+          sky *= 1.0 - 0.16 * smoothstep(0.5, 1.0, e);
 
-          // Blue forward-scattering corona (famous martian sunset halo)
-          float blueCorona = pow(sunGlow, 8.0) * 0.45;
-          sky = mix(sky, uSunHaloBlue, blueCorona);
+          // High-altitude dust streaks (subtle, slowly drifting)
+          vec2 sp = dir.xz / (dir.y + 0.4) * 1.6;
+          float streak = vn(sp * vec2(1.0, 3.2) + vec2(uTime * 0.012, 0.0)) * 0.6
+                       + vn(sp * vec2(2.3, 6.0) - vec2(uTime * 0.02, 0.0)) * 0.4;
+          sky *= 1.0 + (streak - 0.5) * 0.14 * smoothstep(0.04, 0.45, e);
+
+          // Mars forward-scattering: blue corona around the sun + warm glare lobes
+          float sc = max(dot(dir, normalize(uSunPos)), 0.0);
+          float blueHalo = pow(sc, 10.0) * 0.5 * (1.0 - band * 0.35);
+          sky = mix(sky, uSunHaloBlue, blueHalo);
+          float glare = pow(sc, 5.0) * 0.28 + pow(sc, 36.0) * 0.55 + pow(sc, 380.0) * 1.6;
+          sky += uSunColor * glare * 0.6;
 
           // Sharp Sun disk (Mars sun appears ~2/3 size of Earth sun)
-          float sunDisk = smoothstep(0.9988, 0.9995, sunCos);
+          float sunDisk = smoothstep(0.9988, 0.9995, dot(dir, normalize(uSunPos)));
           vec3 col = sky + uSunColor * sunDisk * 3.0;
 
           gl_FragColor = vec4(col, 1.0);
         }
       `
     });
+    this.skyMat = skyMat;
 
     this.skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    this.skyMesh.renderOrder = -10;
     this.scene.add(this.skyMesh);
 
     // Directional Sunlight & Ambient
     this.sunLight = new THREE.DirectionalLight(0xffecd4, 2.4);
-    this.sunLight.position.set(300, 350, 240);
+    this.sunLight.position.copy(SUN_DIR).multiplyScalar(500);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.width = 2048;
     this.sunLight.shadow.mapSize.height = 2048;
     this.sunLight.shadow.camera.near = 10;
-    this.sunLight.shadow.camera.far = 600;
+    this.sunLight.shadow.camera.far = 900;
     const d = 50;
     this.sunLight.shadow.camera.left = -d;
     this.sunLight.shadow.camera.right = d;
@@ -81,6 +123,7 @@ export class MarsAtmosphere {
     this.sunLight.shadow.camera.bottom = -d;
     this.sunLight.shadow.bias = -0.0005;
     this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
     this.ambientLight = new THREE.AmbientLight(0x4a2a22, 1.2);
     this.scene.add(this.ambientLight);
@@ -88,39 +131,58 @@ export class MarsAtmosphere {
 
   createDistantMountains() {
     // 360-degree distant Martian mountain silhouettes (Olympus Mons caldera peak and crater rims)
-    const segs = 64;
+    const segs = 180;
     const radius = 950.0;
     const geo = new THREE.BufferGeometry();
     const positions = [];
 
+    const ridge = (t) => {
+      const base = 30.0 + Math.sin(t * 3.0) * 18.0 + Math.pow(Math.max(0, Math.cos(t - 0.78)), 4.0) * 90.0;
+      // Jagged high-frequency ridgelines (deterministic)
+      const jag = Math.sin(t * 23.0 + 1.3) * 4.5 + Math.sin(t * 47.0) * 2.4 + Math.sin(t * 91.0 + 2.0) * 1.2;
+      return base + jag;
+    };
+
     for (let i = 0; i < segs; i++) {
       const theta1 = (i / segs) * Math.PI * 2;
       const theta2 = ((i + 1) / segs) * Math.PI * 2;
-
-      // Olympus Mons silhouette peak at ~45 degrees, rolling crater rims around
-      const h1 = 30.0 + Math.sin(theta1 * 3.0) * 18.0 + Math.pow(Math.max(0, Math.cos(theta1 - 0.78)), 4.0) * 90.0;
-      const h2 = 30.0 + Math.sin(theta2 * 3.0) * 18.0 + Math.pow(Math.max(0, Math.cos(theta2 - 0.78)), 4.0) * 90.0;
+      const h1 = ridge(theta1);
+      const h2 = ridge(theta2);
 
       const x1 = Math.cos(theta1) * radius;
       const z1 = Math.sin(theta1) * radius;
       const x2 = Math.cos(theta2) * radius;
       const z2 = Math.sin(theta2) * radius;
 
-      // Triangle 1
-      positions.push(x1, -15, z1);
-      positions.push(x1, h1, z1);
-      positions.push(x2, h2, z2);
-
-      // Triangle 2
-      positions.push(x1, -15, z1);
-      positions.push(x2, h2, z2);
-      positions.push(x2, -15, z2);
+      positions.push(x1, -15, z1, x1, h1, z1, x2, h2, z2);
+      positions.push(x1, -15, z1, x2, h2, z2, x2, -15, z2);
     }
 
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xc87352,
-      side: THREE.DoubleSide
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      fog: false,
+      uniforms: {
+        uHaze: { value: new THREE.Color(0xda8e6c) },
+        uPeak: { value: new THREE.Color(0xa86448) }
+      },
+      vertexShader: `
+        varying float vY;
+        void main() {
+          vY = position.y;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uHaze;
+        uniform vec3 uPeak;
+        varying float vY;
+        void main() {
+          // Atmospheric perspective: bases dissolve into haze, ridges stay slightly darker
+          float t = smoothstep(-5.0, 120.0, vY);
+          gl_FragColor = vec4(mix(uHaze, uPeak, t * 0.7), 1.0);
+        }
+      `
     });
 
     this.distantMountains = new THREE.Mesh(geo, mat);
@@ -152,7 +214,7 @@ export class MarsAtmosphere {
   }
 
   createWindDust() {
-    // 1500 blowing sand particles drifting across the dunes
+    // Blowing sand particles drifting across the dunes
     this.dustCount = 1200;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(this.dustCount * 3);
@@ -179,125 +241,439 @@ export class MarsAtmosphere {
       color: 0xd98d6c,
       size: 1.4,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.45,
+      depthWrite: false,
       blending: THREE.NormalBlending
     });
 
     this.dustPoints = new THREE.Points(geometry, material);
+    this.dustPoints.frustumCulled = false;
     this.scene.add(this.dustPoints);
   }
 
   createVehicleParticles() {
-    // 1. Tire Sand Plume particles
-    this.tireParticleCount = 200;
-    const tireGeo = new THREE.BufferGeometry();
-    const tirePos = new Float32Array(this.tireParticleCount * 3);
-    const tireSizes = new Float32Array(this.tireParticleCount);
-    const tireAlphas = new Float32Array(this.tireParticleCount);
+    // 1. Sand dust (soft billowing sprites, tinted to the sand under the wheels)
+    this.dustPool = new SoftParticlePool(this.scene, 900, { additive: false, softness: 1.0 });
+    this.tireAcc = [0, 0, 0, 0];
+    this.sandTints = [
+      [0.78, 0.50, 0.34],
+      [0.72, 0.44, 0.30],
+      [0.84, 0.58, 0.40]
+    ];
 
-    for (let i = 0; i < this.tireParticleCount; i++) {
-      tirePos[i * 3 + 1] = -1000; // start hidden
-      tireSizes[i] = 1.0;
-      tireAlphas[i] = 0.0;
-    }
+    // 2. Nitro sparks / embers (additive glow)
+    this.fxPool = new SoftParticlePool(this.scene, 420, { additive: true, softness: 1.0, maxPointSize: 120 });
+    this.nitroAcc = 0;
+    this.emberAcc = 0;
+    this.nitroLevel = 0;
 
-    tireGeo.setAttribute('position', new THREE.BufferAttribute(tirePos, 3));
-    tireGeo.setAttribute('size', new THREE.BufferAttribute(tireSizes, 1));
-    tireGeo.setAttribute('alpha', new THREE.BufferAttribute(tireAlphas, 1));
+    this.createNitroPlumes();
+    this.createTireTracks();
+  }
 
-    this.tireParticles = [];
-    for (let i = 0; i < this.tireParticleCount; i++) {
-      this.tireParticles.push({
-        active: false,
-        pos: new THREE.Vector3(),
-        vel: new THREE.Vector3(),
-        life: 0,
-        maxLife: 1.0,
-        size: 1.0
-      });
-    }
-
-    const tireMat = new THREE.PointsMaterial({
-      color: 0xc4633f,
-      size: 2.2,
+  createNitroPlumes() {
+    // Volumetric-looking layered plume cones with animated flame shader + mach diamonds
+    const makePlumeMaterial = (scale) => new THREE.ShaderMaterial({
       transparent: true,
-      opacity: 0.45,
-      depthWrite: false
-    });
-    this.tirePoints = new THREE.Points(tireGeo, tireMat);
-    this.scene.add(this.tirePoints);
-
-    // 2. Nitro Jet Flame particles
-    this.nitroParticleCount = 150;
-    const nitroGeo = new THREE.BufferGeometry();
-    const nitroPos = new Float32Array(this.nitroParticleCount * 3);
-
-    for (let i = 0; i < this.nitroParticleCount * 3; i++) {
-      nitroPos[i] = -1000;
-    }
-    nitroGeo.setAttribute('position', new THREE.BufferAttribute(nitroPos, 3));
-
-    this.nitroParticles = [];
-    for (let i = 0; i < this.nitroParticleCount; i++) {
-      this.nitroParticles.push({
-        active: false,
-        pos: new THREE.Vector3(),
-        vel: new THREE.Vector3(),
-        life: 0,
-        maxLife: 0.35
-      });
-    }
-
-    const nitroMat = new THREE.PointsMaterial({
-      color: 0x00f0ff,
-      size: 2.5,
-      transparent: true,
-      opacity: 0.9,
+      depthWrite: false,
+      side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
-      depthWrite: false
+      toneMapped: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uIntensity: { value: 0 },
+        uScale: { value: scale }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vN;
+        varying vec3 vV;
+        void main() {
+          vUv = uv;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vN = normalize(normalMatrix * normal);
+          vV = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uIntensity;
+        uniform float uScale;
+        varying vec2 vUv;
+        varying vec3 vN;
+        varying vec3 vV;
+        void main() {
+          float t = vUv.y;                     // 0 at nozzle -> 1 at flame tip
+          float ang = vUv.x * 6.2831853;
+          float turb = 0.5 + 0.5 * sin(ang * 3.0 + t * 20.0 - uTime * 42.0);
+          turb *= 0.5 + 0.5 * sin(ang * 5.0 - t * 31.0 - uTime * 57.0 + 1.7);
+          float core = pow(1.0 - t, 2.0);
+          float fres = pow(abs(dot(normalize(vN), normalize(vV))), 0.7);
+          // Mach (shock) diamonds, stationary in the exhaust
+          float diamonds = pow(max(0.0, sin(t * 26.0 / uScale + 0.6)), 8.0) * (1.0 - t) * step(0.04, t);
+          vec3 outer = vec3(1.0, 0.42, 0.10);
+          vec3 mid = vec3(1.0, 0.78, 0.40);
+          vec3 inner = vec3(0.55, 0.80, 1.0);
+          vec3 col = mix(outer, mid, smoothstep(0.55, 0.0, t));
+          col = mix(col, inner, core * fres);
+          col += vec3(0.9, 0.95, 1.0) * diamonds * 0.9;
+          float flick = 0.75 + 0.25 * turb;
+          float a = pow(1.0 - t, 1.3) * fres * flick * uIntensity;
+          a += diamonds * 0.5 * uIntensity;
+          gl_FragColor = vec4(col * (1.2 + core * 1.5), clamp(a, 0.0, 1.0));
+        }
+      `
     });
-    this.nitroPoints = new THREE.Points(nitroGeo, nitroMat);
-    this.scene.add(this.nitroPoints);
+
+    const makeConeGeo = (radius) => {
+      // Wide at nozzle (y = 0) tapering to a tip (y = 1), then pointed along -Z (rover rear)
+      const g = new THREE.CylinderGeometry(0.0, radius, 1, 20, 6, true);
+      g.translate(0, 0.5, 0);
+      g.rotateX(-Math.PI / 2);
+      return g;
+    };
+
+    this.plumes = [];
+    for (let side = 0; side < 2; side++) {
+      const outer = new THREE.Mesh(makeConeGeo(0.26), makePlumeMaterial(1.0));
+      const inner = new THREE.Mesh(makeConeGeo(0.13), makePlumeMaterial(0.7));
+      for (const m of [outer, inner]) {
+        m.frustumCulled = false;
+        m.visible = false;
+        m.renderOrder = 12;
+        this.scene.add(m);
+      }
+      this.plumes.push({ outer, inner, x: side === 0 ? -0.55 : 0.55 });
+    }
+
+    // Flickering exhaust light that paints the sand orange behind the rover
+    this.nitroLight = new THREE.PointLight(0xff9a4a, 0, 26, 1.6);
+    this.scene.add(this.nitroLight);
   }
 
-  emitTireDust(pos, wheelVel) {
-    for (let i = 0; i < this.tireParticleCount; i++) {
-      const p = this.tireParticles[i];
-      if (!p.active) {
-        p.active = true;
-        p.pos.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.1, (Math.random() - 0.5) * 0.4));
-        p.vel.copy(wheelVel).multiplyScalar(-0.15).add(new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2 + 1, (Math.random() - 0.5) * 2));
-        p.life = 0;
-        p.maxLife = 0.6 + Math.random() * 0.4;
-        p.size = 1.5 + Math.random() * 2.0;
-        break;
+  createTireTracks() {
+    // Ring buffer of tire tread decals stamped onto the sand
+    this.trackMax = 520;
+    this.trackCursor = 0;
+
+    const cv = document.createElement('canvas');
+    cv.width = 32; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, 32, 64);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(2, 0, 28, 64);
+    // Deep directional tread bars
+    ctx.fillStyle = 'rgba(255,255,255,1.0)';
+    for (let y = 0; y < 64; y += 8) {
+      ctx.fillRect(2, y, 28, 4);
+    }
+    // Soft shoulder edges
+    ctx.globalCompositeOperation = 'destination-out';
+    const grad = ctx.createLinearGradient(0, 0, 32, 0);
+    grad.addColorStop(0.0, 'rgba(0,0,0,1)');
+    grad.addColorStop(0.18, 'rgba(0,0,0,0)');
+    grad.addColorStop(0.82, 'rgba(0,0,0,0)');
+    grad.addColorStop(1.0, 'rgba(0,0,0,1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 32, 64);
+
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+
+    const planeGeo = new THREE.PlaneGeometry(1, 1);
+    planeGeo.rotateX(-Math.PI / 2);
+
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      color: 0x2b130c,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4
+    });
+
+    this.tracks = new THREE.InstancedMesh(planeGeo, mat, this.trackMax);
+    this.tracks.frustumCulled = false;
+    this.tracks.renderOrder = 2;
+    this._trackDummy = new THREE.Object3D();
+    this._trackDummy.scale.set(0, 0, 0);
+    this._trackDummy.updateMatrix();
+    for (let i = 0; i < this.trackMax; i++) this.tracks.setMatrixAt(i, this._trackDummy.matrix);
+    this.tracks.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.tracks);
+
+    this.lastTrackPos = [0, 1, 2, 3].map(() => new THREE.Vector3(1e6, 0, 1e6));
+    this._qa = new THREE.Quaternion();
+    this._qb = new THREE.Quaternion();
+    this._up = new THREE.Vector3(0, 1, 0);
+  }
+
+  createDustDevils() {
+    // Wandering dust devils: rotating columns of dust that drift across the plain
+    this.devilCount = 3;
+    this.devilParticles = 80;
+    this.devilPool = new SoftParticlePool(this.scene, this.devilCount * this.devilParticles, { additive: false, softness: 1.0, maxPointSize: 260 });
+    this.devils = [];
+    for (let i = 0; i < this.devilCount; i++) {
+      this.devils.push({
+        x: 0, z: 0, y: 0,
+        radius: 2.5 + Math.random() * 2.5,
+        height: 30 + Math.random() * 25,
+        spin: 2.2 + Math.random() * 1.2,
+        phase: Math.random() * 100,
+        needsSpawn: true,
+        meander: Math.random() * 6.28
+      });
+    }
+    for (let i = 0; i < this.devilPool.count; i++) this.devilPool.alive[i] = 1;
+  }
+
+  spawnDevil(dv, playerPos, idx) {
+    const a = (idx / this.devilCount) * Math.PI * 2 + Math.random() * 1.6;
+    const r = 110 + Math.random() * 120;
+    dv.x = playerPos.x + Math.cos(a) * r;
+    dv.z = playerPos.z + Math.sin(a) * r;
+    dv.needsSpawn = false;
+  }
+
+  updateDustDevils(dt, playerPos) {
+    const pool = this.devilPool;
+    const t = this.time;
+    for (let d = 0; d < this.devilCount; d++) {
+      const dv = this.devils[d];
+      if (dv.needsSpawn) this.spawnDevil(dv, playerPos, d);
+      dv.meander += dt * 0.25;
+      dv.x += (this.wind.x * 0.8 + Math.cos(dv.meander) * 2.0) * dt;
+      dv.z += (this.wind.z * 0.8 + Math.sin(dv.meander) * 2.0) * dt;
+      const dx = dv.x - playerPos.x;
+      const dz = dv.z - playerPos.z;
+      if (dx * dx + dz * dz > 300 * 300) dv.needsSpawn = true;
+      dv.y = getMarsHeight(dv.x, dv.z);
+
+      for (let k = 0; k < this.devilParticles; k++) {
+        const i = d * this.devilParticles + k;
+        const i3 = i * 3;
+        const seed = (k * 0.6180339) % 1.0;
+        const u = (k / this.devilParticles + t * (0.10 + seed * 0.05) + dv.phase) % 1.0;
+        const r = dv.radius * (0.25 + u * 1.15) * (0.7 + seed * 0.6);
+        const ang = seed * 6.2831 * 3.0 + t * (dv.spin - u * 1.1) + u * 4.0;
+        pool.pos[i3] = dv.x + Math.cos(ang) * r + this.wind.x * u * 1.8;
+        pool.pos[i3 + 1] = dv.y + u * dv.height + 0.5;
+        pool.pos[i3 + 2] = dv.z + Math.sin(ang) * r + this.wind.z * u * 1.8;
+        pool.aSize[i] = 1.6 + u * 5.5 + seed * 1.5;
+        pool.aAlpha[i] = 0.30 * Math.sin(Math.min(1.0, u * 1.05) * Math.PI) * (0.6 + seed * 0.4);
+        const shade = 0.78 - u * 0.12;
+        pool.aColor[i3] = 0.80 * shade;
+        pool.aColor[i3 + 1] = 0.50 * shade;
+        pool.aColor[i3 + 2] = 0.36 * shade;
       }
+    }
+    pool.posAttr.needsUpdate = true;
+    pool.sizeAttr.needsUpdate = true;
+    pool.alphaAttr.needsUpdate = true;
+    pool.colorAttr.needsUpdate = true;
+  }
+
+  emitDust(x, y, z, vx, vy, vz, sizeStart, sizeEnd, alpha, life) {
+    const tint = this.sandTints[(Math.random() * this.sandTints.length) | 0];
+    const v = 0.88 + Math.random() * 0.24;
+    this.dustPool.emit({
+      x, y, z, vx, vy, vz,
+      life,
+      size0: sizeStart,
+      size1: sizeEnd,
+      alpha,
+      drag: 0.965,
+      gravity: -1.2,
+      c0r: tint[0] * v, c0g: tint[1] * v, c0b: tint[2] * v,
+      c1r: tint[0] * v * 1.08, c1g: tint[1] * v * 1.04, c1b: tint[2] * v * 0.98
+    });
+  }
+
+  // Landing / impact burst of sand
+  burstDust(pos, strength = 1.0) {
+    const n = Math.floor(26 * Math.min(2.0, strength) * this.dustDensity);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (2.5 + Math.random() * 5.0) * strength;
+      this.emitDust(
+        pos.x + Math.cos(a) * 0.8, pos.y + 0.2, pos.z + Math.sin(a) * 0.8,
+        Math.cos(a) * sp, 1.0 + Math.random() * 3.0 * strength, Math.sin(a) * sp,
+        0.8, 4.5 + Math.random() * 2.5, 0.5, 1.0 + Math.random() * 0.9
+      );
     }
   }
 
-  emitNitroFlame(nozzlePos, roverForward) {
-    for (let i = 0; i < this.nitroParticleCount; i++) {
-      const p = this.nitroParticles[i];
-      if (!p.active) {
-        p.active = true;
-        p.pos.copy(nozzlePos).add(new THREE.Vector3((Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2));
-        // Eject backwards with high speed + slight spread
-        p.vel.copy(roverForward).multiplyScalar(-38.0).add(new THREE.Vector3((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5));
-        p.life = 0;
-        p.maxLife = 0.25 + Math.random() * 0.15;
-        break;
+  stampTrack(w, contact, yaw) {
+    const gp = contact.groundPoint;
+    const last = this.lastTrackPos[w];
+    const dx = gp.x - last.x;
+    const dz = gp.z - last.z;
+    if (dx * dx + dz * dz < 0.55 * 0.55) return;
+    last.copy(gp);
+
+    const n = getMarsNormal(gp.x, gp.z);
+    this._qa.setFromUnitVectors(this._up, n);
+    this._qb.setFromAxisAngle(this._up, yaw);
+    this._qa.multiply(this._qb);
+
+    const dummy = this._trackDummy;
+    dummy.position.set(gp.x + n.x * 0.05, gp.y + n.y * 0.05, gp.z + n.z * 0.05);
+    dummy.quaternion.copy(this._qa);
+    dummy.scale.set(0.46, 1, 0.95);
+    dummy.updateMatrix();
+    this.tracks.setMatrixAt(this.trackCursor, dummy.matrix);
+    this.trackCursor = (this.trackCursor + 1) % this.trackMax;
+    this.tracks.instanceMatrix.needsUpdate = true;
+  }
+
+  updateVehicleEffects(dt, playerPos, physics) {
+    const speed = Math.abs(physics.speed);
+    const slip = Math.abs(physics.lateralVelocity);
+    const forward = physics._vForward;
+    const grounded = !physics.isAirborne;
+
+    // --- Sand dust behind the wheels (rate scales with speed, throttle and drift) ---
+    if (grounded && speed > 2.0) {
+      const baseRate = (5.0 + speed * 1.3 + slip * 12.0) * this.dustDensity;
+      for (let w = 0; w < 4; w++) {
+        const c = physics.wheelContacts[w];
+        if (!c.onGround) continue;
+        this.tireAcc[w] += baseRate * dt;
+        while (this.tireAcc[w] >= 1.0) {
+          this.tireAcc[w] -= 1.0;
+          const gp = c.groundPoint;
+          const spread = 0.5 + slip * 0.25;
+          const lift = 0.9 + Math.random() * 1.8 + speed * 0.05;
+          const back = -0.25 - Math.random() * 0.2;
+          this.emitDust(
+            gp.x + (Math.random() - 0.5) * 0.5, gp.y + 0.12, gp.z + (Math.random() - 0.5) * 0.5,
+            physics.velocity.x * 0.35 + forward.x * speed * back * 0.8 + (Math.random() - 0.5) * spread * 2.0,
+            lift,
+            physics.velocity.z * 0.35 + forward.z * speed * back * 0.8 + (Math.random() - 0.5) * spread * 2.0,
+            0.5 + Math.random() * 0.3,
+            2.6 + speed * 0.07 + Math.random() * 1.6,
+            0.28 + Math.min(0.25, speed * 0.006),
+            0.9 + Math.random() * 0.9
+          );
+        }
+      }
+    } else {
+      for (let w = 0; w < 4; w++) this.tireAcc[w] = 0;
+    }
+
+    // --- Tire track decals ---
+    if (grounded && speed > 0.5) {
+      for (let w = 0; w < 4; w++) {
+        const c = physics.wheelContacts[w];
+        if (c.onGround) this.stampTrack(w, c, physics.yaw);
       }
     }
+
+    // --- Nitro plumes ---
+    const active = physics.isNitroActive;
+    this.nitroLevel += ((active ? 1 : 0) - this.nitroLevel) * Math.min(1, dt * (active ? 9 : 5));
+    const level = this.nitroLevel;
+    const vis = level > 0.02;
+
+    const flicker = 0.85 + Math.random() * 0.3;
+    for (const p of this.plumes) {
+      p.outer.visible = vis;
+      p.inner.visible = vis;
+      if (!vis) continue;
+      const nozzle = new THREE.Vector3(p.x, 0.55, -2.75).applyQuaternion(physics.quaternion).add(playerPos);
+      const len = (2.2 + 6.5 * level + speed * 0.05) * flicker;
+      for (const [m, lenMul, widMul] of [[p.outer, 1.0, 1.0], [p.inner, 0.68, 1.0]]) {
+        m.position.copy(nozzle);
+        m.quaternion.copy(physics.quaternion);
+        m.scale.set(widMul * (0.7 + 0.5 * level), widMul * (0.7 + 0.5 * level), len * lenMul);
+        m.material.uniforms.uTime.value = this.time;
+        m.material.uniforms.uIntensity.value = level * (0.9 + Math.random() * 0.2);
+      }
+    }
+
+    // Exhaust glow light
+    const lp = new THREE.Vector3(0, 0.9, -4.5).applyQuaternion(physics.quaternion).add(playerPos);
+    this.nitroLight.position.copy(lp);
+    this.nitroLight.intensity = level * (7 + Math.random() * 5);
+
+    if (vis && active) {
+      // Hot sparks (blue-white core fading to orange) and slow glowing embers
+      this.nitroAcc += 140 * this.dustDensity * dt;
+      this.emberAcc += 50 * this.dustDensity * dt;
+      const nozzles = [-0.55, 0.55].map((x) => new THREE.Vector3(x, 0.55, -2.75).applyQuaternion(physics.quaternion).add(playerPos));
+
+      while (this.nitroAcc >= 1.0) {
+        this.nitroAcc -= 1.0;
+        const n = nozzles[(Math.random() * 2) | 0];
+        const sp = 32 + Math.random() * 20 + speed * 0.4;
+        this.fxPool.emit({
+          x: n.x, y: n.y, z: n.z,
+          vx: -forward.x * sp + (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, vz: -forward.z * sp + (Math.random() - 0.5) * 5,
+          life: 0.22 + Math.random() * 0.22,
+          size0: 0.35, size1: 1.1 + Math.random() * 0.6,
+          alpha: 0.85,
+          drag: 0.97, gravity: 0,
+          c0r: 0.75, c0g: 0.9, c0b: 1.0,
+          c1r: 1.0, c1g: 0.35, c1b: 0.08
+        });
+      }
+      while (this.emberAcc >= 1.0) {
+        this.emberAcc -= 1.0;
+        const n = nozzles[(Math.random() * 2) | 0];
+        const sp = 8 + Math.random() * 16;
+        this.fxPool.emit({
+          x: n.x - forward.x * 0.6, y: n.y, z: n.z - forward.z * 0.6,
+          vx: -forward.x * sp + (Math.random() - 0.5) * 9, vy: 1.5 + Math.random() * 4, vz: -forward.z * sp + (Math.random() - 0.5) * 9,
+          life: 0.7 + Math.random() * 0.8,
+          size0: 0.16, size1: 0.04,
+          alpha: 1.0,
+          drag: 0.985, gravity: -3.7,
+          c0r: 1.0, c0g: 0.75, c0b: 0.35,
+          c1r: 0.9, c1g: 0.2, c1b: 0.05
+        });
+      }
+
+      // Boost kicks up a heavy rooster tail of sand
+      if (grounded && this.dustDensity > 0.5) {
+        const extra = 22 * this.dustDensity * dt;
+        this.tailAcc = (this.tailAcc || 0) + extra;
+        while (this.tailAcc >= 1.0) {
+          this.tailAcc -= 1.0;
+          const rear = new THREE.Vector3((Math.random() - 0.5) * 1.6, -0.1, -2.2).applyQuaternion(physics.quaternion).add(playerPos);
+          this.emitDust(
+            rear.x, rear.y, rear.z,
+            -forward.x * speed * 0.3 + (Math.random() - 0.5) * 3, 2.5 + Math.random() * 3.0, -forward.z * speed * 0.3 + (Math.random() - 0.5) * 3,
+            1.2, 5.5 + Math.random() * 2.0, 0.34, 1.3 + Math.random() * 0.8
+          );
+        }
+      }
+    }
+
+    this.dustPool.update(dt, this.wind);
+    this.fxPool.update(dt, null);
   }
 
   update(dt, playerPos, physics) {
+    this.time += dt;
+    this.skyMat.uniforms.uTime.value = this.time;
+
     // 1. Anchor skydome, distant mountains and directional light to player
     this.skyMesh.position.copy(playerPos);
     if (this.distantMountains) {
       this.distantMountains.position.set(playerPos.x, 0, playerPos.z);
     }
-    this.sunLight.position.set(playerPos.x + 300, 350, playerPos.z + 240);
+    this.sunLight.position.set(
+      playerPos.x + SUN_DIR.x * 500,
+      SUN_DIR.y * 500,
+      playerPos.z + SUN_DIR.z * 500
+    );
     this.sunLight.target.position.copy(playerPos);
+    this.sunLight.target.updateMatrixWorld();
 
     // Slowly orbit moons
     this.phobos.rotation.y += dt * 0.02;
@@ -328,59 +704,8 @@ export class MarsAtmosphere {
     }
     dustPosAttr.needsUpdate = true;
 
-    // 3. Emit & update vehicle particles
-    // Tire dust when driving on ground
-    if (physics.speedKmh > 8) {
-      for (let w = 0; w < 4; w++) {
-        const contact = physics.wheelContacts[w];
-        if (contact.onGround && Math.random() < 0.4) {
-          this.emitTireDust(contact.groundPoint, physics.velocity);
-        }
-      }
-    }
-
-    // Nitro exhaust
-    if (physics.isNitroActive) {
-      const forward = physics._vForward;
-      const leftNozzle = new THREE.Vector3(-0.55, 0.55, -2.7).applyQuaternion(physics.quaternion).add(playerPos);
-      const rightNozzle = new THREE.Vector3(0.55, 0.55, -2.7).applyQuaternion(physics.quaternion).add(playerPos);
-      this.emitNitroFlame(leftNozzle, forward);
-      this.emitNitroFlame(rightNozzle, forward);
-    }
-
-    // Update Tire Particles
-    const tirePosAttr = this.tirePoints.geometry.attributes.position;
-    for (let i = 0; i < this.tireParticleCount; i++) {
-      const p = this.tireParticles[i];
-      if (p.active) {
-        p.life += dt;
-        if (p.life >= p.maxLife) {
-          p.active = false;
-          tirePosAttr.setXYZ(i, 0, -1000, 0);
-        } else {
-          p.pos.addScaledVector(p.vel, dt);
-          p.vel.multiplyScalar(0.95);
-          tirePosAttr.setXYZ(i, p.pos.x, p.pos.y, p.pos.z);
-        }
-      }
-    }
-    tirePosAttr.needsUpdate = true;
-
-    // Update Nitro Particles
-    const nitroPosAttr = this.nitroPoints.geometry.attributes.position;
-    for (let i = 0; i < this.nitroParticleCount; i++) {
-      const p = this.nitroParticles[i];
-      if (p.active) {
-        p.life += dt;
-        if (p.life >= p.maxLife) {
-          p.active = false;
-          nitroPosAttr.setXYZ(i, 0, -1000, 0);
-        } else {
-          p.pos.addScaledVector(p.vel, dt);
-          nitroPosAttr.setXYZ(i, p.pos.x, p.pos.y, p.pos.z);
-        }
-      }
-    }
-    nitroPosAttr.needsUpdate = true;
+    // 3. Vehicle dust, tracks and nitro plumes; ambient dust devils
+    this.updateVehicleEffects(dt, playerPos, physics);
+    this.updateDustDevils(dt, playerPos);
   }
 }

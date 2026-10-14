@@ -86,25 +86,54 @@ export function createMarsTerrainMaterial(options = {}) {
       return sqrt(minDist);
     }
 
-    // Wind ripple micro-normal perturbation
-    vec3 getDetailedNormal(vec3 worldPos, vec3 baseNormal) {
+    float hash11(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+
+    // Smooth value noise
+    float vnoise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      float a = hash11(i);
+      float b = hash11(i + vec2(1.0, 0.0));
+      float c = hash11(i + vec2(0.0, 1.0));
+      float d = hash11(i + vec2(1.0, 1.0));
+      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+
+    // Wind-warped, meandering sand ripples (wavy crests like real aeolian ripples)
+    // Returns ripple height phase in .x and crest derivative in .y
+    vec2 sandRipple(vec2 xz) {
       float windAngle = 0.63;
       mat2 rot = mat2(cos(windAngle), -sin(windAngle), sin(windAngle), cos(windAngle));
-      vec2 windUV = rot * worldPos.xz;
+      vec2 windUV = rot * xz;
+      float warp = vnoise(windUV * vec2(0.35, 0.9)) * 5.0 + vnoise(windUV * 1.7) * 1.2;
+      float phase = windUV.y * 7.5 + warp;
+      // Asymmetric ripple profile: gentle windward face, steep lee face
+      float s = sin(phase);
+      float h = s + 0.35 * sin(phase * 2.0 + 1.2);
+      float dh = cos(phase) + 0.7 * cos(phase * 2.0 + 1.2);
+      return vec2(h, dh);
+    }
 
-      // Primary sand dune wind ripples
-      float ripple = sin(windUV.y * 3.14159 * 2.5);
-      float rippleDeriv = cos(windUV.y * 3.14159 * 2.5) * 0.16;
-
-      // Secondary fine cross ripples
-      float micro = sin(worldPos.x * 6.0 + worldPos.z * 6.0) * 0.05;
-
-      vec3 perturbed = baseNormal + vec3(-sin(windAngle) * (rippleDeriv + micro), 0.0, cos(windAngle) * (rippleDeriv + micro));
+    // Wind ripple micro-normal perturbation (faded with distance to avoid aliasing)
+    vec3 getDetailedNormal(vec3 worldPos, vec3 baseNormal, float distFade) {
+      float windAngle = 0.63;
+      vec2 r = sandRipple(worldPos.xz);
+      float grainBump = (hash11(floor(worldPos.xz * 55.0)) - 0.5) * 0.10 * distFade;
+      float strength = 0.075 * distFade;
+      float d = r.y * strength + grainBump;
+      vec3 perturbed = baseNormal + vec3(-sin(windAngle) * d, 0.0, cos(windAngle) * d);
       return normalize(perturbed);
     }
 
     void main() {
-      vec3 N = getDetailedNormal(vWorldPosition, vNormal);
+      float camDist = length(vWorldPosition - cameraPosition);
+      float detailFade = 1.0 - smoothstep(18.0, 85.0, camDist);
+      float grainFade = 1.0 - smoothstep(6.0, 45.0, camDist);
+
+      vec3 N = getDetailedNormal(vWorldPosition, vNormal, detailFade);
       vec3 L = normalize(uSunDirection);
       vec3 V = normalize(cameraPosition - vWorldPosition);
 
@@ -124,6 +153,24 @@ export function createMarsTerrainMaterial(options = {}) {
       // Blend Sand with Bedrock Slabs
       vec3 surfaceAlbedo = mix(uMarsSandColor, uMarsBedrockColor, rockSlabFactor * 0.55);
 
+      // Multi-scale sand mottling: broad drifts, medium patches, fine speckle
+      float mottleLarge = vnoise(vWorldPosition.xz * 0.045);
+      float mottleMid = vnoise(vWorldPosition.xz * 0.35 + 7.3);
+      float mottleFine = vnoise(vWorldPosition.xz * 2.4 + 31.7);
+      float mottle = mottleLarge * 0.5 + mottleMid * 0.32 + mottleFine * 0.18;
+      surfaceAlbedo *= 0.80 + 0.40 * mottle;
+      // Darker, iron-rich dust patches and paler wind-swept patches
+      surfaceAlbedo = mix(surfaceAlbedo, uMarsDuneShadowColor, smoothstep(0.62, 0.9, mottleLarge) * 0.28);
+      surfaceAlbedo = mix(surfaceAlbedo, uMarsSandLightColor * 1.08, smoothstep(0.65, 0.95, mottleMid) * 0.22 * (1.0 - rockSlabFactor));
+
+      // Individual sand grain variation (near field only)
+      float grain = hash11(floor(vWorldPosition.xz * 55.0));
+      surfaceAlbedo *= 1.0 + (grain - 0.5) * 0.28 * grainFade;
+
+      // Ripple troughs collect darker, finer dust; crests are lighter coarse grains
+      vec2 rip = sandRipple(vWorldPosition.xz);
+      surfaceAlbedo *= 1.0 + rip.x * 0.07 * detailFade * (1.0 - rockSlabFactor * 0.6);
+
       // Highlights on sunward dune crests
       surfaceAlbedo = mix(surfaceAlbedo, uMarsSandLightColor, smoothstep(0.3, 0.8, NdotL) * 0.4);
 
@@ -136,6 +183,11 @@ export function createMarsTerrainMaterial(options = {}) {
       // Specular glint for silicate / quartz sand grains
       vec3 H = normalize(L + V);
       float spec = pow(max(dot(N, H), 0.0), 28.0) * 0.18 * (1.0 - steepFactor);
+
+      // Sparkling individual quartz grains catching the sun
+      float sparkSeed = hash11(floor(vWorldPosition.xz * 38.0) + 13.0);
+      float sparkle = step(0.975, sparkSeed) * pow(max(dot(N, H), 0.0), 6.0) * grainFade * (1.0 - steepFactor);
+      spec += sparkle * 0.9;
 
       vec3 lighting = uAmbientColor + uSunColor * diffuse + vec3(spec);
       vec3 finalColor = surfaceAlbedo * lighting;
