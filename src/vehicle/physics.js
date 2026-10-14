@@ -2,41 +2,39 @@ import * as THREE from 'three';
 import { getMarsHeight, getMarsNormal } from '../terrain/noise.js';
 
 // Mars Dune Rover Vehicle Simulator
-// Stable, responsive arcade/rally driving physics tuned for low Martian gravity (3.72 m/s²)
+// Stays firmly on the land with responsive arcade driving, terrain slope conformance,
+// controlled dune crest jumps, and nitro boost.
 export class MarsRoverPhysics {
   constructor(roverModel) {
     this.model = roverModel;
 
-    // Position & Orientation
+    // Position & Heading
     this.position = new THREE.Vector3(0, 0, 0);
-    this.yaw = 0; // Heading in radians (0 = along +Z)
-    this.pitch = 0;
-    this.roll = 0;
+    this.yaw = 0; // Heading in radians (0 = forward along +Z)
+    this.pitch = 0; // Slope pitch (up/down)
+    this.roll = 0; // Slope roll (left/right bank)
     this.quaternion = new THREE.Quaternion();
 
     // Velocities
-    this.speed = 0; // Forward velocity (m/s)
-    this.verticalVelocity = 0; // Vertical Y velocity (m/s)
-    this.lateralVelocity = 0; // Sideways slip velocity (m/s)
+    this.speed = 0; // Forward linear speed (m/s)
+    this.verticalVelocity = 0; // Up/down jump velocity (m/s)
+    this.lateralVelocity = 0; // Sideways slip / drift (m/s)
     this.velocity = new THREE.Vector3(0, 0, 0);
 
     // Initial position on Mars surface
-    const initY = getMarsHeight(0, 0);
-    this.position.set(0, initY + 1.2, 0);
+    this.rideHeight = 0.95; // Fixed chassis height above dune surface
+    const initY = getMarsHeight(0, 0) + this.rideHeight;
+    this.position.set(0, initY, 0);
 
-    // Vehicle Specifications
-    this.rideHeight = 1.05; // Target height above terrain
-    this.gravity = 3.72; // Mars gravity (m/s²)
-    this.wheelRadius = 0.55;
-
-    // Driving Parameters
+    // Vehicle Performance Specs
     this.acceleration = 24.0; // m/s²
     this.maxSpeedForward = 32.0; // ~115 km/h
-    this.maxSpeedNitro = 50.0; // ~180 km/h
+    this.maxSpeedNitro = 48.0; // ~173 km/h
     this.maxSpeedReverse = 12.0; // ~43 km/h
-    this.brakeForce = 35.0; // m/s²
-    this.turnSpeed = 1.85; // rad/s
+    this.brakeForce = 38.0; // m/s²
+    this.turnSpeed = 2.2; // rad/s
     this.steerAngleVisual = 0.52; // max visual wheel steer angle
+    this.gravity = 16.0; // Snappy downward gravity for arcade vehicle control
 
     // Nitro System
     this.nitroCapacity = 100.0;
@@ -50,7 +48,7 @@ export class MarsRoverPhysics {
     this.distanceTraveled = 0;
     this.currentSteer = 0;
 
-    // Vectors
+    // Direction Vectors
     this._vForward = new THREE.Vector3(0, 0, 1);
     this._vUp = new THREE.Vector3(0, 1, 0);
     this._vRight = new THREE.Vector3(1, 0, 0);
@@ -70,220 +68,198 @@ export class MarsRoverPhysics {
       { onGround: true, compression: 0, groundPoint: new THREE.Vector3() }
     ];
 
+    this.wheelRadius = 0.55;
     this.wheelRotation = 0;
   }
 
   update(dt, input) {
-    if (dt > 0.1) dt = 0.1; // clamp frame hitches
+    if (dt > 0.05) dt = 0.05; // clamp frame hitches
     if (dt <= 0) return;
 
-    // 1. Steering & Nitro Input
-    const targetSteer = input.steer;
-    this.currentSteer = THREE.MathUtils.lerp(this.currentSteer, targetSteer, dt * 12.0);
+    // 1. Steering Input (smooth interpolation)
+    const targetSteer = THREE.MathUtils.clamp(input.steer, -1.0, 1.0);
+    this.currentSteer = THREE.MathUtils.lerp(this.currentSteer, targetSteer, Math.min(1.0, dt * 14.0));
 
-    // Nitro handling
+    // 2. Nitro Handling
     if (input.nitro && this.nitro > 0) {
       this.isNitroActive = true;
-      this.nitro = Math.max(0, this.nitro - 26.0 * dt);
+      this.nitro = Math.max(0, this.nitro - 28.0 * dt);
     } else {
       this.isNitroActive = false;
-      this.nitro = Math.min(this.nitroCapacity, this.nitro + 12.0 * dt);
+      this.nitro = Math.min(this.nitroCapacity, this.nitro + 14.0 * dt);
     }
 
-    // Top speed limit based on nitro
-    const maxForward = this.isNitroActive ? this.maxSpeedNitro : this.maxSpeedForward;
-    const accelRate = this.isNitroActive ? (this.acceleration * 2.2) : this.acceleration;
+    const topSpeed = this.isNitroActive ? this.maxSpeedNitro : this.maxSpeedForward;
+    const accelRate = this.isNitroActive ? (this.acceleration * 1.8) : this.acceleration;
 
-    // 2. Sample 4-wheel ground elevations
-    let groundHeightSum = 0;
-    let groundContactCount = 0;
-
-    const cosY = Math.cos(this.yaw);
-    const sinY = Math.sin(this.yaw);
-
-    // Calculate wheel world positions
-    for (let i = 0; i < 4; i++) {
-      const off = this.wheelOffsets[i];
-      // Rotate offset by current yaw
-      const wx = this.position.x + (off.x * cosY + off.z * sinY);
-      const wz = this.position.z + (-off.x * sinY + off.z * cosY);
-      const gy = getMarsHeight(wx, wz);
-
-      const contact = this.wheelContacts[i];
-      contact.groundPoint.set(wx, gy, wz);
-
-      const wheelY = this.position.y + off.y;
-      const distToGround = wheelY - gy;
-
-      if (distToGround <= this.wheelRadius + 0.3) {
-        contact.onGround = true;
-        contact.compression = Math.max(0, (this.wheelRadius + 0.3) - distToGround);
-        groundContactCount++;
-      } else {
-        contact.onGround = false;
-        contact.compression = 0;
-      }
-
-      groundHeightSum += gy;
-    }
-
-    const avgGroundHeight = groundHeightSum / 4.0;
-    const centerGroundHeight = getMarsHeight(this.position.x, this.position.z);
-    const targetGroundY = Math.max(avgGroundHeight, centerGroundHeight);
-
-    this.onGroundCount = groundContactCount;
-    this.isAirborne = (this.position.y > targetGroundY + this.rideHeight + 0.5);
-
-    // 3. Ground / Airborne Suspension & Vertical Dynamics
-    if (!this.isAirborne) {
-      // Soft spring-damper to target ride height
-      const currentHeight = this.position.y - targetGroundY;
-      const heightError = this.rideHeight - currentHeight;
-
-      if (heightError > 0) {
-        // Pushing up against ground
-        this.verticalVelocity += heightError * 48.0 * dt;
-        this.verticalVelocity -= this.verticalVelocity * 10.0 * dt; // damping
-      } else {
-        // Natural settling with Mars gravity
-        this.verticalVelocity -= this.gravity * dt;
-      }
-
-      // Hard floor clamp to prevent clipping into dunes
-      if (this.position.y < targetGroundY + this.rideHeight * 0.8) {
-        this.position.y = targetGroundY + this.rideHeight * 0.8;
-        if (this.verticalVelocity < 0) this.verticalVelocity = 0;
-      }
-    } else {
-      // Airborne in low Mars gravity
-      this.verticalVelocity -= this.gravity * dt;
-    }
-
-    // Apply vertical displacement
-    this.position.y += this.verticalVelocity * dt;
-
-    // 4. Longitudinal Drive (Acceleration & Braking)
+    // 3. Longitudinal Acceleration & Braking
     if (!this.isAirborne) {
       if (input.throttle > 0) {
-        // Driving Forward
-        if (this.speed < maxForward) {
+        if (this.speed < topSpeed) {
           this.speed += accelRate * input.throttle * dt;
         }
       } else if (input.throttle < 0) {
-        // Reverse or Braking
         if (this.speed > 0.5) {
-          this.speed -= this.brakeForce * dt; // Brake first if moving forward
+          // Firm brake
+          this.speed = Math.max(0, this.speed - this.brakeForce * dt);
         } else {
-          // Drive reverse
+          // Reverse
           if (this.speed > -this.maxSpeedReverse) {
-            this.speed -= this.acceleration * 0.7 * dt;
+            this.speed -= this.acceleration * 0.75 * dt;
           }
         }
       } else {
-        // Coasting & Rolling resistance
-        const coastDrag = 5.0 * dt;
-        if (Math.abs(this.speed) < coastDrag) {
+        // Natural rolling resistance
+        const coast = 6.0 * dt;
+        if (Math.abs(this.speed) <= coast) {
           this.speed = 0;
         } else {
-          this.speed -= Math.sign(this.speed) * coastDrag;
+          this.speed -= Math.sign(this.speed) * coast;
         }
       }
 
       // Handbrake
       if (input.handbrake) {
-        const hbDrag = this.brakeForce * 1.5 * dt;
-        if (Math.abs(this.speed) < hbDrag) {
+        const hb = this.brakeForce * 1.5 * dt;
+        if (Math.abs(this.speed) <= hb) {
           this.speed = 0;
         } else {
-          this.speed -= Math.sign(this.speed) * hbDrag;
+          this.speed -= Math.sign(this.speed) * hb;
+        }
+        // Lateral rally drift slip
+        if (Math.abs(this.speed) > 6.0 && Math.abs(this.currentSteer) > 0.1) {
+          this.lateralVelocity += -this.currentSteer * 12.0 * dt;
         }
       }
     } else {
-      // In air, slight forward air drag
+      // In air, subtle drag
       this.speed -= this.speed * 0.05 * dt;
     }
 
-    // 5. Steering & Yaw Rotation
-    if (!this.isAirborne) {
-      // Steering response depends on speed (cannot turn when completely still)
-      const speedFactor = Math.min(1.0, Math.abs(this.speed) / 4.0);
-      const reverseMultiplier = this.speed < 0 ? -1.0 : 1.0;
-      const turnDelta = -this.currentSteer * this.turnSpeed * speedFactor * reverseMultiplier * dt;
-      this.yaw += turnDelta;
+    // Lateral slip decay (firm grip on sand)
+    this.lateralVelocity *= Math.pow(0.82, dt * 60.0);
+    this.lateralVelocity = THREE.MathUtils.clamp(this.lateralVelocity, -6.0, 6.0);
 
-      // Lateral slip & Drift physics
-      const grip = input.handbrake ? 0.82 : 0.95;
-      this.lateralVelocity *= Math.pow(grip, dt * 60.0);
-
-      // Centrifugal slip when turning sharply at speed
-      const slipForce = this.speed * turnDelta * 8.0;
-      this.lateralVelocity += slipForce;
-    } else {
-      // Airborne pitch/roll air assist
-      if (input.steer !== 0) {
-        this.yaw += -input.steer * 0.8 * dt;
-      }
+    // 4. Steering & Heading (Yaw)
+    // Steering direction: steer > 0 (right) turns towards +X (yaw increases)
+    if (Math.abs(this.speed) > 0.05) {
+      const steerDir = this.speed >= 0 ? 1.0 : -1.0;
+      const speedFactor = THREE.MathUtils.clamp(Math.abs(this.speed) / 5.0, 0.25, 1.0);
+      const highSpeedStability = Math.max(0.65, 1.0 - (Math.abs(this.speed) / this.maxSpeedNitro) * 0.35);
+      const turnRate = this.turnSpeed * speedFactor * highSpeedStability * steerDir;
+      this.yaw += this.currentSteer * turnRate * dt;
+    } else if (input.throttle !== 0 && Math.abs(this.currentSteer) > 0.1) {
+      // Pivot turn from standstill
+      this.yaw += this.currentSteer * 1.5 * Math.sign(input.throttle) * dt;
     }
 
-    // 6. Pitch and Roll Alignment
-    if (!this.isAirborne) {
-      // Align with terrain slope normal
-      const normal = getMarsNormal(this.position.x, this.position.z);
-      // Slope pitch (forward/back) and roll (left/right)
-      const targetPitch = -(normal.z * cosY - normal.x * sinY) * 0.9;
-      const targetRoll = (-normal.x * cosY - normal.z * sinY) * 0.9;
+    // 5. Update Direction Vectors
+    const sinY = Math.sin(this.yaw);
+    const cosY = Math.cos(this.yaw);
 
-      // Dynamic chassis pitch on acceleration & braking
-      const accelPitch = (input.throttle * -0.06);
-
-      this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch + accelPitch, dt * 8.0);
-      this.roll = THREE.MathUtils.lerp(this.roll, targetRoll, dt * 8.0);
-    } else {
-      // Airborne leveling
-      this.pitch = THREE.MathUtils.lerp(this.pitch, 0, dt * 2.0);
-      this.roll = THREE.MathUtils.lerp(this.roll, 0, dt * 2.0);
-    }
-
-    // In-Flight / Emergency Assist ('R' key or on-screen button)
-    if (input.assist) {
-      this.pitch = THREE.MathUtils.lerp(this.pitch, 0, dt * 14.0);
-      this.roll = THREE.MathUtils.lerp(this.roll, 0, dt * 14.0);
-      this.verticalVelocity = Math.max(0, this.verticalVelocity);
-      if (this.position.y < targetGroundY + 1.2) {
-        this.position.y = targetGroundY + 1.2;
-      }
-    }
-
-    // 7. Update Position from Forward & Lateral Velocity
     this._vForward.set(sinY, 0, cosY);
     this._vRight.set(cosY, 0, -sinY);
     this._vUp.set(0, 1, 0);
 
-    const fwdMove = this._vForward.clone().multiplyScalar(this.speed * dt);
-    const latMove = this._vRight.clone().multiplyScalar(this.lateralVelocity * dt);
+    // 6. Horizontal Displacement (X and Z)
+    const fwdMoveX = sinY * this.speed * dt;
+    const fwdMoveZ = cosY * this.speed * dt;
+    const latMoveX = cosY * this.lateralVelocity * dt;
+    const latMoveZ = -sinY * this.lateralVelocity * dt;
 
-    this.position.add(fwdMove).add(latMove);
+    this.position.x += fwdMoveX + latMoveX;
+    this.position.z += fwdMoveZ + latMoveZ;
 
-    // Compute total linear velocity
-    this.velocity.set(
-      (this._vForward.x * this.speed + this._vRight.x * this.lateralVelocity),
-      this.verticalVelocity,
-      (this._vForward.z * this.speed + this._vRight.z * this.lateralVelocity)
-    );
+    // 7. Ground Adherence & Vertical Suspension (Y)
+    const centerGroundY = getMarsHeight(this.position.x, this.position.z);
+    const targetY = centerGroundY + this.rideHeight;
 
-    // 8. Construct Rover Quaternion (Yaw * Pitch * Roll)
+    if (!this.isAirborne) {
+      const heightDiff = targetY - this.position.y;
+
+      if (heightDiff > 0) {
+        // Ground is rising up: push up instantly with smooth compliance
+        this.position.y = THREE.MathUtils.lerp(this.position.y, targetY, Math.min(1.0, dt * 35.0));
+        // Hard floor clamp to completely prevent sinking
+        if (this.position.y < targetY) {
+          this.position.y = targetY;
+        }
+        this.verticalVelocity = 0;
+      } else {
+        // Ground is falling away underneath
+        // Check for genuine jump over a crest at high speed
+        if (heightDiff < -0.4 && Math.abs(this.speed) > 18.0) {
+          this.isAirborne = true;
+          // Jump launch momentum based on speed and slope angle
+          this.verticalVelocity = Math.min(8.0, Math.max(1.0, -this.pitch * this.speed * 0.35));
+        } else {
+          // Follow terrain down closely
+          this.position.y = THREE.MathUtils.lerp(this.position.y, targetY, Math.min(1.0, dt * 25.0));
+          this.verticalVelocity = 0;
+        }
+      }
+    } else {
+      // Airborne in flight
+      this.verticalVelocity -= this.gravity * dt;
+      this.position.y += this.verticalVelocity * dt;
+
+      // Landing touchdown detection
+      if (this.position.y <= targetY) {
+        this.position.y = targetY;
+        this.verticalVelocity = 0;
+        this.isAirborne = false;
+      }
+    }
+
+    this.onGroundCount = this.isAirborne ? 0 : 4;
+
+    // 8. Terrain Normal Alignment (Pitch & Roll)
+    if (!this.isAirborne) {
+      const normal = getMarsNormal(this.position.x, this.position.z);
+      // Pitch aligns with forward slope: nose up when rising, nose down when descending
+      const targetPitch = (normal.x * sinY + normal.z * cosY);
+      // Roll aligns with side slope: right side up when terrain rises to the right
+      const targetRoll = -(normal.x * cosY - normal.z * sinY);
+
+      // Subtle dynamic chassis tilt on acceleration/braking
+      const accelPitch = (input.throttle * -0.035);
+
+      this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch + accelPitch, Math.min(1.0, dt * 14.0));
+      this.roll = THREE.MathUtils.lerp(this.roll, targetRoll, Math.min(1.0, dt * 14.0));
+    } else {
+      // Auto-leveling while airborne
+      this.pitch = THREE.MathUtils.lerp(this.pitch, 0, Math.min(1.0, dt * 4.0));
+      this.roll = THREE.MathUtils.lerp(this.roll, 0, Math.min(1.0, dt * 4.0));
+    }
+
+    // Emergency Assist ('R' key or on-screen Assist button)
+    if (input.assist) {
+      this.pitch = THREE.MathUtils.lerp(this.pitch, 0, Math.min(1.0, dt * 20.0));
+      this.roll = THREE.MathUtils.lerp(this.roll, 0, Math.min(1.0, dt * 20.0));
+      if (this.isAirborne) {
+        this.verticalVelocity = Math.min(0, this.verticalVelocity); // fast descent
+      }
+    }
+
+    // 9. Construct Rover Quaternion
     const euler = new THREE.Euler(this.pitch, this.yaw, this.roll, 'YXZ');
     this.quaternion.setFromEuler(euler);
 
-    // 9. Update Telemetry
+    // 10. Update Telemetry
     this.speedKmh = Math.abs(Math.round(this.speed * 3.6));
     this.distanceTraveled += Math.abs(this.speed) * dt;
 
-    // 10. Update 3D Rover Model
+    this.velocity.set(
+      (sinY * this.speed + cosY * this.lateralVelocity),
+      this.verticalVelocity,
+      (cosY * this.speed - sinY * this.lateralVelocity)
+    );
+
+    // 11. Update 3D Model Group
     this.model.group.position.copy(this.position);
     this.model.group.quaternion.copy(this.quaternion);
 
-    // Wheel visual rotations and steering
+    // 12. Wheel Visual Rotations and Steering
     const circumference = 2 * Math.PI * this.wheelRadius;
     const rotDelta = (this.speed * dt) / circumference * (Math.PI * 2);
     this.wheelRotation += rotDelta;
@@ -291,17 +267,26 @@ export class MarsRoverPhysics {
     for (let i = 0; i < 4; i++) {
       const assembly = this.model.wheelAssemblies[i];
       if (assembly.isFront) {
-        assembly.pivot.rotation.y = this.currentSteer * this.steerAngleVisual;
+        // Front wheels pivot with steering
+        assembly.pivot.rotation.y = -this.currentSteer * this.steerAngleVisual;
       }
       assembly.wheelContainer.rotation.x = this.wheelRotation;
+
+      // Update contact points for tire particle emitters
+      const off = this.wheelOffsets[i];
+      const wx = this.position.x + (off.x * cosY + off.z * sinY);
+      const wz = this.position.z + (-off.x * sinY + off.z * cosY);
+      const gy = getMarsHeight(wx, wz);
+      this.wheelContacts[i].groundPoint.set(wx, gy, wz);
+      this.wheelContacts[i].onGround = !this.isAirborne;
     }
 
-    // Thruster glow
+    // 13. Visual Nitro Thruster
     this.model.setNitroVisuals(this.isNitroActive, this.nitro / this.nitroCapacity);
   }
 
   resetAt(x, z) {
-    const y = getMarsHeight(x, z) + 1.5;
+    const y = getMarsHeight(x, z) + this.rideHeight;
     this.position.set(x, y, z);
     this.speed = 0;
     this.verticalVelocity = 0;
@@ -311,5 +296,7 @@ export class MarsRoverPhysics {
     this.pitch = 0;
     this.roll = 0;
     this.quaternion.set(0, 0, 0, 1);
+    this.isAirborne = false;
+    this.onGroundCount = 4;
   }
 }

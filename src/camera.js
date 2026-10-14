@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getMarsHeight } from './terrain/noise.js';
 
 // Dynamic Multi-Mode Camera Controller with Smooth Damped Follow and Impact Shake
 export class MarsCameraController {
@@ -42,21 +43,26 @@ export class MarsCameraController {
 
     // Dynamic FOV widening during high speed & nitro
     const targetFov = this.baseFov + speedRatio * 14 + nitroFactor * 10;
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * 6);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1.0, dt * 6.0));
     this.camera.updateProjectionMatrix();
 
-    // Smoothly follow rover yaw
+    // Initialize immediately on first frame
+    if (!this.initialized) {
+      this.cameraYaw = physics.yaw;
+    }
+
+    // Smoothly follow rover yaw via shortest angle
     let angleDiff = physics.yaw - this.cameraYaw;
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-    this.cameraYaw += angleDiff * Math.min(1.0, dt * 5.0);
+    this.cameraYaw += angleDiff * Math.min(1.0, dt * 6.0);
 
     const cosY = Math.cos(this.cameraYaw);
     const sinY = Math.sin(this.cameraYaw);
 
     if (mode === 'CHASE') {
       const distBehind = 8.5 + speedRatio * 2.0;
-      const heightAbove = 3.8;
+      const heightAbove = 3.6;
 
       this.targetPos.set(
         roverPos.x - sinY * distBehind,
@@ -65,21 +71,18 @@ export class MarsCameraController {
       );
 
       this.targetLook.set(
-        roverPos.x + sinY * 4.0,
-        roverPos.y + 1.2,
-        roverPos.z + cosY * 4.0
+        roverPos.x + sinY * 3.5,
+        roverPos.y + 0.9,
+        roverPos.z + cosY * 3.5
       );
-
-      const lerpPos = Math.min(1.0, dt * 8.0);
-      const lerpLook = Math.min(1.0, dt * 10.0);
 
       if (!this.initialized) {
         this.currentPos.copy(this.targetPos);
         this.currentLook.copy(this.targetLook);
         this.initialized = true;
       } else {
-        this.currentPos.lerp(this.targetPos, lerpPos);
-        this.currentLook.lerp(this.targetLook, lerpLook);
+        this.currentPos.lerp(this.targetPos, Math.min(1.0, dt * 8.0));
+        this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 10.0));
       }
 
     } else if (mode === 'CLOSE') {
@@ -93,16 +96,22 @@ export class MarsCameraController {
       );
 
       this.targetLook.set(
-        roverPos.x + sinY * 5.0,
-        roverPos.y + 0.9,
-        roverPos.z + cosY * 5.0
+        roverPos.x + sinY * 4.0,
+        roverPos.y + 0.8,
+        roverPos.z + cosY * 4.0
       );
 
-      this.currentPos.lerp(this.targetPos, Math.min(1.0, dt * 12.0));
-      this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 14.0));
+      if (!this.initialized) {
+        this.currentPos.copy(this.targetPos);
+        this.currentLook.copy(this.targetLook);
+        this.initialized = true;
+      } else {
+        this.currentPos.lerp(this.targetPos, Math.min(1.0, dt * 12.0));
+        this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 14.0));
+      }
 
     } else if (mode === 'COCKPIT') {
-      // Mount in front cabin visor
+      // Windshield visor view
       this.targetPos.set(
         roverPos.x + sinY * 0.8,
         roverPos.y + 1.2,
@@ -118,11 +127,11 @@ export class MarsCameraController {
       this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 20.0));
 
     } else if (mode === 'DRONE') {
-      // High bird's eye view
+      // High bird's-eye view
       this.targetPos.set(
-        roverPos.x - sinY * 18.0,
-        roverPos.y + 26.0,
-        roverPos.z - cosY * 18.0
+        roverPos.x - sinY * 16.0,
+        roverPos.y + 24.0,
+        roverPos.z - cosY * 16.0
       );
       this.targetLook.copy(roverPos);
 
@@ -130,15 +139,21 @@ export class MarsCameraController {
       this.currentLook.lerp(this.targetLook, Math.min(1.0, dt * 6.0));
     }
 
-    // Camera impact shake
+    // Terrain collision clamp so camera never dips underground
+    const camGround = getMarsHeight(this.currentPos.x, this.currentPos.z);
+    if (this.currentPos.y < camGround + 1.2) {
+      this.currentPos.y = camGround + 1.2;
+    }
+
+    // Camera impact & nitro vibration shake
     if (physics.isNitroActive) {
-      this.shakeIntensity = Math.max(this.shakeIntensity, 0.12);
+      this.shakeIntensity = Math.max(this.shakeIntensity, 0.1);
     }
 
     if (this.shakeIntensity > 0.001) {
-      const sx = (Math.random() - 0.5) * this.shakeIntensity * 0.25;
-      const sy = (Math.random() - 0.5) * this.shakeIntensity * 0.25;
-      const sz = (Math.random() - 0.5) * this.shakeIntensity * 0.25;
+      const sx = (Math.random() - 0.5) * this.shakeIntensity * 0.2;
+      const sy = (Math.random() - 0.5) * this.shakeIntensity * 0.2;
+      const sz = (Math.random() - 0.5) * this.shakeIntensity * 0.2;
       this.camera.position.set(
         this.currentPos.x + sx,
         this.currentPos.y + sy,

@@ -7,14 +7,20 @@ export default function MarsCanvas() {
 
   useEffect(() => {
     let engine = null;
+    let isMounted = true;
 
     import('../game/engine.js').then(({ MarsGameEngine }) => {
-      if (containerRef.current) {
+      if (isMounted && containerRef.current) {
+        // Clear any previous canvas children
+        while (containerRef.current.firstChild) {
+          containerRef.current.removeChild(containerRef.current.firstChild);
+        }
         engine = new MarsGameEngine(containerRef.current);
       }
     });
 
     return () => {
+      isMounted = false;
       if (engine) {
         engine.destroy();
       }

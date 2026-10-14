@@ -106,59 +106,38 @@ export function fbm(x, y, octaves = 4, lacunarity = 2.0, gain = 0.5) {
 }
 
 // Procedural Martian dune height formula:
-// Combines broad rolling hills, wind-carved asymmetric barchan dunes,
-// sharp slip-faces, and occasional impact craters.
+// 100% mathematically continuous (no sudden steps, no grid boundaries)
+// Produces sweeping barchan dune fields with wind ripples and rolling plains
 export function getMarsHeight(x, z) {
-  // Broad regional topography (huge Martian plains and rolling crater rims)
-  const macro = fbm(x * 0.0006, z * 0.0006, 3, 2.1, 0.45) * 65.0;
+  // 1. Broad regional topography (huge Martian undulating plains & rolling highlands)
+  const macro = fbm(x * 0.0004, z * 0.0004, 3, 2.0, 0.45) * 45.0;
 
-  // Primary dune fields (oriented by Martian prevailing winds)
-  // Dune angle ~ 35 degrees
-  const angle = 0.62;
+  // 2. Primary Martian dune fields (oriented along prevailing wind ~36 degrees)
+  const angle = 0.63;
   const cosA = Math.cos(angle);
   const sinA = Math.sin(angle);
   const wx = x * cosA - z * sinA;
   const wz = x * sinA + z * cosA;
 
-  // Dune wave wavelength ~ 70m
-  const duneFreq = 0.015;
-  const duneWarp = simplex2D(wx * 0.004, wz * 0.004) * 8.0;
-  const wave = Math.sin((wz + duneWarp) * duneFreq);
+  // Dune wave wavelength ~ 80m, with undulating serpentine dune crests
+  const duneWarp = simplex2D(wx * 0.003, wz * 0.003) * 10.0;
+  const wave = Math.sin((wz + duneWarp) * 0.015);
 
-  // Asymmetric dune profile (gradual windward slope, steeper slip face)
+  // Asymmetric barchan dune profile: gentle windward ramp, steeper slip face
   let duneProfile = (wave + 1.0) * 0.5;
-  duneProfile = Math.pow(duneProfile, 1.4); // sharper crests
-  // Modulation so dunes gather in large fields (ergs) and leave some flat desert plates
-  const ergMask = (simplex2D(x * 0.0018, z * 0.0018) + 1.0) * 0.5;
-  const dunes = duneProfile * 16.0 * ergMask;
+  duneProfile = Math.pow(duneProfile, 1.35);
 
-  // Medium scale Martian ridges & mounds
-  const ridges = Math.abs(simplex2D(x * 0.0045, z * 0.0045)) * 12.0;
+  // Erg mask: dunes gather into large regional dune fields with open flats
+  const ergMask = (simplex2D(x * 0.0012, z * 0.0012) + 1.0) * 0.5;
+  const dunes = (duneProfile * 15.0 - 5.0) * ergMask;
 
-  // Micro wind-ripples
-  const micro = simplex2D(x * 0.04, z * 0.04) * 0.6;
+  // 3. Medium rolling ridges
+  const ridges = simplex2D(x * 0.004, z * 0.004) * 6.0;
 
-  // Crater carving (occasional subtle craters)
-  const craterCellX = Math.floor(x / 400);
-  const craterCellZ = Math.floor(z / 400);
-  const cx = craterCellX * 400 + 200 + simplex2D(craterCellX * 13.1, craterCellZ * 7.7) * 80;
-  const cz = craterCellZ * 400 + 200 + simplex2D(craterCellX * 5.3, craterCellZ * 19.4) * 80;
-  const distToCrater = Math.hypot(x - cx, z - cz);
-  const craterRadius = 90.0;
-  let craterEffect = 0;
-  if (distToCrater < craterRadius * 1.8) {
-    const nd = distToCrater / craterRadius;
-    if (nd < 1.0) {
-      // Crater bowl
-      craterEffect = -Math.cos((nd * Math.PI) / 2) * 8.0;
-    } else {
-      // Raised crater rim
-      const rimFactor = Math.sin(((nd - 1.0) / 0.8) * Math.PI);
-      craterEffect = rimFactor * 3.5;
-    }
-  }
+  // 4. Fine wind ripple surface texture
+  const ripples = Math.sin((wz * 0.2) + simplex2D(x * 0.015, z * 0.015) * 2.0) * 0.35;
 
-  return macro + dunes + ridges + micro + craterEffect;
+  return macro + dunes + ridges + ripples;
 }
 
 // Compute analytical or central difference normal for physical terrain query
