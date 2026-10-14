@@ -5,6 +5,7 @@ export class MarsAtmosphere {
   constructor(scene) {
     this.scene = scene;
     this.createSky();
+    this.createDistantMountains();
     this.createMoons();
     this.createWindDust();
     this.createVehicleParticles();
@@ -17,8 +18,8 @@ export class MarsAtmosphere {
       side: THREE.BackSide,
       uniforms: {
         uSunPos: { value: new THREE.Vector3(0.5, 0.45, 0.4).normalize() },
-        uSkyZenith: { value: new THREE.Color(0xb56345) },     // Deep Mars butterscotch/terracotta
-        uSkyHorizon: { value: new THREE.Color(0xe89974) },    // Warm dusty peach horizon
+        uSkyZenith: { value: new THREE.Color(0xb25d40) },     // Authentic Martian butterscotch/terracotta
+        uSkyHorizon: { value: new THREE.Color(0xda8e6c) },    // Matching terrain horizon dust haze
         uSunColor: { value: new THREE.Color(0xfff5e6) },      // Brilliant Martian sun
         uSunHaloBlue: { value: new THREE.Color(0x5ca0d3) }    // Signature Mars twilight blue scattering halo
       },
@@ -83,6 +84,47 @@ export class MarsAtmosphere {
 
     this.ambientLight = new THREE.AmbientLight(0x4a2a22, 1.2);
     this.scene.add(this.ambientLight);
+  }
+
+  createDistantMountains() {
+    // 360-degree distant Martian mountain silhouettes (Olympus Mons caldera peak and crater rims)
+    const segs = 64;
+    const radius = 950.0;
+    const geo = new THREE.BufferGeometry();
+    const positions = [];
+
+    for (let i = 0; i < segs; i++) {
+      const theta1 = (i / segs) * Math.PI * 2;
+      const theta2 = ((i + 1) / segs) * Math.PI * 2;
+
+      // Olympus Mons silhouette peak at ~45 degrees, rolling crater rims around
+      const h1 = 30.0 + Math.sin(theta1 * 3.0) * 18.0 + Math.pow(Math.max(0, Math.cos(theta1 - 0.78)), 4.0) * 90.0;
+      const h2 = 30.0 + Math.sin(theta2 * 3.0) * 18.0 + Math.pow(Math.max(0, Math.cos(theta2 - 0.78)), 4.0) * 90.0;
+
+      const x1 = Math.cos(theta1) * radius;
+      const z1 = Math.sin(theta1) * radius;
+      const x2 = Math.cos(theta2) * radius;
+      const z2 = Math.sin(theta2) * radius;
+
+      // Triangle 1
+      positions.push(x1, -15, z1);
+      positions.push(x1, h1, z1);
+      positions.push(x2, h2, z2);
+
+      // Triangle 2
+      positions.push(x1, -15, z1);
+      positions.push(x2, h2, z2);
+      positions.push(x2, -15, z2);
+    }
+
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xc87352,
+      side: THREE.DoubleSide
+    });
+
+    this.distantMountains = new THREE.Mesh(geo, mat);
+    this.scene.add(this.distantMountains);
   }
 
   createMoons() {
@@ -249,8 +291,11 @@ export class MarsAtmosphere {
   }
 
   update(dt, playerPos, physics) {
-    // 1. Anchor skydome and directional light to player
+    // 1. Anchor skydome, distant mountains and directional light to player
     this.skyMesh.position.copy(playerPos);
+    if (this.distantMountains) {
+      this.distantMountains.position.set(playerPos.x, 0, playerPos.z);
+    }
     this.sunLight.position.set(playerPos.x + 300, 350, playerPos.z + 240);
     this.sunLight.target.position.copy(playerPos);
 

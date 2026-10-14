@@ -35,8 +35,8 @@ export default function MarsCanvas() {
       <div id="hud-layer">
         {/* Top-Left Branding */}
         <div className="top-left-brand">
-          <span className="brand-text">drune.io</span>
-          <span className="sub-brand">MARS EXPEDITION</span>
+          <span className="brand-text">DUNES</span>
+          <span className="sub-brand">RED PLANET EXPEDITION</span>
         </div>
 
         {/* Top-Right Settings Gear */}
@@ -123,7 +123,7 @@ export default function MarsCanvas() {
             </div>
 
             <div className="setting-item">
-              <label htmlFor="toggle-grid">Surveyor Topo Grid (drune style)</label>
+              <label htmlFor="toggle-grid">Surveyor Topographical Grid</label>
               <input type="checkbox" id="toggle-grid" defaultChecked />
             </div>
 
@@ -138,7 +138,7 @@ export default function MarsCanvas() {
             </div>
           </div>
           <div className="modal-footer">
-            <p>Mars Gravity: 3.72 m/s² · Atmosphere: CO₂ / Dust Haze · drune.io inspired</p>
+            <p>Mars Surface Simulation · Atmosphere: CO₂ / Dust Haze · DUNES</p>
           </div>
         </div>
       </div>

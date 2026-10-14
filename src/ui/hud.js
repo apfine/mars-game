@@ -36,12 +36,7 @@ export class MarsHUD {
   }
 
   initPredefinedWaypoints() {
-    // A few initial mystery landmarks to explore like drune.io's "? · 4.3 km"
-    this.predefinedPOIs = [
-      { name: '?', position: new THREE.Vector3(1200, 0, 1800), isMystery: true },
-      { name: '?', position: new THREE.Vector3(-2400, 0, 3100), isMystery: true },
-      { name: 'Opportunity Relic', position: new THREE.Vector3(-850, 0, -1200), isMystery: false }
-    ];
+    this.predefinedPOIs = [];
   }
 
   initMobileTouch() {
@@ -291,8 +286,13 @@ export class MarsHUD {
         continue;
       }
 
-      const km = (wp.dist / 1000).toFixed(1);
-      const label = wp.isMystery ? `○ ? · ${km} km` : `📍 ${wp.name} · ${km} km`;
+      let distLabel = '';
+      if (wp.dist < 1000) {
+        distLabel = `${Math.round(wp.dist)} m`;
+      } else {
+        distLabel = `${(wp.dist / 1000).toFixed(1)} km`;
+      }
+      const label = `📍 ${wp.name} · ${distLabel}`;
 
       html += `<div class="waypoint-badge" style="transform: translate(${screenX}px, ${screenY}px);">${label}</div>`;
     }

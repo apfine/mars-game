@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Mars Dunes - Infinite Driving Game',
-  description: 'Infinite procedurally generated Mars dune driving simulator with realistic physics, nitro boost, and atmospheric scattering.'
+  title: 'DUNES - Infinite Mars Driving Simulator',
+  description: 'Infinite procedurally generated Mars dune driving simulator with realistic physics, nitro boost, authentic Mars exploration monuments, and atmospheric scattering.'
 };
 
 export const viewport = {
