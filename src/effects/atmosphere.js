@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getMarsHeight, getMarsNormal } from '../terrain/noise.js';
 import { SoftParticlePool } from './particles.js';
+import { PostLaunchSpace } from './postLaunchSpace.js';
 
 const SUN_DIR = new THREE.Vector3(0.5, 0.65, 0.45).normalize();
 
@@ -18,6 +19,8 @@ export class MarsAtmosphere {
     this.createWindDust();
     this.createVehicleParticles();
     this.createDustDevils();
+    this.createFlightAtmosphere();
+    this.postLaunchSpace = new PostLaunchSpace(this.scene, new THREE.Vector2(1400, 1150));
   }
 
   setQuality(preset) {
@@ -40,10 +43,11 @@ export class MarsAtmosphere {
         uTime: { value: 0 },
         uSunPos: { value: SUN_DIR.clone() },
         uSkyZenith: { value: new THREE.Color(0xcd8a66) },     // Butterscotch overhead
-        uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Pale dusty salmon horizon (matches terrain haze + scene fog)
+        uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Pale dusty salmon horizon
         uSunColor: { value: new THREE.Color(0xfff5e6) },      // Brilliant Martian sun
         uSunHaloBlue: { value: new THREE.Color(0x5ca0d3) },   // Signature Mars twilight blue scattering halo
-        uSpaceFade: { value: 0.0 }                            // 0 = surface, 1 = orbit/space
+        uSpaceFade: { value: 0.0 },                           // 0 = surface, 1 = orbit/space
+        uAltitude: { value: 0.0 }                             // vehicle altitude in meters
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -61,87 +65,62 @@ export class MarsAtmosphere {
         uniform vec3 uSunColor;
         uniform vec3 uSunHaloBlue;
         uniform float uSpaceFade;
+        uniform float uAltitude;
         varying vec3 vWorldPosition;
-
-        float h11(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-        float vn(vec2 p) {
-          vec2 i = floor(p); vec2 f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(h11(i), h11(i + vec2(1.0, 0.0)), f.x),
-                     mix(h11(i + vec2(0.0, 1.0)), h11(i + vec2(1.0, 1.0)), f.x), f.y);
-        }
-
-        float fbm2(vec2 p) {
-          float a = 0.5; float s = 0.0;
-          for (int i = 0; i < 4; i++) { s += a * vn(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; }
-          return s;
-        }
 
         void main() {
           vec3 dir = normalize(vWorldPosition);
-          float e = max(dir.y, 0.0);
           vec3 sunDir = normalize(uSunPos);
-
-          // 1. Martian Atmospheric Gradient
-          // Mars atmosphere is thin: concentrated near the horizon (e < 0.25).
-          // As altitude increases (uSpaceFade -> 1.0), this compresses into a razor-thin planetary limb.
-          float atmoCompression = mix(4.8, 36.0, uSpaceFade);
-          float atmoDensity = exp(-e * atmoCompression) * (1.0 - uSpaceFade * 0.95);
-
-          // Atmospheric color gradient: warm dusty salmon at horizon blending towards butterscotch
-          vec3 atmoCol = mix(uSkyHorizon, uSkyZenith, clamp(e * 2.8, 0.0, 1.0));
-
-          // Forward-scattered dust illumination on the sun-facing side
           float sc = max(dot(dir, sunDir), 0.0);
-          atmoCol += vec3(0.28, 0.18, 0.12) * pow(sc, 3.0) * atmoDensity;
 
-          // 2. Pure pitch-black space directly after the Martian gradient
-          vec3 spaceBlack = vec3(0.0005, 0.0007, 0.0016);
-          vec3 sky = mix(spaceBlack, atmoCol, clamp(atmoDensity, 0.0, 1.0));
+          // 1. Natural Planetary Atmospheric Scattering (No blackhole pinhole distortion!)
+          // At surface: amber/salmon horizon and butterscotch zenith.
+          // As altitude increases, atmospheric optical thickness decays exponentially
+          // with altitude without squeezing or compressing the sky geometry.
+          float atmoFade = exp(-max(0.0, uAltitude) / 13500.0);
+          float horizonFade = smoothstep(-0.4, 0.05, dir.y);
 
-          // 3. Wispy water-ice cirrus clouds hugging the lower atmosphere
-          if (uSpaceFade < 0.85 && e < 0.35) {
-            vec2 cp = dir.xz / (dir.y + 0.28);
-            vec2 wind = vec2(uTime * 0.010, uTime * 0.004);
-            vec2 q = cp * vec2(0.9, 2.6) + wind;
-            float c1 = fbm2(q + fbm2(q * 0.7) * 1.2);
-            float cloud = smoothstep(0.50, 0.78, c1) * smoothstep(0.02, 0.18, e) * (1.0 - smoothstep(0.24, 0.38, e));
-            vec3 cloudCol = mix(vec3(0.95, 0.74, 0.62), vec3(1.0, 0.92, 0.84), pow(sc, 2.0));
-            sky = mix(sky, cloudCol, clamp(cloud * 0.22, 0.0, 0.30) * (1.0 - uSpaceFade));
-          }
+          // Base atmospheric colors
+          vec3 atmoCol = mix(uSkyHorizon, uSkyZenith, clamp(dir.y * 1.6 + 0.1, 0.0, 1.0));
+          atmoCol += vec3(0.24, 0.16, 0.10) * pow(sc, 2.5);
 
-          // 4. Mars forward-scattering: twilight blue corona around the sun
-          float blueHalo = pow(sc, 16.0) * 0.25 * (1.0 - uSpaceFade * 0.7);
+          // Deep inky space black
+          vec3 spaceBlack = vec3(0.0004, 0.0006, 0.0014);
+
+          // Blend atmosphere towards space as rocket climbs
+          vec3 sky = mix(spaceBlack, atmoCol, clamp(atmoFade * 1.2 * horizonFade, 0.0, 1.0));
+
+          // 2. Cosmic Space: 3D curved Mars globe with realistic terrain & airglow renders below the vehicle
+
+          // 3. Martian Mie Twilight Blue Corona around the sun
+          float blueHalo = pow(sc, 14.0) * 0.26 * atmoFade;
           sky = mix(sky, uSunHaloBlue, blueHalo);
 
-          // Solar glare and disk
-          float glare = pow(sc, 8.0) * 0.32 + pow(sc, 45.0) * 0.7 + pow(sc, 450.0) * 2.0;
-          sky += uSunColor * glare * (1.0 - uSpaceFade * 0.25);
-          float sunDisk = smoothstep(0.9988, 0.9996, sc);
-          sky += uSunColor * sunDisk * 1.6;
+          // 4. Solar disk and glare
+          float solarGlare = pow(sc, 6.0) * 0.35 + pow(sc, 35.0) * 0.85 + pow(sc, 300.0) * 2.2;
+          sky += uSunColor * solarGlare;
+          float sunDisk = smoothstep(0.9990, 0.9997, sc);
+          sky += uSunColor * sunDisk * 1.8;
 
-          // 5. Starfield visible in the black of space (zenith from surface & entire sky in orbit)
-          float starElevationMask = smoothstep(0.06, 0.30, e);
-          float starVisibility = max(uSpaceFade, starElevationMask * (1.0 - atmoDensity));
-
-          if (starVisibility > 0.01) {
+          // 5. Procedural Starfield & Milky Way visible as atmosphere thins
+          float starFactor = clamp(1.0 - atmoFade * 0.82, 0.0, 1.0);
+          if (starFactor > 0.02) {
             vec3 starDir = dir;
-            vec2 starCoord = floor(starDir.xz / (abs(starDir.y) + 0.12) * 280.0);
-            float starHash = h11(starCoord + vec2(17.3, 49.1));
-            float starBright = step(0.982, starHash) * pow(h11(starCoord * 3.1 + vec2(5.2, 9.4)), 3.5) * 2.4;
+            vec2 starCoord = floor(starDir.xz / (abs(starDir.y) + 0.08) * 320.0);
+            float starHash = fract(sin(dot(starCoord, vec2(127.1, 311.7))) * 43758.5453);
+            float isStar = step(0.980, starHash) * pow(fract(sin(dot(starCoord * 2.7, vec2(19.2, 53.4))) * 28419.1), 3.0) * 2.2;
 
-            // Twinkling effect
-            float twinkle = 0.82 + 0.18 * sin(uTime * 3.2 + starHash * 35.0);
+            float twinkle = 0.82 + 0.18 * sin(uTime * 3.5 + starHash * 40.0);
 
-            // Bright prominent navigational stars
-            vec2 majorCoord = floor(starDir.xz / (abs(starDir.y) + 0.12) * 85.0);
-            float majorHash = h11(majorCoord + vec2(83.1, 19.7));
-            float majorStar = step(0.991, majorHash) * 2.0;
+            vec2 cCoord = floor(starDir.xz / (abs(starDir.y) + 0.08) * 95.0);
+            float cHash = fract(sin(dot(cCoord, vec2(83.1, 19.7))) * 38291.3);
+            float majorStar = step(0.990, cHash) * 2.5;
 
-            vec3 starColor = mix(vec3(0.85, 0.92, 1.0), vec3(1.0, 0.94, 0.8), starHash);
-            vec3 stars = starColor * (starBright * twinkle + majorStar) * starVisibility;
+            vec3 starCol = mix(vec3(0.85, 0.92, 1.0), vec3(1.0, 0.92, 0.8), starHash);
+            sky += starCol * (isStar * twinkle + majorStar) * starFactor;
 
-            sky += stars;
+            float galacticPlane = 1.0 - smoothstep(0.0, 0.35, abs(dir.x * 0.6 + dir.y * 0.7 - dir.z * 0.35));
+            sky += vec3(0.08, 0.10, 0.15) * galacticPlane * starFactor * 0.35;
           }
 
           gl_FragColor = vec4(sky, 1.0);
@@ -349,6 +328,159 @@ export class MarsAtmosphere {
 
     this.createNitroPlumes();
     this.createTireTracks();
+  }
+
+  createFlightAtmosphere() {
+    this.flightAtmosphereGroup = new THREE.Group();
+    this.isFlight = false;
+
+    // Soft round procedural cloud texture (ZERO square artifacts!)
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0.0, 'rgba(255, 235, 218, 0.70)');
+    grad.addColorStop(0.38, 'rgba(235, 195, 175, 0.42)');
+    grad.addColorStop(0.72, 'rgba(215, 170, 150, 0.12)');
+    grad.addColorStop(1.0, 'rgba(195, 150, 130, 0.0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    const cloudTex = new THREE.CanvasTexture(cv);
+    cloudTex.colorSpace = THREE.SRGBColorSpace;
+
+    const cloudMat = new THREE.SpriteMaterial({
+      map: cloudTex,
+      color: 0xffe6d2,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      blending: THREE.NormalBlending
+    });
+
+    const cirrusMat = new THREE.SpriteMaterial({
+      map: cloudTex,
+      color: 0xeed6c8,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    // 1. Lower Atmospheric Cloud Deck (Y = 3,500m to 7,500m)
+    this.clouds = [];
+    const lowerCount = 55;
+    for (let i = 0; i < lowerCount; i++) {
+      const sprite = new THREE.Sprite(cloudMat);
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 180 + Math.random() * 3200;
+      const x = 1400 + Math.cos(angle) * radius;
+      const z = 1150 + Math.sin(angle) * radius;
+      const y = 3500 + Math.random() * 4000;
+      const scale = 420 + Math.random() * 480;
+      sprite.position.set(x, y, z);
+      sprite.scale.set(scale, scale * 0.42, 1);
+      this.flightAtmosphereGroup.add(sprite);
+      this.clouds.push(sprite);
+    }
+
+    // 2. High-Altitude Mesospheric Cirrus (Y = 18,000m to 24,000m)
+    const upperCount = 38;
+    for (let i = 0; i < upperCount; i++) {
+      const sprite = new THREE.Sprite(cirrusMat);
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 250 + Math.random() * 4200;
+      const x = 1400 + Math.cos(angle) * radius;
+      const z = 1150 + Math.sin(angle) * radius;
+      const y = 18000 + Math.random() * 6000;
+      const scale = 680 + Math.random() * 750;
+      sprite.position.set(x, y, z);
+      sprite.scale.set(scale, scale * 0.28, 1);
+      this.flightAtmosphereGroup.add(sprite);
+      this.clouds.push(sprite);
+    }
+
+    // 3. High-Speed Aerodynamic Vapor Streamers (Motion Parallax)
+    const streamerCount = 42;
+    const streamerGeo = new THREE.CylinderGeometry(0.08, 0.14, 20.0, 6, 1, true);
+    streamerGeo.translate(0, -10.0, 0);
+    const streamerMat = new THREE.MeshBasicMaterial({
+      color: 0xcceeec,
+      transparent: true,
+      opacity: 0.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    this.streamers = [];
+    this.streamerGroup = new THREE.Group();
+    for (let i = 0; i < streamerCount; i++) {
+      const mesh = new THREE.Mesh(streamerGeo, streamerMat.clone());
+      const rad = 7.0 + Math.random() * 15.0;
+      const theta = Math.random() * Math.PI * 2;
+      mesh.userData = {
+        baseRadius: rad,
+        theta: theta,
+        yOffset: (Math.random() - 0.5) * 80.0,
+        speedFactor: 0.8 + Math.random() * 0.5
+      };
+      this.streamerGroup.add(mesh);
+      this.streamers.push(mesh);
+    }
+    this.flightAtmosphereGroup.add(this.streamerGroup);
+
+    this.flightAtmosphereGroup.visible = false;
+    this.scene.add(this.flightAtmosphereGroup);
+  }
+
+  setFlightMode(isFlight) {
+    this.isFlight = isFlight;
+    if (this.dustPoints) this.dustPoints.visible = !isFlight;
+    if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = !isFlight;
+    if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight;
+    if (this.tracks) this.tracks.visible = !isFlight;
+    if (this.phobos) this.phobos.visible = !isFlight;
+    if (this.deimos) this.deimos.visible = !isFlight;
+    if (this.flightAtmosphereGroup) this.flightAtmosphereGroup.visible = isFlight;
+    if (this.postLaunchSpace) this.postLaunchSpace.group.visible = isFlight;
+
+    if (this.scene.fog) {
+      if (isFlight) {
+        this.scene.fog.near = 150000;
+        this.scene.fog.far = 1000000;
+      } else {
+        this.scene.fog.near = 110;
+        this.scene.fog.far = 520;
+      }
+    }
+  }
+
+  updateSpeedStreamers(alt, speed = 0, playerPos = null) {
+    if (!this.streamerGroup || !this.isFlight) return;
+    const inAtmo = alt > 400 && alt < 38000;
+    const speedRatio = THREE.MathUtils.clamp((speed - 40.0) / 280.0, 0.0, 1.0);
+    const visible = inAtmo && speedRatio > 0.02;
+
+    this.streamerGroup.visible = visible;
+    if (!visible) return;
+
+    if (playerPos) {
+      this.streamerGroup.position.copy(playerPos);
+    }
+
+    for (let i = 0; i < this.streamers.length; i++) {
+      const s = this.streamers[i];
+      const ud = s.userData;
+      ud.yOffset -= Math.max(15.0, speed * 0.035) * ud.speedFactor;
+      if (ud.yOffset < -45.0) {
+        ud.yOffset = 45.0 + Math.random() * 20.0;
+      }
+      s.position.set(
+        Math.cos(ud.theta) * ud.baseRadius,
+        ud.yOffset,
+        Math.sin(ud.theta) * ud.baseRadius
+      );
+      s.material.opacity = speedRatio * 0.65;
+    }
   }
 
   createNitroPlumes() {
@@ -738,21 +870,23 @@ export class MarsAtmosphere {
     this.fxPool.update(dt, null);
   }
 
-  setAltitude(alt) {
+  setAltitude(alt, speed = 0) {
     const spaceFade = THREE.MathUtils.clamp((alt - 1500) / 14500, 0.0, 1.0);
     if (this.skyMat) {
       this.skyMat.uniforms.uSpaceFade.value = spaceFade;
+      this.skyMat.uniforms.uAltitude.value = Math.max(0, alt);
     }
     if (this.distantMountains) {
       this.distantMountains.visible = alt < 12000;
     }
-    if (this.scene.fog) {
+    if (this.scene.fog && !this.isFlight) {
       this.scene.fog.near = THREE.MathUtils.lerp(110, 80000, spaceFade);
       this.scene.fog.far = THREE.MathUtils.lerp(520, 250000, spaceFade);
     }
     if (this.dustPoints) {
-      this.dustPoints.visible = alt < 600;
+      this.dustPoints.visible = !this.isFlight && alt < 600;
     }
+    this.updateSpeedStreamers(alt, speed);
   }
 
   update(dt, playerPos, physics) {
@@ -775,6 +909,15 @@ export class MarsAtmosphere {
     // Slowly orbit moons
     this.phobos.rotation.y += dt * 0.02;
     this.deimos.rotation.y += dt * 0.01;
+
+    // In Flight Mode, skip rover dust & ground dust devils completely; update speed streamers & 3D space
+    if (this.isFlight) {
+      this.updateSpeedStreamers(physics?.altitude || 0, physics?.speed || 0, playerPos);
+      if (this.postLaunchSpace) {
+        this.postLaunchSpace.update(dt, physics?.altitude || 0, physics?.speed || 0, playerPos);
+      }
+      return;
+    }
 
     // 2. Update Wind Dust Specks
     const dustPosAttr = this.dustPoints.geometry.attributes.position;

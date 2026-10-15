@@ -48,8 +48,21 @@ export class MissionFlightHUD {
       btnPitchDown: document.getElementById('flight-btn-pitch-down'),
       btnPitchUp: document.getElementById('flight-btn-pitch-up'),
       btnYawLeft: document.getElementById('flight-btn-yaw-left'),
-      btnYawRight: document.getElementById('flight-btn-yaw-right')
+      btnYawRight: document.getElementById('flight-btn-yaw-right'),
+
+      // Starship Orbital Space Score Card & Online Player Count
+      scoreCard: document.getElementById('flight-score-card'),
+      scoreVal: document.getElementById('flight-score-val'),
+      scoreApogee: document.getElementById('score-apogee-val'),
+      scoreVelocity: document.getElementById('score-velocity-val'),
+      scoreBooster: document.getElementById('score-booster-val'),
+      scoreNext: document.getElementById('score-next-val'),
+      flightOnlineVal: document.getElementById('flight-online-val'),
+      roverOnlineVal: document.getElementById('online-players-count')
     };
+
+    this.onlineCount = 43;
+    this.lastOnlineUpdate = 0;
 
     this.initEvents();
   }
@@ -193,11 +206,24 @@ export class MissionFlightHUD {
       if (this.dom.mobileSteering) {
         this.dom.mobileSteering.style.display = 'none';
       }
+      if (this.dom.scoreCard) {
+        this.dom.scoreCard.style.display = 'none';
+      }
     }
   }
 
   update(physics) {
     if (!this.dom.container || !this.dom.container.classList.contains('active')) return;
+
+    // 0. Live Online Explorer Fluctuation
+    const now = performance.now();
+    if (!this.lastOnlineUpdate || now - this.lastOnlineUpdate > 12000) {
+      this.lastOnlineUpdate = now;
+      const delta = (Math.random() > 0.48 ? 1 : -1) * (Math.random() < 0.25 ? 2 : 1);
+      this.onlineCount = Math.max(39, Math.min(52, (this.onlineCount || 43) + delta));
+      if (this.dom.flightOnlineVal) this.dom.flightOnlineVal.textContent = this.onlineCount;
+      if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = this.onlineCount;
+    }
 
     // 1. Altitude
     const alt = Math.max(0, physics.altitude);
@@ -206,6 +232,32 @@ export class MissionFlightHUD {
         this.dom.altitudeVal.textContent = `${(alt / 1000).toFixed(1)} km`;
       } else {
         this.dom.altitudeVal.textContent = `${Math.round(alt)} m`;
+      }
+    }
+
+    // 1.1 Starship Orbital Space Score Card (User Request)
+    if (this.dom.scoreCard) {
+      if (physics.phase === FLIGHT_PHASES.ORBIT) {
+        this.dom.scoreCard.style.display = 'block';
+        if (this.dom.scoreVal) {
+          const score = physics.starshipScore || 15420;
+          this.dom.scoreVal.textContent = score.toLocaleString();
+        }
+        if (this.dom.scoreApogee) {
+          this.dom.scoreApogee.textContent = `${(alt / 1000).toFixed(1)} km`;
+        }
+        if (this.dom.scoreVelocity) {
+          this.dom.scoreVelocity.textContent = `${Math.round(physics.speed)} m/s`;
+        }
+        if (this.dom.scoreBooster) {
+          const isCaught = physics.boosterState === 'CAUGHT';
+          this.dom.scoreBooster.textContent = isCaught ? 'MECHAZILLA CAUGHT! 🥢' : (physics.boosterState || 'RECOVERED');
+        }
+        if (this.dom.scoreNext) {
+          this.dom.scoreNext.textContent = 'CLOUD RE-ENTRY // SKYDIVE';
+        }
+      } else {
+        this.dom.scoreCard.style.display = 'none';
       }
     }
 

@@ -149,6 +149,10 @@ export default function MarsCanvas() {
 
         {/* Top-Right Settings & Actions */}
         <div className="top-right-bar">
+          <div className="online-pill" id="online-counter-pill">
+            <span className="online-dot"></span>
+            <span id="online-count-val">43</span> ONLINE
+          </div>
           <button id="launch-mission-btn" className="hud-pill-btn launch-pill" aria-label="Launch Starship Mission">
             <span>🚀 Mission</span>
           </button>
@@ -229,7 +233,13 @@ export default function MarsCanvas() {
         <div className="flight-top-panel">
           <div className="flight-title-group">
             <div id="flight-phase-badge" className="flight-phase-badge">PRE-LAUNCH // STARBASE OLM</div>
-            <div id="flight-booster-badge" className="flight-booster-badge" style={{ display: 'none' }}>BOOSTER: ON PAD</div>
+            <div className="flight-badge-row">
+              <div id="flight-booster-badge" className="flight-booster-badge" style={{ display: 'none' }}>BOOSTER: ON PAD</div>
+              <div className="flight-online-badge">
+                <span className="online-dot"></span>
+                <span id="flight-online-val">43</span> ONLINE
+              </div>
+            </div>
           </div>
 
           <div className="flight-top-actions">
@@ -253,6 +263,38 @@ export default function MarsCanvas() {
           <button className="cam-tab-btn" data-cam="TOWER_CAM">🗼 TOWER CAM</button>
           <button className="cam-tab-btn" data-cam="COCKPIT">COCKPIT</button>
           <button className="cam-tab-btn" data-cam="FREE_ORBIT">ORBIT</button>
+        </div>
+
+        {/* Starship Orbital Space Score Card (Ref User Prompt) */}
+        <div id="flight-score-card" className="flight-score-card" style={{ display: 'none' }}>
+          <div className="score-card-inner">
+            <div className="score-header">
+              <span className="score-badge">ORBITAL EXPEDITION ACHIEVED</span>
+              <h2 className="score-title">LOW MARS ORBIT INSERTION</h2>
+            </div>
+            <div className="score-main-value">
+              <span className="score-num" id="flight-score-val">15,420</span>
+              <span className="score-pts">PTS</span>
+            </div>
+            <div className="score-metrics-grid">
+              <div className="metric-box">
+                <span className="metric-lbl">APOGEE</span>
+                <span className="metric-val" id="score-apogee-val">102.4 km</span>
+              </div>
+              <div className="metric-box">
+                <span className="metric-lbl">VELOCITY</span>
+                <span className="metric-val" id="score-velocity-val">3,380 m/s</span>
+              </div>
+              <div className="metric-box">
+                <span className="metric-lbl">BOOSTER CATCH</span>
+                <span className="metric-val highlight" id="score-booster-val">MECHAZILLA CAUGHT! 🥢</span>
+              </div>
+              <div className="metric-box">
+                <span className="metric-lbl">MISSION SEQUENCE</span>
+                <span className="metric-val" id="score-next-val">CLOUD RE-ENTRY</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="flight-action-prompt" className="flight-action-prompt"></div>

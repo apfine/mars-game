@@ -62,12 +62,49 @@ html, body {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
-/* Top-Right Settings Gear */
+/* Top-Right Settings Gear & Actions */
 .top-right-bar {
   position: absolute;
   top: 16px;
   right: 20px;
   pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.online-counter-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(14, 18, 26, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(80, 255, 160, 0.35);
+  color: #7affc0;
+  font-family: monospace, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 6px 14px;
+  border-radius: 18px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45), 0 0 12px rgba(80, 255, 160, 0.2);
+  white-space: nowrap;
+}
+
+.online-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22ff88;
+  box-shadow: 0 0 8px #22ff88;
+  animation: online-pulse 2s infinite ease-in-out;
+}
+
+@keyframes online-pulse {
+  0% { transform: scale(0.9); opacity: 0.75; box-shadow: 0 0 4px #22ff88; }
+  50% { transform: scale(1.25); opacity: 1.0; box-shadow: 0 0 10px #22ff88; }
+  100% { transform: scale(0.9); opacity: 0.75; box-shadow: 0 0 4px #22ff88; }
 }
 
 .hud-pill-btn {
@@ -693,6 +730,30 @@ html, body {
   box-shadow: 0 0 16px rgba(50, 255, 120, 0.6) !important;
 }
 
+.flight-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flight-online-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 22, 28, 0.75);
+  border: 1px solid rgba(80, 255, 160, 0.4);
+  color: #7affc0;
+  font-family: monospace, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  box-shadow: 0 0 12px rgba(80, 255, 160, 0.25);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .flight-top-actions {
   display: flex;
   align-items: center;
@@ -836,6 +897,130 @@ html, body {
 @keyframes pulse-alert {
   0% { transform: scale(0.98); opacity: 0.8; }
   100% { transform: scale(1.04); opacity: 1.0; text-shadow: 0 0 18px #ff2200; }
+}
+
+/* Starship Orbital Space Score Card */
+.flight-score-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 50% 20%, rgba(20, 28, 48, 0.92), rgba(8, 12, 20, 0.96));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(100, 200, 255, 0.45);
+  border-radius: 24px;
+  padding: 28px 36px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(0, 160, 255, 0.35);
+  pointer-events: auto;
+  z-index: 120;
+  max-width: 90vw;
+  width: 460px;
+  text-align: center;
+  animation: score-card-appear 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes score-card-appear {
+  0% { opacity: 0; transform: translate(-50%, -46%) scale(0.92); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.score-card-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.score-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.score-badge {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 800;
+  color: #44ddff;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  background: rgba(0, 180, 255, 0.15);
+  padding: 4px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 200, 255, 0.3);
+}
+
+.score-title {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 1.5px;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.score-main-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+
+.score-num {
+  font-family: monospace, sans-serif;
+  font-size: 46px;
+  font-weight: 900;
+  color: #ffcc33;
+  text-shadow: 0 0 24px rgba(255, 204, 51, 0.65), 0 0 4px #ffa500;
+  letter-spacing: 1px;
+}
+
+.score-pts {
+  font-family: monospace;
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffaa33;
+}
+
+.score-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+
+.metric-box {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.metric-lbl {
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: #8da4be;
+  letter-spacing: 1px;
+}
+
+.metric-val {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.metric-val.highlight {
+  color: #44ffaa;
+  text-shadow: 0 0 10px rgba(68, 255, 170, 0.5);
 }
 
 .flight-telemetry-panel {
@@ -1224,6 +1409,29 @@ html, body {
   .flight-dpad-middle {
     gap: 22px;
   }
+  .top-right-bar {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 8px);
+    gap: 6px;
+  }
+  .online-counter-pill {
+    font-size: 9px;
+    padding: 4px 8px;
+    gap: 5px;
+  }
+  .flight-online-badge {
+    font-size: 9px;
+    padding: 3px 8px;
+    gap: 4px;
+  }
+  .flight-score-card {
+    padding: 18px 20px;
+    width: 92vw;
+    border-radius: 18px;
+  }
+  .score-num { font-size: 32px; }
+  .score-title { font-size: 13px; }
+  .metric-val { font-size: 12px; }
 }
 
 /* -------------------------------------------------------------

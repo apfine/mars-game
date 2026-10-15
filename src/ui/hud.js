@@ -19,8 +19,12 @@ export class MarsHUD {
       mobileControls: document.getElementById('mobile-controls'),
       settingsModal: document.getElementById('settings-modal'),
       escBtn: document.getElementById('esc-btn'),
-      closeSettingsBtn: document.getElementById('close-settings')
+      closeSettingsBtn: document.getElementById('close-settings'),
+      roverOnlineVal: document.getElementById('online-players-count')
     };
+
+    this.onlineCount = 43;
+    this.lastOnlineUpdate = 0;
 
     this.touchState = {
       throttle: 0,
@@ -217,6 +221,15 @@ export class MarsHUD {
   }
 
   update(physics, camera, scatterPOIs = []) {
+    // 0. Update Online Explorer Count
+    const now = performance.now();
+    if (!this.lastOnlineUpdate || now - this.lastOnlineUpdate > 12000) {
+      this.lastOnlineUpdate = now;
+      const delta = (Math.random() > 0.48 ? 1 : -1) * (Math.random() < 0.25 ? 2 : 1);
+      this.onlineCount = Math.max(39, Math.min(52, (this.onlineCount || 43) + delta));
+      if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = this.onlineCount;
+    }
+
     // 1. Update Speedometer
     const speed = physics.speedKmh;
     if (this.dom.speedometer) {

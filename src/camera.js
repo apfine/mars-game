@@ -258,15 +258,28 @@ export class MarsCameraController {
         // Re-entry & belly-flop: 45 degree angle showing heat shield & plasma ionization
         this.currentPos.set(shipPos.x + 45, shipPos.y + 12, shipPos.z + 55);
         this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
+      } else if (phase === 'ORBIT') {
+        // Space view: open panoramic orbital camera showing Starship against curved Mars and starry cosmos
+        const orbitAngle = physics.yaw + 0.85;
+        const orbitDist = 130.0;
+        this.currentPos.set(
+          shipPos.x + Math.sin(orbitAngle) * orbitDist,
+          shipPos.y + 20.0,
+          shipPos.z + Math.cos(orbitAngle) * orbitDist
+        );
+        this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
       } else {
-        // Velocity/Attitude-aligned chase camera: ZERO lerping on ship coordinates to prevent high-speed lag!
-        const camDist = 80.0 + Math.min(50.0, alt * 0.001);
-        const offsetX = -Math.sin(physics.yaw) * camDist;
-        const offsetY = -Math.cos(physics.pitch) * camDist * 0.45;
-        const offsetZ = -Math.cos(physics.yaw) * camDist;
+        // Velocity/Attitude-aligned cinematic chase camera:
+        // Positioned 85m back and 22m to the side at a 3/4 angle, showing rocket, receding planet, clouds, and sky!
+        const camDist = 85.0 + Math.min(50.0, alt * 0.0008);
+        const behindAngle = physics.yaw + Math.PI;
+        const sideAngle = physics.yaw + Math.PI * 0.5;
+        const offsetX = Math.sin(behindAngle) * camDist * 0.85 + Math.sin(sideAngle) * 22.0;
+        const offsetY = THREE.MathUtils.lerp(18.0, -Math.cos(physics.pitch) * camDist * 0.45, Math.min(1.0, alt / 20000.0));
+        const offsetZ = Math.cos(behindAngle) * camDist * 0.85 + Math.cos(sideAngle) * 22.0;
 
         this.currentPos.set(shipPos.x + offsetX, shipPos.y + offsetY, shipPos.z + offsetZ);
-        this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
+        this.currentLook.set(shipPos.x, shipPos.y + stackCenterY + 12.0, shipPos.z);
       }
     } else if (mode === 'GROUND_CAM') {
       // Ground tracking telephoto camera stationed near Starbase station & control dome (padCoords + offset)

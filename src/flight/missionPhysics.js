@@ -189,6 +189,15 @@ export class StarshipMissionPhysics {
     this.mach = (this.speed / speedOfSound).toFixed(1);
     this.dynamicPressure = 0.5 * marsDensity * this.speed * this.speed;
 
+    // Detect pilot manual override ("till user changes things")
+    const manualSteer = (input.pitch && Math.abs(input.pitch) > 0.08) || (input.steer && Math.abs(input.steer) > 0.08);
+    const manualThrottle = input.throttleUp || input.throttleDown || input.fullThrottle || input.throttleCut;
+    if (manualSteer || manualThrottle) {
+      if (this.autoMission) {
+        this.autoMission = false; // Gracefully yield to pilot control
+      }
+    }
+
     // Flight Phase Finite State Machine
     // 1. Throttle Pilot Control
     if (this.phase === FLIGHT_PHASES.BOOSTER_ASCENT ||
@@ -207,6 +216,12 @@ export class StarshipMissionPhysics {
       case FLIGHT_PHASES.ON_PAD:
         this.throttle = 0;
         this.altitude = 0;
+        if (this.autoMission) {
+          this.autoPadWait = (this.autoPadWait || 0) + dt;
+          if (this.autoPadWait > 1.8) {
+            this.startLaunch();
+          }
+        }
         break;
 
       case FLIGHT_PHASES.COUNTDOWN:
@@ -219,7 +234,7 @@ export class StarshipMissionPhysics {
         if (this.countdownTimer <= 0) {
           // Liftoff!
           this.phase = FLIGHT_PHASES.BOOSTER_ASCENT;
-          this.velocity.set(0, 8.0, 0);
+          this.velocity.set(0, 10.0, 0);
           this.throttle = 1.0;
         }
         break;
@@ -282,7 +297,8 @@ export class StarshipMissionPhysics {
         this.missionTime += dt;
         // Brief interstage hot firing window before separation
         this.vehicle.setStarshipThrottle(1.0, true);
-        if (this.altitude > 24000) {
+        this.hotStageTimer = (this.hotStageTimer || 0) + dt;
+        if (this.hotStageTimer > 1.2 || this.altitude > 23000) {
           this.executeHotStaging();
         }
         break;
@@ -344,15 +360,22 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.ORBIT:
         this.missionTime += dt;
+
+        // Compute Starship Orbital Space Score (User Request)
+        if (!this.starshipScore) {
+          const boosterBonus = this.boosterState === BOOSTER_STATES.CAUGHT ? 5000 : 2500;
+          this.starshipScore = Math.round(10000 + (this.altitude / 1000) * 45 + (this.speed * 1.6) + boosterBonus);
+        }
+
         // Microgravity orbital mechanics around Mars
         const orbitalGravity = (this.marsGravity * 0.82);
         const centAccel = (this.speed * this.speed) / 3400000;
         this.velocity.y += (centAccel - orbitalGravity) * dt * 0.1;
 
-        // Auto mission waits 6.5s in orbit for viewing, then triggers deorbit burn
+        // Auto mission waits 7.5s in orbit for space panoramic view, then triggers deorbit burn
         if (this.autoMission) {
           this.orbitTimer += dt;
-          if (this.orbitTimer >= 6.5) {
+          if (this.orbitTimer >= 7.5) {
             this.triggerDeorbit();
           }
         }

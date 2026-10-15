@@ -225,6 +225,7 @@ export class MarsGameEngine {
       if (mobileControls) mobileControls.style.display = 'none';
       this.flightHud.show(true, this.input.isMobile);
       this.flightHud.notifyCameraMode(this.cameraController.getFlightMode());
+      this.atmosphere.setFlightMode(true);
 
       // Silence rover motor while in flight
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
@@ -239,7 +240,8 @@ export class MarsGameEngine {
         mobileControls.style.display = 'block';
       }
 
-      this.atmosphere.setAltitude(0);
+      this.atmosphere.setFlightMode(false);
+      this.atmosphere.setAltitude(0, 0);
       this.audio.updateRocket(0, 0, 0);
     }
   }
@@ -351,11 +353,13 @@ export class MarsGameEngine {
       this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
 
       // Atmosphere space blackening & sky fade
-      this.atmosphere.setAltitude(this.missionPhysics.altitude);
+      this.atmosphere.setAltitude(this.missionPhysics.altitude, this.missionPhysics.speed);
 
       // Center atmosphere and skydome on Starship
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
       this.atmosphere.update(dt, this.missionPhysics.position, {
+        altitude: this.missionPhysics.altitude,
+        speed: this.missionPhysics.speed,
         quaternion: this.missionPhysics.quaternion,
         velocity: this.missionPhysics.velocity,
         isNitroActive: false,
