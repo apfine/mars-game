@@ -70,6 +70,13 @@ export class MarsRoverPhysics {
 
     this.wheelRadius = 0.55;
     this.wheelRotation = 0;
+
+    // Collision (set by engine) and launch state
+    this.collider = null;   // object exposing resolve(position, radius) -> hit | null
+    this.impact = 0;        // last collision strength (consumed by engine for shake/dust/audio)
+    this.groundVy = 0;      // vertical speed of the ground under the rover (used for ramp launches)
+    this.lastGroundY = null;
+    this.collisionRadius = 1.7;
   }
 
   update(dt, input) {
@@ -170,9 +177,34 @@ export class MarsRoverPhysics {
     this.position.x += fwdMoveX + latMoveX;
     this.position.z += fwdMoveZ + latMoveZ;
 
+    // 6b. Obstacle collision (boulders, outcrops, monuments): push out and bounce
+    this.landSpeed = 0;
+    if (this.collider) {
+      const hit = this.collider.resolve(this.position, this.collisionRadius, this.position.y - this.rideHeight);
+      if (hit) {
+        this.position.x += hit.nx * hit.pen;
+        this.position.z += hit.nz * hit.pen;
+        const vx = sinY * this.speed + cosY * this.lateralVelocity;
+        const vz = cosY * this.speed - sinY * this.lateralVelocity;
+        const vn = vx * hit.nx + vz * hit.nz;
+        if (vn < 0) {
+          const k = -1.3 * vn; // 0.3 restitution
+          const nvx = vx + hit.nx * k;
+          const nvz = vz + hit.nz * k;
+          this.speed = (nvx * sinY + nvz * cosY) * 0.9;
+          this.lateralVelocity = nvx * cosY - nvz * sinY;
+          // Glancing blows twist the nose away from the obstacle
+          this.yaw += (hit.nx * cosY - hit.nz * sinY) * Math.min(1, -vn / 12) * 0.25;
+          this.impact = Math.max(this.impact, -vn);
+        }
+      }
+    }
+
     // 7. Ground Adherence & Vertical Suspension (Y)
     const centerGroundY = getMarsHeight(this.position.x, this.position.z);
     const targetY = centerGroundY + this.rideHeight;
+    const gvyNow = this.lastGroundY === null ? 0 : (centerGroundY - this.lastGroundY) / dt;
+    this.lastGroundY = centerGroundY;
 
     if (!this.isAirborne) {
       const heightDiff = targetY - this.position.y;
@@ -186,18 +218,18 @@ export class MarsRoverPhysics {
         }
         this.verticalVelocity = 0;
       } else {
-        // Ground is falling away underneath
-        // Check for genuine jump over a crest at high speed
-        if (heightDiff < -0.4 && Math.abs(this.speed) > 18.0) {
+        // Ground is falling away underneath: leave the surface (ramp lips, dune crests, ledges)
+        if (heightDiff < -0.4 && Math.abs(this.speed) > 14.0) {
           this.isAirborne = true;
-          // Jump launch momentum based on speed and slope angle
-          this.verticalVelocity = Math.min(8.0, Math.max(1.0, -this.pitch * this.speed * 0.35));
+          // Keep the vertical speed the ground had just before the lip
+          this.verticalVelocity = THREE.MathUtils.clamp(this.groundVy, 0.5, 18.0);
         } else {
           // Follow terrain down closely
           this.position.y = THREE.MathUtils.lerp(this.position.y, targetY, Math.min(1.0, dt * 25.0));
           this.verticalVelocity = 0;
         }
       }
+      this.groundVy = THREE.MathUtils.lerp(this.groundVy, gvyNow, 0.6);
     } else {
       // Airborne in flight
       this.verticalVelocity -= this.gravity * dt;
@@ -205,9 +237,11 @@ export class MarsRoverPhysics {
 
       // Landing touchdown detection
       if (this.position.y <= targetY) {
+        this.landSpeed = Math.max(0, -this.verticalVelocity);
         this.position.y = targetY;
         this.verticalVelocity = 0;
         this.isAirborne = false;
+        this.groundVy = 0;
       }
     }
 
@@ -218,6 +252,8 @@ export class MarsRoverPhysics {
       const normal = getMarsNormal(this.position.x, this.position.z);
       // Pitch aligns with forward slope: nose up when rising, nose down when descending
       const targetPitch = (normal.x * sinY + normal.z * cosY);
+      // Gravity along the slope: climbing steep dunes bleeds speed, descending adds it
+      this.speed += targetPitch * 14.0 * dt;
       // Roll aligns with side slope: right side up when terrain rises to the right
       const targetRoll = -(normal.x * cosY - normal.z * sinY);
 

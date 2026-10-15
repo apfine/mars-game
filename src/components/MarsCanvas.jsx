@@ -124,7 +124,7 @@ export default function MarsCanvas() {
 
             <div className="setting-item">
               <label htmlFor="toggle-grid">Surveyor Topographical Grid</label>
-              <input type="checkbox" id="toggle-grid" defaultChecked />
+              <input type="checkbox" id="toggle-grid" />
             </div>
 
             <div className="setting-item">

@@ -39,8 +39,8 @@ export class MarsAtmosphere {
       uniforms: {
         uTime: { value: 0 },
         uSunPos: { value: SUN_DIR.clone() },
-        uSkyZenith: { value: new THREE.Color(0xb8795a) },     // Butterscotch overhead
-        uSkyHorizon: { value: new THREE.Color(0xd9a07e) },    // Pale dusty tan horizon (matches terrain haze + scene fog)
+        uSkyZenith: { value: new THREE.Color(0xcd8a66) },     // Butterscotch overhead
+        uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Pale dusty salmon horizon (matches terrain haze + scene fog)
         uSunColor: { value: new THREE.Color(0xfff5e6) },      // Brilliant Martian sun
         uSunHaloBlue: { value: new THREE.Color(0x5ca0d3) }    // Signature Mars twilight blue scattering halo
       },
@@ -100,17 +100,17 @@ export class MarsAtmosphere {
           float cloud = smoothstep(0.50, 0.78, c1) * smoothstep(0.05, 0.30, e) * (1.0 - smoothstep(0.7, 1.0, e) * 0.5);
           float thin = smoothstep(0.42, 0.62, fbm2(cp * vec2(0.5, 5.0) - wind * 1.5)) * smoothstep(0.08, 0.4, e) * 0.35;
           vec3 cloudCol = mix(vec3(0.95, 0.74, 0.62), vec3(1.0, 0.92, 0.84), pow(sc, 2.0));
-          sky = mix(sky, cloudCol, clamp(cloud * 0.55 + thin, 0.0, 0.7));
+          sky = mix(sky, cloudCol, clamp(cloud * 0.15 + thin * 0.4, 0.0, 0.25));
 
           // Mars forward-scattering: blue corona around the sun + warm glare lobes
-          float blueHalo = pow(sc, 14.0) * 0.55 * (1.0 - band * 0.3);
+          float blueHalo = pow(sc, 14.0) * 0.1 * (1.0 - band * 0.3);
           sky = mix(sky, uSunHaloBlue, blueHalo);
           float glare = pow(sc, 6.0) * 0.30 + pow(sc, 40.0) * 0.6 + pow(sc, 420.0) * 1.8;
           sky += uSunColor * glare * 0.6;
 
           // Sharp Sun disk (Mars sun appears ~2/3 size of Earth sun)
           float sunDisk = smoothstep(0.9988, 0.9995, sc);
-          vec3 col = sky + uSunColor * sunDisk * 3.0;
+          vec3 col = sky + uSunColor * sunDisk * 1.1;
 
           gl_FragColor = vec4(col, 1.0);
           #include <colorspace_fragment>
@@ -124,7 +124,7 @@ export class MarsAtmosphere {
     this.scene.add(this.skyMesh);
 
     // Directional Sunlight & Ambient
-    this.sunLight = new THREE.DirectionalLight(0xffecd4, 2.4);
+    this.sunLight = new THREE.DirectionalLight(0xffe6d0, 1.8);
     this.sunLight.position.copy(SUN_DIR).multiplyScalar(500);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.width = 2048;
@@ -140,15 +140,15 @@ export class MarsAtmosphere {
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
-    this.ambientLight = new THREE.AmbientLight(0x6a4034, 0.5);
+    this.ambientLight = new THREE.AmbientLight(0x7a5044, 0.7);
     this.scene.add(this.ambientLight);
 
     // Warm sky fill / sand bounce light (soft, realistic shadow fill)
-    this.hemiLight = new THREE.HemisphereLight(0xd9a98a, 0x8a4a30, 0.7);
+    this.hemiLight = new THREE.HemisphereLight(0xe8b496, 0xa0583a, 0.95);
     this.scene.add(this.hemiLight);
 
     // Atmospheric perspective for all standard-lit objects (terrain has its own matching fog)
-    this.scene.fog = new THREE.Fog(0xd9a07e, 110, 520);
+    this.scene.fog = new THREE.Fog(0xe0aa8c, 110, 520);
   }
 
   // Build an image-based lighting environment from the sky shader so metals, glass and paint reflect
@@ -162,7 +162,7 @@ export class MarsAtmosphere {
 
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(95, 32).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x9c5a3c })
+      new THREE.MeshBasicMaterial({ color: 0xc4724a })
     );
     ground.position.y = -1.0;
     envScene.add(ground);
@@ -210,8 +210,8 @@ export class MarsAtmosphere {
       side: THREE.DoubleSide,
       fog: false,
       uniforms: {
-        uHaze: { value: new THREE.Color(0xd9a07e) },
-        uPeak: { value: new THREE.Color(0xb27a5e) }
+        uHaze: { value: new THREE.Color(0xe0aa8c) },
+        uPeak: { value: new THREE.Color(0xc88d70) }
       },
       vertexShader: `
         varying float vY;

@@ -105,39 +105,82 @@ export function fbm(x, y, octaves = 4, lacunarity = 2.0, gain = 0.5) {
   return sum / maxAmp;
 }
 
-// Procedural Martian dune height formula:
-// 100% mathematically continuous (no sudden steps, no grid boundaries)
-// Produces sweeping barchan dune fields with wind ripples and rolling plains
-export function getMarsHeight(x, z) {
-  // 1. Broad regional topography (huge Martian undulating plains & rolling highlands)
-  const macro = fbm(x * 0.0004, z * 0.0004, 3, 2.0, 0.45) * 45.0;
+function sstep(a, b, x) {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
 
-  // 2. Primary Martian dune fields (oriented along prevailing wind ~36 degrees)
+function cellHash(a, b, k) {
+  const p = Math.sin(a * 127.1 + b * 311.7 + k * 74.7) * 43758.5453123;
+  return p - Math.floor(p);
+}
+
+// Stunt jump ramps: one possible ramp per 260m cell, random heading. Long rising wedge, sharp lip,
+// then a landing mound further along the heading. Continuous, so physics and mesh stay in sync.
+const RAMP_CELL = 260;
+export function rampHeight(x, z) {
+  const cx = Math.floor(x / RAMP_CELL);
+  const cz = Math.floor(z / RAMP_CELL);
+  if (cellHash(cx, cz, 1) < 0.5) return 0;
+  const a = cellHash(cx, cz, 2) * Math.PI * 2;
+  const px = (cx + 0.3 + 0.4 * cellHash(cx, cz, 3)) * RAMP_CELL;
+  const pz = (cz + 0.3 + 0.4 * cellHash(cx, cz, 4)) * RAMP_CELL;
+  const dx = x - px, dz = z - pz;
+  const u = dx * Math.sin(a) + dz * Math.cos(a);   // along heading (lip at u = 0)
+  const v = dx * Math.cos(a) - dz * Math.sin(a);   // across
+  if (u < -17 || u > 50) return 0;
+  const wv = 1 - sstep(4.5, 7.5, Math.abs(v));
+  let h = 0;
+  if (u < 0) h = 4.8 * Math.pow((u + 17) / 17, 1.15);
+  else h = 4.8 * (1 - sstep(0, 3, u));
+  const land = 2.8 * sstep(22, 32, u) * (1 - sstep(32, 48, u)) * (1 - sstep(9, 14, Math.abs(v)));
+  return h * wv + land;
+}
+
+// Martian surface: layered sedimentary bedrock terraces (flagstone pavement with low ledges),
+// sparse sand drifts, rare steep climbable dune ridges and stunt ramps. Fully continuous.
+function rawHeight(x, z) {
+  const macro = fbm(x * 0.0004, z * 0.0004, 3, 2.0, 0.45) * 30.0;
+
+  // Bedrock terraces: low-frequency noise quantised into ~1m ledges
+  const bed = fbm(x * 0.009 + 40, z * 0.009 - 17, 3, 2.0, 0.5) * 6.0;
+  const t = bed / 1.1;
+  const f = Math.floor(t);
+  const terraces = (f + sstep(0.42, 0.58, t - f)) * 1.1;
+  const slabTilt = simplex2D(x * 0.07, z * 0.07) * 0.22 + simplex2D(x * 0.19, z * 0.19) * 0.07;
+
+  // Sand drifts in the lee of obstacles (shallow wind dunes in an erg mask)
   const angle = 0.63;
-  const cosA = Math.cos(angle);
-  const sinA = Math.sin(angle);
-  const wx = x * cosA - z * sinA;
-  const wz = x * sinA + z * cosA;
-
-  // Dune wave wavelength ~ 80m, with undulating serpentine dune crests
+  const wx = x * Math.cos(angle) - z * Math.sin(angle);
+  const wz = x * Math.sin(angle) + z * Math.cos(angle);
   const duneWarp = simplex2D(wx * 0.003, wz * 0.003) * 10.0;
-  const wave = Math.sin((wz + duneWarp) * 0.015);
+  const duneProfile = Math.pow((Math.sin((wz + duneWarp) * 0.015) + 1.0) * 0.5, 1.35);
+  const ergMask = sstep(0.55, 0.95, (simplex2D(x * 0.0012, z * 0.0012) + 1.0) * 0.5);
+  const dunes = duneProfile * 6.0 * ergMask;
 
-  // Asymmetric barchan dune profile: gentle windward ramp, steeper slip face
-  let duneProfile = (wave + 1.0) * 0.5;
-  duneProfile = Math.pow(duneProfile, 1.35);
+  // Steep dune/ridge walls (up to ~40 degrees) to climb and fall from, in sparse regions
+  const r = 1 - Math.abs(simplex2D(x * 0.0065 + 11, z * 0.0065 - 7));
+  const steepMask = sstep(0.5, 0.82, (simplex2D(x * 0.0019 - 5, z * 0.0019 + 3) + 1.0) * 0.5);
+  const steep = Math.pow(Math.max(r, 0), 5) * 15.0 * steepMask;
 
-  // Erg mask: dunes gather into large regional dune fields with open flats
-  const ergMask = (simplex2D(x * 0.0012, z * 0.0012) + 1.0) * 0.5;
-  const dunes = (duneProfile * 15.0 - 5.0) * ergMask;
+  const ripples = Math.sin(wz * 0.2 + simplex2D(x * 0.015, z * 0.015) * 2.0) * 0.05;
 
-  // 3. Medium rolling ridges
-  const ridges = simplex2D(x * 0.004, z * 0.004) * 6.0;
+  return macro + terraces + slabTilt + dunes + steep + rampHeight(x, z) + ripples;
+}
 
-  // 4. Fine wind ripple surface texture
-  const ripples = Math.sin((wz * 0.2) + simplex2D(x * 0.015, z * 0.015) * 2.0) * 0.35;
+// Landmark sites are levelled so pads and monuments sit flat (coordinates match scatter.js catalog)
+const SITES = [[380, 520], [-650, 420], [-420, -780], [850, -420], [-950, -320], [1200, 1100], [-1350, 950]]
+  .map(([sx, sz]) => ({ x: sx, z: sz, h: rawHeight(sx, sz) }));
 
-  return macro + dunes + ridges + ripples;
+export function getMarsHeight(x, z) {
+  let h = rawHeight(x, z);
+  for (const s of SITES) {
+    const dx = x - s.x, dz = z - s.z;
+    if (dx > 30 || dx < -30 || dz > 30 || dz < -30) continue;
+    const w = 1 - sstep(15, 28, Math.hypot(dx, dz));
+    if (w > 0) h += (s.h - h) * w;
+  }
+  return h;
 }
 
 // Compute analytical or central difference normal for physical terrain query

@@ -400,7 +400,79 @@ export class MarsScatterManager {
       group.add(beaconLight);
     }
 
+    // Rover-class landmarks get six rocker-bogie style wheels and suspension arms
+    if (['PERSEVERANCE', 'OPPORTUNITY', 'CURIOSITY', 'PATHFINDER'].includes(monument.type)) {
+      const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.42, 20);
+      wheelGeo.rotateZ(Math.PI / 2);
+      const wheelMat = new THREE.MeshStandardMaterial({ color: 0xa79b90, metalness: 0.85, roughness: 0.45 });
+      const wheelX = monument.type === 'PERSEVERANCE' ? 1.45 : 1.2;
+      for (const sx of [-1, 1]) {
+        for (const wz of [-1.35, 0, 1.35]) {
+          const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+          wheel.position.set(sx * wheelX, 0.5, wz);
+          wheel.castShadow = true;
+          group.add(wheel);
+        }
+        const rocker = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 2.9), metalDark);
+        rocker.position.set(sx * (wheelX - 0.25), 0.85, 0);
+        rocker.rotation.x = 0.1 * sx;
+        group.add(rocker);
+      }
+    }
+
+    // Checkpoint dressing: landing pad, glowing ring, tall beam (visible through haze) and spinning halos
+    const accent = { PERSEVERANCE: 0x00f0ff, CURIOSITY: 0x00ff9c, OPPORTUNITY: 0xffb800, VIKING_1: 0xff4466,
+      PATHFINDER: 0x7cffcb, OLYMPUS_BASE: 0x4cc9ff, VALLES_RELAY: 0xb78cff }[monument.type] || 0x00f0ff;
+    const big = monument.type === 'OLYMPUS_BASE' || monument.type === 'VALLES_RELAY';
+    const padR = big ? 13 : 6.5;
+    const pad = new THREE.Mesh(
+      new THREE.CylinderGeometry(padR, padR + 0.5, 1.4, 48),
+      new THREE.MeshStandardMaterial({ color: 0x3a3532, roughness: 0.7, metalness: 0.5 })
+    );
+    pad.position.y = -0.35;
+    pad.receiveShadow = true;
+    group.add(pad);
+    const glowMat = new THREE.MeshBasicMaterial({ color: accent, fog: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(padR - 0.45, padR - 0.15, 64).rotateX(-Math.PI / 2), glowMat);
+    ring.position.y = 0.37;
+    group.add(ring);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.2), glowMat);
+      lamp.position.set(Math.cos(a) * (padR - 1.0), 0.38, Math.sin(a) * (padR - 1.0));
+      lamp.rotation.y = -a;
+      group.add(lamp);
+    }
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: accent, transparent: true, opacity: 0.2, depthWrite: false,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false
+    });
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.7, big ? 2.4 : 1.6, 160, 24, 1, true), beamMat);
+    beam.position.y = 80;
+    group.add(beam);
+    const halos = [];
+    for (let i = 0; i < 3; i++) {
+      const halo = new THREE.Mesh(
+        new THREE.TorusGeometry(big ? 7 : 3.4 - i * 0.5, 0.07, 8, 48).rotateX(Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.85, fog: false })
+      );
+      group.add(halo);
+      halos.push(halo);
+    }
+    group.userData.checkpoint = { halos, beamMat, glowMat, base: big ? 7 : 3.4 };
+
     return group;
+  }
+
+  animateCheckpoint(group, t) {
+    const cp = group.userData.checkpoint;
+    if (!cp) return;
+    cp.halos.forEach((h, i) => {
+      h.position.y = 2.0 + i * 1.3 + Math.sin(t * 1.6 + i * 2.1) * 0.35;
+      h.rotation.y = t * (0.8 + i * 0.4);
+      h.scale.setScalar(1 + 0.06 * Math.sin(t * 2.4 + i));
+    });
+    cp.beamMat.opacity = 0.16 + 0.07 * Math.sin(t * 2.0);
   }
 
   // Populate deterministic rocks in a sector (never move, never disappear).
@@ -457,6 +529,7 @@ export class MarsScatterManager {
     for (const x of w) wTotal += x;
 
     const slots = [];
+    const cols = [];
     const dummy = this.dummy;
     const quat = new THREE.Quaternion();
     const quatYaw = new THREE.Quaternion();
@@ -548,11 +621,16 @@ export class MarsScatterManager {
       mesh.setColorAt(slot, col);
 
       slots.push({ variant, slot });
+      // Collision proxy (pebbles and low slabs are driven over, taller rocks are solid)
+      const topH = sys * (variant === 1 ? 0.6 : variant === 5 ? 1.0 : 1.25) - burial;
+      if (variant !== 4 && topH > 0.5) {
+        cols.push({ x: wx, z: wz, r: Math.max(sxs, szs) * (variant === 3 ? 0.55 : 0.8), top: wy + topH });
+      }
       mesh.instanceMatrix.needsUpdate = true;
       mesh.instanceColor.needsUpdate = true;
     }
 
-    this.activeSectors.set(key, { sx, sz, slots });
+    this.activeSectors.set(key, { sx, sz, slots, cols });
   }
 
   releaseSectorRocks(key) {
@@ -606,6 +684,7 @@ export class MarsScatterManager {
     for (const mon of this.monumentCatalog) {
       const dist = playerPos.distanceTo(mon.position);
       if (dist < activeMonumentDist) {
+        if (this.activePoiMeshes.has(mon.id)) this.animateCheckpoint(this.activePoiMeshes.get(mon.id).mesh, performance.now() * 0.001);
         if (!this.activePoiMeshes.has(mon.id)) {
           const meshGroup = this.createMonumentMesh(mon);
           this.poiGroup.add(meshGroup);
@@ -619,6 +698,35 @@ export class MarsScatterManager {
         }
       }
     }
+  }
+
+  // Collision query used by vehicle physics: returns the deepest overlap as { nx, nz, pen } or null
+  resolve(pos, radius, feetY) {
+    const csx = Math.floor(pos.x / this.sectorSize);
+    const csz = Math.floor(pos.z / this.sectorSize);
+    let best = null;
+    const test = (cx, cz, r, top) => {
+      const dx = pos.x - cx, dz = pos.z - cz;
+      const min = radius + r;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= min * min || top <= feetY + 0.45) return;
+      const d = Math.sqrt(d2) || 0.001;
+      const pen = min - d;
+      if (!best || pen > best.pen) best = { nx: dx / d, nz: dz / d, pen };
+    };
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        const sector = this.activeSectors.get(`${csx + i},${csz + j}`);
+        if (!sector) continue;
+        for (const c of sector.cols) test(c.x, c.z, c.r, c.top);
+      }
+    }
+    for (const m of this.monumentCatalog) {
+      const big = m.type === 'OLYMPUS_BASE' || m.type === 'VALLES_RELAY';
+      test(m.coords.x, m.coords.y, big ? 6.8 : 2.6, Infinity);
+      if (big) test(m.coords.x + 10, m.coords.y, 1.1, Infinity);
+    }
+    return best;
   }
 
   getNearbyPOIs(playerPos, maxDist = 8000) {

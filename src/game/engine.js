@@ -13,7 +13,7 @@ export class MarsGameEngine {
   constructor(container) {
     this.container = container;
     this.quality = 'High';
-    this.gridEnabled = true;
+    this.gridEnabled = false;
     this.disposed = false;
 
     this.initRenderer();
@@ -62,7 +62,7 @@ export class MarsGameEngine {
     this.atmosphere.buildEnvironment(this.renderer);
 
     // 2. Terrain & Dunes
-    this.terrain = new MarsTerrainManager(this.scene, { gridEnabled: 1.0 });
+    this.terrain = new MarsTerrainManager(this.scene, { gridEnabled: 0.0 });
 
     // 3. Martian Scatter (Rocks & POIs)
     this.scatter = new MarsScatterManager(this.scene);
@@ -71,6 +71,7 @@ export class MarsGameEngine {
     this.roverModel = new MarsRoverModel();
     this.scene.add(this.roverModel.group);
     this.physics = new MarsRoverPhysics(this.roverModel);
+    this.physics.collider = this.scatter;
 
     // 5. Audio Synthesizer
     this.audio = new MarsAudioEngine();
@@ -182,9 +183,18 @@ export class MarsGameEngine {
     // 3. Update Vehicle Physics
     this.physics.update(dt, this.input.state);
 
+    // Collision impact feedback (boulders, monuments)
+    if (this.physics.impact > 2.0) {
+      const k = Math.min(2.0, this.physics.impact / 10.0);
+      this.audio.playImpact(k);
+      this.cameraController.addShake(this.physics.impact * 0.1);
+      this.atmosphere.burstDust(this.physics.position, k * 0.7);
+    }
+    this.physics.impact = 0;
+
     // Landing impact detection
     if (this.lastOnGround === 0 && this.physics.onGroundCount > 0) {
-      const impactSpeed = Math.abs(this.physics.velocity.y);
+      const impactSpeed = this.physics.landSpeed || 0;
       if (impactSpeed > 4.0) {
         this.audio.playImpact(Math.min(2.0, impactSpeed / 8.0));
         this.cameraController.addShake(impactSpeed * 0.08);

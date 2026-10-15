@@ -8,14 +8,14 @@ import { getMarsHeight } from './noise.js';
 export function createMarsTerrainMaterial(options = {}) {
   const uniforms = {
     uSunDirection: { value: new THREE.Vector3(0.5, 0.65, 0.45).normalize() },
-    uSunColor: { value: new THREE.Color(0xffeedd) },
-    uAmbientColor: { value: new THREE.Color(0x3e231b) },
-    uMarsSandColor: { value: new THREE.Color(0xc25e38) },         // Rich iron-oxide ochre
-    uMarsSandLightColor: { value: new THREE.Color(0xd8784e) },    // Sun-baked dune crest sand
-    uMarsDuneShadowColor: { value: new THREE.Color(0x6e2816) },   // Warm deep rust shadow
-    uMarsBedrockColor: { value: new THREE.Color(0x8a5843) },      // Layered sedimentary bedrock slabs
-    uMarsBasaltRockColor: { value: new THREE.Color(0x38221c) },   // Dark exposed volcanic rock
-    uMarsDustHazeColor: { value: new THREE.Color(0xda8e6c) },     // Horizon dust haze match
+    uSunColor: { value: new THREE.Color(0xffe6d0) },
+    uAmbientColor: { value: new THREE.Color(0x6a4438) },
+    uMarsSandColor: { value: new THREE.Color(0xd08a62) },         // Pale salmon drift sand
+    uMarsSandLightColor: { value: new THREE.Color(0xdf9d74) },    // Sun-lit slab tops / crests
+    uMarsDuneShadowColor: { value: new THREE.Color(0x7c3e2a) },   // Warm shadow & cracks
+    uMarsBedrockColor: { value: new THREE.Color(0xc4724a) },      // Orange sedimentary slabs
+    uMarsBasaltRockColor: { value: new THREE.Color(0x7a4632) },   // Darker rust rock on steep faces
+    uMarsDustHazeColor: { value: new THREE.Color(0xe0aa8c) },     // Horizon dust haze match
     uGridColor: { value: new THREE.Color(0x28120b) },
     uGridEnabled: { value: options.gridEnabled !== undefined ? options.gridEnabled : 1.0 },
     uGridScale: { value: 10.0 }, // 10 meter topographical survey grid
@@ -69,21 +69,22 @@ export function createMarsTerrainMaterial(options = {}) {
       return fract(sin(p) * 43758.5453);
     }
 
-    // Procedural Voronoi cellular pattern for sedimentary rock pavers/bedrock slabs
-    float voronoiBedrock(vec2 p) {
+    // Voronoi slabs: x = distance to nearest slab border (cracks), y = per-slab random id
+    vec2 voronoiBedrock(vec2 p) {
       vec2 n = floor(p);
       vec2 f = fract(p);
-      float minDist = 1.0;
+      float d1 = 8.0, d2 = 8.0, id = 0.0;
       for (int j = -1; j <= 1; j++) {
         for (int i = -1; i <= 1; i++) {
           vec2 g = vec2(float(i), float(j));
           vec2 o = hash2(n + g);
           vec2 r = g + o - f;
           float d = dot(r, r);
-          minDist = min(minDist, d);
+          if (d < d1) { d2 = d1; d1 = d; id = o.x; }
+          else if (d < d2) { d2 = d; }
         }
       }
-      return sqrt(minDist);
+      return vec2(sqrt(d2) - sqrt(d1), id);
     }
 
     float hash11(vec2 p) {
@@ -142,16 +143,20 @@ export function createMarsTerrainMaterial(options = {}) {
       float wrap = 0.32;
       float diffuse = clamp((NdotL + wrap) / (1.0 + wrap), 0.0, 1.0);
 
-      // 1. Procedural Sedimentary Bedrock Flagstones (NASA reference)
-      // Cellular rock slabs emerging through the drift sand
-      float bedrockCell = voronoiBedrock(vWorldPosition.xz * 0.18);
-      float rockSlabFactor = smoothstep(0.35, 0.65, bedrockCell);
+      // 1. Cracked sedimentary flagstone pavement (reference photo): slabs of varying tint separated by
+      // dark cracks, with sand drifts pooling in low patches
+      vec2 slab = voronoiBedrock(vWorldPosition.xz * 0.33);
+      float crack = 1.0 - smoothstep(0.0, 0.1, slab.x);
+      float sandMix = smoothstep(0.55, 0.88, vnoise(vWorldPosition.xz * 0.03 + 4.0)) * 0.55;
+      float rockSlabFactor = 1.0 - sandMix;
 
-      // 2. Slope based material: flat areas are sand & bedrock plates; steep slopes are dark basalt
-      float steepFactor = smoothstep(0.24, 0.58, vSlope);
+      // 2. Steep slopes shed sand and show darker rust rock
+      float steepFactor = smoothstep(0.30, 0.65, vSlope);
 
-      // Blend Sand with Bedrock Slabs
-      vec3 surfaceAlbedo = mix(uMarsSandColor, uMarsBedrockColor, rockSlabFactor * 0.55);
+      vec3 slabCol = mix(uMarsBedrockColor, uMarsSandLightColor, slab.y * 0.55);
+      slabCol *= 0.9 + 0.2 * vnoise(vWorldPosition.xz * 7.0) + (vnoise(vWorldPosition.xz * 1.3) - 0.5) * 0.12;
+      vec3 surfaceAlbedo = mix(slabCol, uMarsSandColor, sandMix);
+      surfaceAlbedo = mix(surfaceAlbedo, uMarsDuneShadowColor * 0.55, crack * 0.7 * rockSlabFactor);
 
       // Multi-scale sand mottling: broad drifts, medium patches, fine speckle
       float mottleLarge = vnoise(vWorldPosition.xz * 0.045);
@@ -230,7 +235,7 @@ export function createMarsTerrainMaterial(options = {}) {
 
 // Terrain Chunk Dimensions & Progressive Streaming Configuration
 export const CHUNK_SIZE = 120.0;
-export const CHUNK_SEGMENTS = 28; // Uniform resolution eliminates edge cracks/LOD tears
+export const CHUNK_SEGMENTS = 48; // 2.5m cells: resolves bedrock ledges, ramps and steep dunes
 export const GRID_RADIUS = 3;     // 7x7 = 49 total active chunks covering ~840m x 840m
 
 export class MarsTerrainManager {
