@@ -144,6 +144,16 @@ export class MarsGameEngine {
       onStage: () => {
         this.handleFlightStageAction();
       },
+      onToggleAutoMission: () => {
+        this.missionPhysics.toggleAutoMission();
+      },
+      onToggleBoosterTracking: () => {
+        this.missionPhysics.toggleBoosterTracking();
+      },
+      onSelectCamera: (camMode) => {
+        this.cameraController.setFlightMode(camMode);
+        this.flightHud.notifyCameraMode(camMode);
+      },
       onToggleCamera: () => {
         const nextMode = this.cameraController.nextFlightMode();
         this.flightHud.notifyCameraMode(nextMode);
@@ -214,6 +224,7 @@ export class MarsGameEngine {
       if (roverHud) roverHud.style.display = 'none';
       if (mobileControls) mobileControls.style.display = 'none';
       this.flightHud.show(true, this.input.isMobile);
+      this.flightHud.notifyCameraMode(this.cameraController.getFlightMode());
 
       // Silence rover motor while in flight
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });

@@ -10,7 +10,7 @@ export class MarsCameraController {
     this.modes = ['CHASE', 'CLOSE', 'COCKPIT', 'DRONE'];
     this.modeIndex = 0;
 
-    this.flightModes = ['CHASE', 'COCKPIT', 'PANORAMA', 'FREE_ORBIT', 'ENGINE_CAM'];
+    this.flightModes = ['CHASE', 'GROUND_CAM', 'TOWER_CAM', 'COCKPIT', 'PANORAMA', 'FREE_ORBIT', 'ENGINE_CAM'];
     this.flightModeIndex = 0;
 
     this.targetPos = new THREE.Vector3();
@@ -70,6 +70,14 @@ export class MarsCameraController {
 
   nextFlightMode() {
     this.flightModeIndex = (this.flightModeIndex + 1) % this.flightModes.length;
+    return this.flightModes[this.flightModeIndex];
+  }
+
+  setFlightMode(modeName) {
+    const idx = this.flightModes.indexOf(modeName);
+    if (idx !== -1) {
+      this.flightModeIndex = idx;
+    }
     return this.flightModes[this.flightModeIndex];
   }
 
@@ -260,6 +268,48 @@ export class MarsCameraController {
         this.currentPos.set(shipPos.x + offsetX, shipPos.y + offsetY, shipPos.z + offsetZ);
         this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
       }
+    } else if (mode === 'GROUND_CAM') {
+      // Ground tracking telephoto camera stationed near Starbase station & control dome (padCoords + offset)
+      const padX = physics.padCoords.x;
+      const padZ = physics.padCoords.y;
+      const stationX = padX - 78.0;
+      const stationZ = padZ - 42.0;
+      const groundY = getMarsHeight(stationX, stationZ) + 3.2;
+      this.currentPos.set(stationX, groundY, stationZ);
+
+      // Dynamic tracking: Track booster during catch or if tracking is toggled; otherwise track Starship
+      const isBoosterCatching = physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT' ||
+        (physics.boosterTracking && physics.boosterState !== 'ATTACHED');
+
+      if (isBoosterCatching && physics.boosterPosition) {
+        this.currentLook.copy(physics.boosterPosition);
+      } else {
+        this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
+      }
+
+      // Dynamic telephoto zoom: FOV narrows down from 56° to 16° as vehicle ascends toward space
+      const dist = this.currentPos.distanceTo(this.currentLook);
+      const telephotoFov = THREE.MathUtils.clamp(56.0 - (dist / 750.0) * 40.0, 16.0, 56.0);
+      this.camera.fov = telephotoFov;
+      this.camera.updateProjectionMatrix();
+
+    } else if (mode === 'TOWER_CAM') {
+      // Camera mounted 115m high on Mechazilla Tower overlooking chopsticks & launch mount (Ref Image 1)
+      const towerX = physics.padCoords.x + 18.0;
+      const towerZ = physics.padCoords.y;
+      const towerY = physics.padElevation + 115.0;
+      this.currentPos.set(towerX, towerY, towerZ);
+
+      if (physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT') {
+        this.currentLook.copy(physics.boosterPosition);
+      } else if (physics.phase === 'ON_PAD' || physics.phase === 'COUNTDOWN') {
+        this.currentLook.set(physics.padCoords.x, physics.padElevation + 45.0, physics.padCoords.y);
+      } else {
+        this.currentLook.set(physics.padCoords.x, physics.padElevation + 75.0, physics.padCoords.y);
+      }
+      this.camera.fov = 68.0;
+      this.camera.updateProjectionMatrix();
+
     } else if (mode === 'COCKPIT') {
       // First-person cockpit view: mounted at the Starship forward nosecone visor looking out
       const noseHeight = physics.vehicle?.isMated ? 115.0 : 42.0;

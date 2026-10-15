@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 
 // -------------------------------------------------------------
-// SpaceX Starship + Super Heavy Stack & Launch Complex
+// SpaceX Starship + Super Heavy Stack & Expanded Mars Starbase
 // Accurately reflects:
-// 1. Orbital Launch Mount (OLM) & 140m Mechazilla Tower with Chopsticks (Ref Image 0)
-// 2. Super Heavy Booster with 33 Raptors, grid fins, and hot-staging ring
-// 3. Starship upper stage with black ceramic heat shield, flaps, 6 Raptors
-// 4. Vacuum "Space Jellyfish" twilight plume (Ref Image 1)
-// 5. Hypersonic ionized plasma re-entry sheath (Ref Image 2)
+// 1. Orbital Launch Mount (OLM) & 145m Mechazilla Tower with functional Chopsticks (Ref Image 0, 1)
+// 2. Super Heavy Booster with 33 Raptors, grid fins, and forward catch pins (Ref Image 1)
+// 3. Starship upper stage with ogive nosecone, black ceramic heat shield, flaps, cargo bay doors & elevator crane (Ref Image 2, 3)
+// 4. Expanded Mars Starbase with multiple landed Starships, open cargo bays, rover trailers, and cryo tanks (Ref Image 2, 3)
+// 5. Vacuum "Space Jellyfish" twilight plume & hypersonic plasma sheath
 // -------------------------------------------------------------
 
 let _cachedSteel = null;
@@ -132,6 +132,18 @@ export class StarshipMissionVehicle {
       wireframe: true
     });
 
+    this.matConcrete = new THREE.MeshStandardMaterial({
+      color: 0x48423c,
+      roughness: 0.92,
+      metalness: 0.1
+    });
+
+    this.matWhiteTank = new THREE.MeshStandardMaterial({
+      color: 0xe6e4e0,
+      roughness: 0.35,
+      metalness: 0.65
+    });
+
     // Build vehicle sub-assemblies
     this.boosterGroup = new THREE.Group();
     this.starshipGroup = new THREE.Group();
@@ -154,16 +166,22 @@ export class StarshipMissionVehicle {
   }
 
   // -------------------------------------------------------------
-  // 1. ORBITAL LAUNCH MOUNT (OLM) & MECHAZILLA TOWER (Ref Image 0)
+  // 1. ORBITAL LAUNCH MOUNT (OLM), MECHAZILLA TOWER & EXPANDED STARBASE (Ref Images 0, 1, 2, 3)
   // -------------------------------------------------------------
   buildLaunchComplex() {
     const pad = this.launchPadGroup;
+
+    // Primary Launch Pad 1 Concrete Foundation
+    const padBaseGeo = new THREE.CylinderGeometry(32, 34, 3.5, 32);
+    const padBase = new THREE.Mesh(padBaseGeo, this.matConcrete);
+    padBase.position.y = 1.75;
+    padBase.receiveShadow = true;
+    pad.add(padBase);
 
     // OLM Base Ring Mount (elevates rocket 22m above ground)
     const tableRadius = 8.5;
     const tableHeight = 22.0;
 
-    // Table ring
     const ringGeo = new THREE.CylinderGeometry(tableRadius, tableRadius + 1.2, 4.0, 32);
     const ringMesh = new THREE.Mesh(ringGeo, this.matTower);
     ringMesh.position.y = tableHeight - 2.0;
@@ -186,11 +204,12 @@ export class StarshipMissionVehicle {
       pad.add(leg);
     }
 
-    // 145m Mechazilla Tower (offset 16m from rocket center)
+    // 145m Mechazilla Tower (offset 18m from rocket center along +X)
     const towerX = 18.0;
     const towerZ = 0.0;
     const towerHeight = 145.0;
     const towerWidth = 9.0;
+    this.towerPosition = new THREE.Vector3(towerX, 0, towerZ);
 
     // 4 Main Tower Column Legs
     const columnGeo = new THREE.BoxGeometry(1.2, towerHeight, 1.2);
@@ -222,31 +241,291 @@ export class StarshipMissionVehicle {
       pad.add(beamZ2);
     }
 
-    // Top Tower Crane boom
-    const craneBoom = new THREE.Mesh(new THREE.BoxGeometry(22, 1.8, 1.8), this.matTower);
-    craneBoom.position.set(towerX - 5, towerHeight + 2, towerZ);
+    // Top Tower Crane Boom
+    const craneBoom = new THREE.Mesh(new THREE.BoxGeometry(24, 1.8, 1.8), this.matTower);
+    craneBoom.position.set(towerX - 6, towerHeight + 2, towerZ);
     pad.add(craneBoom);
 
-    // Chopstick Arms Carriage (Mechazilla arms that cradle the booster & ship)
-    this.chopsticks = new THREE.Group();
-    this.chopsticks.position.set(towerX - towerWidth / 2, 85, towerZ);
+    // Functional Articulated Chopsticks Carriage (Ref Image 1: The Mechazilla Catch Arms!)
+    this.chopsticksCarriage = new THREE.Group();
+    this.chopsticksCarriage.position.set(towerX - towerWidth / 2, 85, towerZ);
 
-    const armGeo = new THREE.BoxGeometry(18, 1.6, 1.4);
+    const carriageFrame = new THREE.Mesh(new THREE.BoxGeometry(4.0, 8.0, 11.0), this.matDarkMetal);
+    carriageFrame.position.set(1.5, 0, 0);
+    this.chopsticksCarriage.add(carriageFrame);
+
+    const armGeo = new THREE.BoxGeometry(20, 1.6, 1.4);
+    armGeo.translate(-10, 0, 0); // pivot at root
+
+    // Left Chopstick Arm with Hinge
+    this.leftChopstickHinge = new THREE.Group();
+    this.leftChopstickHinge.position.set(0, 0, -4.6);
     const leftArm = new THREE.Mesh(armGeo, this.matDarkMetal);
-    leftArm.position.set(-9, 0, -4.5);
-    leftArm.rotation.y = 0.22;
-    this.chopsticks.add(leftArm);
+    leftArm.castShadow = true;
+    this.leftChopstickHinge.add(leftArm);
+    this.leftChopstickHinge.rotation.y = 0.22;
+    this.chopsticksCarriage.add(this.leftChopstickHinge);
 
+    // Right Chopstick Arm with Hinge
+    this.rightChopstickHinge = new THREE.Group();
+    this.rightChopstickHinge.position.set(0, 0, 4.6);
     const rightArm = new THREE.Mesh(armGeo, this.matDarkMetal);
-    rightArm.position.set(-9, 0, 4.5);
-    rightArm.rotation.y = -0.22;
-    this.chopsticks.add(rightArm);
+    rightArm.castShadow = true;
+    this.rightChopstickHinge.add(rightArm);
+    this.rightChopstickHinge.rotation.y = -0.22;
+    this.chopsticksCarriage.add(this.rightChopstickHinge);
 
-    pad.add(this.chopsticks);
+    pad.add(this.chopsticksCarriage);
+
+    // Quick Disconnect (QD) Umbilical Arm connecting tower to rocket
+    const qdArm = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 1.8), this.matTower);
+    qdArm.position.set(towerX - 8.5, 36, towerZ);
+    pad.add(qdArm);
+
+    // Build the broader Mars Starbase complex (Ref Images 2 & 3)
+    this.buildExpandedMarsStarbase(pad);
   }
 
   // -------------------------------------------------------------
-  // 2. SUPER HEAVY BOOSTER (STAGE 1)
+  // EXPANDED MARS STARBASE: Landed Starships, Cargo Docks & Tanks (Ref Images 2 & 3)
+  // -------------------------------------------------------------
+  buildExpandedMarsStarbase(pad) {
+    // 1. Concrete Landing Pad 2 (135m East: X = 135, Z = 55)
+    const pad2Geo = new THREE.CylinderGeometry(28, 30, 2.5, 32);
+    const pad2 = new THREE.Mesh(pad2Geo, this.matConcrete);
+    pad2.position.set(135, 1.25, 55);
+    pad2.receiveShadow = true;
+    pad.add(pad2);
+
+    // Landed Cargo Starship #1 standing tall with OPEN cargo doors & elevator crane! (Ref Images 2 & 3)
+    const landedCargoShip = this.createStaticStarshipMesh({ withCargoOpen: true, withLegs: true });
+    landedCargoShip.position.set(135, 2.5, 55);
+    pad.add(landedCargoShip);
+
+    // Rover Trailers & Cargo Logistics Containers around Landed Ship 1 (Ref Image 2 & 3)
+    const crateGeo = new THREE.BoxGeometry(4.2, 2.4, 2.6);
+    const crateMat = new THREE.MeshStandardMaterial({ color: 0x8a9098, metalness: 0.8, roughness: 0.4 });
+    const crate1 = new THREE.Mesh(crateGeo, crateMat);
+    crate1.position.set(135 + 14, 1.4, 55 + 8);
+    crate1.castShadow = true;
+    pad.add(crate1);
+
+    const crate2 = new THREE.Mesh(new THREE.BoxGeometry(5.0, 2.2, 2.8), crateMat);
+    crate2.position.set(135 + 16, 1.3, 55 - 10);
+    crate2.castShadow = true;
+    pad.add(crate2);
+
+    // Pressurized Rover Logistics Pod on wheels (Ref Image 2 & 3)
+    const roverPod = new THREE.Group();
+    const podBody = new THREE.Mesh(new THREE.BoxGeometry(6.5, 2.8, 3.4), this.matWhiteTank);
+    podBody.position.y = 2.2;
+    roverPod.add(podBody);
+    // Wheels
+    for (let wx of [-2.4, 0, 2.4]) {
+      for (let wz of [-1.9, 1.9]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.6, 16), this.matDarkMetal);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(wx, 0.75, wz);
+        roverPod.add(wheel);
+      }
+    }
+    roverPod.position.set(135 - 18, 0, 55 + 12);
+    pad.add(roverPod);
+
+    // 2. Concrete Landing Pad 3 (210m Northeast: X = 190, Z = -140)
+    const pad3Geo = new THREE.CylinderGeometry(28, 30, 2.5, 32);
+    const pad3 = new THREE.Mesh(pad3Geo, this.matConcrete);
+    pad3.position.set(190, 1.25, -140);
+    pad3.receiveShadow = true;
+    pad.add(pad3);
+
+    // Landed Crew Starship #2 standing on landing legs
+    const landedCrewShip = this.createStaticStarshipMesh({ withCargoOpen: false, withLegs: true });
+    landedCrewShip.position.set(190, 2.5, -140);
+    pad.add(landedCrewShip);
+
+    // 3. Cryogenic Propellant Tank Farm (LOX + LCH4)
+    const tankGeo = new THREE.CylinderGeometry(4.8, 4.8, 24, 24);
+    const tankCapGeo = new THREE.SphereGeometry(4.8, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.5);
+
+    const tankPositions = [
+      [-65, 55], [-65, 75], [-65, 95],
+      [-80, 55], [-80, 75], [-80, 95]
+    ];
+
+    for (const [tx, tz] of tankPositions) {
+      const tank = new THREE.Mesh(tankGeo, this.matWhiteTank);
+      tank.position.set(tx, 12, tz);
+      tank.castShadow = true;
+      pad.add(tank);
+
+      const cap = new THREE.Mesh(tankCapGeo, this.matWhiteTank);
+      cap.position.set(tx, 24, tz);
+      pad.add(cap);
+    }
+
+    // Pipeline Manifold connecting tanks to launch table
+    const pipeGeo = new THREE.CylinderGeometry(0.7, 0.7, 85, 12);
+    pipeGeo.rotateZ(Math.PI / 2);
+    const pipe = new THREE.Mesh(pipeGeo, this.matDarkMetal);
+    pipe.position.set(-25, 4.0, 75);
+    pad.add(pipe);
+
+    // 4. Starbase Pressurized Control Center & Geodesic Dome
+    const domeGeo = new THREE.SphereGeometry(16, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const dome = new THREE.Mesh(domeGeo, new THREE.MeshStandardMaterial({
+      color: 0xe0ddd8,
+      metalness: 0.85,
+      roughness: 0.28
+    }));
+    dome.position.set(-85, 0, -45);
+    dome.castShadow = true;
+    pad.add(dome);
+
+    // Satellite Comm Dish on Control Dome
+    const dishGeo = new THREE.SphereGeometry(3.5, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.4);
+    const dish = new THREE.Mesh(dishGeo, this.matSteel);
+    dish.rotation.x = -Math.PI / 3;
+    dish.position.set(-85, 18, -45);
+    pad.add(dish);
+
+    // 5. High-Power Perimeter Floodlight Masts
+    const lightMastGeo = new THREE.CylinderGeometry(0.5, 0.8, 36, 10);
+    const mastPositions = [
+      [45, 60], [-45, 60], [45, -60], [-45, -60]
+    ];
+    for (const [mx, mz] of mastPositions) {
+      const mast = new THREE.Mesh(lightMastGeo, this.matDarkMetal);
+      mast.position.set(mx, 18, mz);
+      pad.add(mast);
+
+      const spot = new THREE.PointLight(0xfff0dd, 0.85, 90, 1.6);
+      spot.position.set(mx, 36, mz);
+      pad.add(spot);
+    }
+  }
+
+  // Helper to build realistic static Starships for Mars Starbase (Ref Images 2 & 3)
+  createStaticStarshipMesh({ withCargoOpen = false, withLegs = true }) {
+    const ship = new THREE.Group();
+    const r = 4.5;
+    const barrelH = 34.0;
+    const noseH = 16.0;
+
+    // Barrel
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, barrelH, 36), this.matSteel);
+    barrel.position.y = barrelH / 2;
+    barrel.castShadow = true;
+    ship.add(barrel);
+
+    // Windward Heat Shield
+    const shieldBelly = new THREE.Mesh(
+      new THREE.CylinderGeometry(r * 1.01, r * 1.01, barrelH, 36, 1, false, Math.PI * 0.5, Math.PI),
+      this.matHeatshield
+    );
+    shieldBelly.position.y = barrelH / 2;
+    ship.add(shieldBelly);
+
+    // Ogive Nosecone
+    const ogivePoints = [];
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16;
+      const y = t * noseH;
+      const rad = r * Math.cos(t * Math.PI * 0.5);
+      ogivePoints.push(new THREE.Vector2(rad, y));
+    }
+    const nose = new THREE.Mesh(new THREE.LatheGeometry(ogivePoints, 36), this.matSteel);
+    nose.position.y = barrelH;
+    nose.castShadow = true;
+    ship.add(nose);
+
+    const noseShield = new THREE.Mesh(
+      new THREE.LatheGeometry(ogivePoints, 36, Math.PI * 0.5, Math.PI),
+      this.matHeatshield
+    );
+    noseShield.scale.set(1.01, 1.0, 1.01);
+    noseShield.position.y = barrelH;
+    ship.add(noseShield);
+
+    // Flaps
+    for (const sx of [-1, 1]) {
+      // Forward flap
+      const ff = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.8, 3.2), this.matHeatshield);
+      ff.position.set(sx * (r + 1.2), barrelH + noseH * 0.45, 0);
+      ship.add(ff);
+
+      // Aft flap
+      const af = new THREE.Mesh(new THREE.BoxGeometry(0.4, 11.0, 5.2), this.matHeatshield);
+      af.position.set(sx * (r + 2.0), 6.5, 0);
+      ship.add(af);
+    }
+
+    // Deployable / Deployed Landing Legs (Ref Image 2 & 3)
+    if (withLegs) {
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const legGroup = new THREE.Group();
+        legGroup.position.set(Math.cos(a) * r, 1.5, Math.sin(a) * r);
+        legGroup.rotation.y = -a;
+
+        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 5.5, 8), this.matDarkMetal);
+        strut.position.set(0, -1.8, 1.2);
+        strut.rotation.x = 0.45;
+        legGroup.add(strut);
+
+        const footPad = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.3, 10), this.matDarkMetal);
+        footPad.position.set(0, -3.8, 2.4);
+        legGroup.add(footPad);
+
+        ship.add(legGroup);
+      }
+    }
+
+    // Gullwing Open Cargo Bay Door & Deployed Crane Elevator! (Ref Images 2 & 3)
+    if (withCargoOpen) {
+      // Open gullwing doors
+      const doorGeo = new THREE.BoxGeometry(0.2, 9.5, 4.0);
+      const leftDoor = new THREE.Mesh(doorGeo, this.matSteel);
+      leftDoor.position.set(-r - 0.4, 30, 2.8);
+      leftDoor.rotation.y = -0.7;
+      ship.add(leftDoor);
+
+      const rightDoor = new THREE.Mesh(doorGeo, this.matSteel);
+      rightDoor.position.set(r + 0.4, 30, 2.8);
+      rightDoor.rotation.y = 0.7;
+      ship.add(rightDoor);
+
+      // Illuminated Cargo Bay Interior
+      const cargoLight = new THREE.PointLight(0xffeedd, 1.6, 25);
+      cargoLight.position.set(0, 30, 2.5);
+      ship.add(cargoLight);
+
+      // Crane Suspension Cables extending down to the ground
+      const cableGeo = new THREE.CylinderGeometry(0.04, 0.04, 30, 6);
+      cableGeo.translate(0, -15, 0);
+      for (const cx of [-2.0, 2.0]) {
+        for (const cz of [2.8, 5.2]) {
+          const cable = new THREE.Mesh(cableGeo, this.matSteel);
+          cable.position.set(cx, 30, cz);
+          ship.add(cable);
+        }
+      }
+
+      // Suspended Elevator Platform carrying cargo pallets on the Martian ground! (Ref Image 2 & 3)
+      const platform = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.4, 3.8), this.matDarkMetal);
+      platform.position.set(0, 0.2, 4.0);
+      ship.add(platform);
+
+      const pallet = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.6, 2.8), this.matWhiteTank);
+      pallet.position.set(0, 1.2, 4.0);
+      ship.add(pallet);
+    }
+
+    return ship;
+  }
+
+  // -------------------------------------------------------------
+  // 2. SUPER HEAVY BOOSTER (STAGE 1) (Ref Images 0, 1)
   // -------------------------------------------------------------
   buildSuperHeavyBooster() {
     const B = this.boosterGroup;
@@ -267,6 +546,15 @@ export class StarshipMissionVehicle {
       const chine = new THREE.Mesh(chineGeo, this.matSteel);
       chine.position.set(sx * (radius + 0.15), boosterHeight * 0.45, 0);
       B.add(chine);
+    }
+
+    // Forward Catch Pins / Lifting Strakes (Ref Image 1: The exact structural pins caught by Mechazilla Chopsticks!)
+    const pinGeo = new THREE.BoxGeometry(2.4, 0.9, 1.4);
+    for (const sx of [-1, 1]) {
+      const pin = new THREE.Mesh(pinGeo, this.matDarkMetal);
+      pin.position.set(sx * (radius + 0.8), boosterHeight - 4.5, 0);
+      pin.castShadow = true;
+      B.add(pin);
     }
 
     // 4 Hexagonal Grid Fins at the top (steer booster during atmospheric return)
@@ -304,7 +592,6 @@ export class StarshipMissionVehicle {
 
     // 33 Raptor Engine Cluster at Booster Base
     const raptorGeo = new THREE.CylinderGeometry(0.4, 0.75, 1.8, 16);
-    this.boosterPlumes = [];
 
     // Outer ring (20 fixed engines)
     for (let i = 0; i < 20; i++) {
@@ -322,7 +609,7 @@ export class StarshipMissionVehicle {
       bell.position.set(Math.cos(a) * r, -0.6, Math.sin(a) * r);
       B.add(bell);
     }
-    // Center cluster (3 gimbaling center engines)
+    // Center cluster (3 gimbaling center engines firing during catch!)
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2;
       const r = radius * 0.22;
@@ -363,25 +650,20 @@ export class StarshipMissionVehicle {
     );
     B.add(this.boosterShockCore);
 
-    // Booster Light
     this.boosterLight = new THREE.PointLight(0xff8822, 0, 160);
     this.boosterLight.position.set(0, -5, 0);
     B.add(this.boosterLight);
   }
 
   // -------------------------------------------------------------
-  // 3. STARSHIP UPPER STAGE (STAGE 2) (Ref Images 0, 1, 2)
+  // 3. STARSHIP UPPER STAGE (STAGE 2) (Ref Images 0, 1, 2, 3)
   // -------------------------------------------------------------
   buildStarship() {
     const S = this.starshipGroup;
-    const r = 4.5; // 9m diameter
+    const r = 4.5;
     const barrelH = 34.0;
     const noseH = 16.0;
     this.shipHeight = barrelH + noseH;
-
-    // Cylinder body: Front half (Z > 0) has black tiles, back half (Z < 0) has stainless steel
-    // We achieve this accurately with two semi-cylinders or multi-materials
-    const shipBodyMat = [this.matSteel, this.matHeatshield];
 
     // Main barrel cylinder
     const barrelGeo = new THREE.CylinderGeometry(r, r, barrelH, 48, 8);
@@ -396,18 +678,32 @@ export class StarshipMissionVehicle {
     shieldBelly.position.y = barrelH / 2;
     S.add(shieldBelly);
 
-    // Aerodynamic Nosecone (Gothic ogive arched nose)
-    const noseGeo = new THREE.ConeGeometry(r, noseH, 48);
-    const nose = new THREE.Mesh(noseGeo, this.matSteel);
-    nose.position.y = barrelH + noseH / 2;
+    // Authentic Gothic Ogive Nosecone (Ref Image 0, 2, 3)
+    const ogivePoints = [];
+    const ogiveSteps = 18;
+    for (let i = 0; i <= ogiveSteps; i++) {
+      const t = i / ogiveSteps; // 0 at base -> 1 at tip
+      const y = t * noseH;
+      const rad = r * Math.cos(t * Math.PI * 0.5);
+      ogivePoints.push(new THREE.Vector2(rad, y));
+    }
+    const noseSteelGeo = new THREE.LatheGeometry(ogivePoints, 48);
+    const nose = new THREE.Mesh(noseSteelGeo, this.matSteel);
+    nose.position.y = barrelH;
     nose.castShadow = true;
     S.add(nose);
 
     // Nosecone Heatshield half
-    const noseShieldGeo = new THREE.ConeGeometry(r * 1.01, noseH, 48, 1, false, Math.PI * 0.5, Math.PI);
+    const noseShieldGeo = new THREE.LatheGeometry(ogivePoints, 48, Math.PI * 0.5, Math.PI);
+    noseShieldGeo.scale(1.008, 1.0, 1.008);
     const noseShield = new THREE.Mesh(noseShieldGeo, this.matHeatshield);
-    noseShield.position.y = barrelH + noseH / 2;
+    noseShield.position.y = barrelH;
     S.add(noseShield);
+
+    // Raceway conduit down the leeward spine
+    const raceway = new THREE.Mesh(new THREE.BoxGeometry(0.35, barrelH + noseH * 0.6, 0.4), this.matDarkMetal);
+    raceway.position.set(0, (barrelH + noseH * 0.6) / 2, r + 0.1);
+    S.add(raceway);
 
     // 4 Articulating Aerodynamic Flaps for Hypersonic Re-entry Belly-flop Control!
     this.forwardFlaps = [];
@@ -441,8 +737,59 @@ export class StarshipMissionVehicle {
       this.aftFlaps.push({ hinge, side: sx });
     }
 
+    // Deployable Landing Legs for Mars Touchdown (Ref Image 2 & 3)
+    this.landingLegs = [];
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const legPivot = new THREE.Group();
+      legPivot.position.set(Math.cos(a) * (r - 0.2), 1.8, Math.sin(a) * (r - 0.2));
+      legPivot.rotation.y = -a;
+
+      const legStrut = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 4.8, 8), this.matDarkMetal);
+      legStrut.position.set(0, -1.6, 0.9);
+      legStrut.rotation.x = 0.35;
+      legPivot.add(legStrut);
+
+      const padMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.25, 10), this.matDarkMetal);
+      padMesh.position.set(0, -3.2, 1.8);
+      legPivot.add(padMesh);
+
+      legPivot.scale.set(0.001, 0.001, 0.001); // starts retracted in flight
+      S.add(legPivot);
+      this.landingLegs.push(legPivot);
+    }
+
+    // Gullwing Cargo Bay Doors & Interior Crane (Ref Image 2 & 3)
+    this.cargoBayGroup = new THREE.Group();
+    this.cargoBayGroup.position.set(0, 26.0, r);
+
+    // Left Gullwing Door
+    this.cargoDoorLeft = new THREE.Mesh(new THREE.BoxGeometry(0.25, 9.0, 3.8), this.matSteel);
+    this.cargoDoorLeft.position.set(-2.0, 0, 0);
+    this.cargoBayGroup.add(this.cargoDoorLeft);
+
+    // Right Gullwing Door
+    this.cargoDoorRight = new THREE.Mesh(new THREE.BoxGeometry(0.25, 9.0, 3.8), this.matSteel);
+    this.cargoDoorRight.position.set(2.0, 0, 0);
+    this.cargoBayGroup.add(this.cargoDoorRight);
+
+    // Cargo Elevator Platform & Crane Cables
+    this.cargoPlatform = new THREE.Group();
+    this.cargoPlatform.position.set(0, 0, 0);
+
+    const platformFloor = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.3, 3.2), this.matDarkMetal);
+    this.cargoPlatform.add(platformFloor);
+
+    const cargoPod = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.6, 2.2), this.matWhiteTank);
+    cargoPod.position.y = 0.95;
+    this.cargoPlatform.add(cargoPod);
+
+    this.cargoPlatform.visible = false;
+    this.cargoBayGroup.add(this.cargoPlatform);
+
+    S.add(this.cargoBayGroup);
+
     // 6 Starship Raptor Engines: 3 Vacuum (large bell) + 3 Sea-level
-    // 3 Vacuum Raptors (Raptor Vac with huge expansion bells)
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2;
       const vacBellGeo = new THREE.CylinderGeometry(0.5, 1.4, 2.6, 20);
@@ -450,7 +797,6 @@ export class StarshipMissionVehicle {
       vacBell.position.set(Math.cos(a) * 2.5, -1.0, Math.sin(a) * 2.5);
       S.add(vacBell);
     }
-    // 3 Center Gimbaling Raptors
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2 + Math.PI / 3;
       const slBellGeo = new THREE.CylinderGeometry(0.3, 0.7, 1.6, 16);
@@ -484,8 +830,7 @@ export class StarshipMissionVehicle {
   // 4. SPECIAL FX: SPACE JELLYFISH PLUME & HYPERSONIC PLASMA SHEATH
   // -------------------------------------------------------------
   buildFX() {
-    // A. "SPACE JELLYFISH" Twilight Expansion Plume (Ref Image 1)
-    // At high altitudes / space, exhaust expands into a vast luminous bell nebula
+    // "SPACE JELLYFISH" Twilight Expansion Plume (Ref Image 1)
     const jellyGeo = new THREE.SphereGeometry(45, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.75);
     jellyGeo.rotateX(Math.PI);
     jellyGeo.scale(1.0, 2.4, 1.0);
@@ -520,11 +865,12 @@ export class StarshipMissionVehicle {
         varying vec3 vPos;
 
         void main() {
-          if (uIntensity <= 0.001) discard;
-          float rim = 1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0)));
-          float falloff = smoothstep(120.0, 0.0, abs(vPos.y));
-          vec3 col = mix(uColorCore, uColorOuter, smoothstep(0.0, 45.0, length(vPos.xz)));
-          float alpha = pow(rim, 1.8) * falloff * uIntensity * 0.75;
+          if (uIntensity <= 0.005) discard;
+          float y = -vPos.y / 110.0;
+          float fres = pow(1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0))), 2.0);
+          float ripple = sin(vPos.y * 0.2 - uTime * 6.0) * 0.15 + sin(vPos.x * 0.3) * 0.1;
+          vec3 col = mix(uColorCore, uColorOuter, clamp(y * 1.2 + ripple, 0.0, 1.0));
+          float alpha = clamp(fres * (1.0 - y * 0.7) * uIntensity * 1.5, 0.0, 0.85);
           gl_FragColor = vec4(col, alpha);
         }
       `
@@ -532,11 +878,9 @@ export class StarshipMissionVehicle {
     this.jellyfishMesh = new THREE.Mesh(jellyGeo, this.jellyfishMat);
     this.starshipGroup.add(this.jellyfishMesh);
 
-    // B. HYPERSONIC IONIZED PLASMA RE-ENTRY SHEATH (Ref Image 2)
-    // Incandescent bow shockwave wrapping around Starship's black heatshield during belly-flop!
-    const plasmaGeo = new THREE.CylinderGeometry(5.2, 5.2, 38, 32, 1, true, Math.PI * 0.45, Math.PI * 1.1);
-    plasmaGeo.scale(1.2, 1.05, 1.35);
-    plasmaGeo.translate(0, 19, -0.6);
+    // HYPERSONIC IONIZED PLASMA SHEATH (Ref Image 2)
+    const plasmaGeo = new THREE.CylinderGeometry(5.2, 5.8, 38, 32, 1, true, Math.PI * 0.45, Math.PI * 1.1);
+    plasmaGeo.translate(0, 19, -0.2);
 
     this.plasmaMat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
@@ -545,7 +889,7 @@ export class StarshipMissionVehicle {
       blending: THREE.AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
-        uHeat: { value: 0.0 } // 0.0 = cold, 1.0 = peak heating (1600°C)
+        uHeat: { value: 0.0 }
       },
       vertexShader: `
         varying vec3 vNormal;
@@ -554,7 +898,6 @@ export class StarshipMissionVehicle {
         void main() {
           vNormal = normalize(normalMatrix * normal);
           vPos = position;
-          // Turbulent fluttering ripple along shockwave
           vec3 pos = position;
           pos += normal * (sin(pos.y * 0.5 - uTime * 25.0) * 0.15);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
@@ -568,8 +911,6 @@ export class StarshipMissionVehicle {
 
         void main() {
           if (uHeat <= 0.005) discard;
-          // Gradient from blazing incandescent white-yellow stagnation core
-          // to magenta/violet ionized plasma halo and cyan trail (Ref Image 2)
           vec3 stagnation = vec3(1.0, 0.95, 0.7);
           vec3 ionizedMagenta = vec3(0.95, 0.2, 0.75);
           vec3 ionizedViolet = vec3(0.55, 0.25, 1.0);
@@ -580,10 +921,8 @@ export class StarshipMissionVehicle {
           plasmaCol = mix(plasmaCol, ionizedViolet, smoothstep(0.5, 0.8, t));
           plasmaCol = mix(plasmaCol, ribbonCyan, smoothstep(0.8, 1.0, t));
 
-          // Edge glow / Fresnel
           float rim = pow(1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0))), 1.5);
           float alpha = clamp(rim * uHeat * 1.3, 0.0, 0.95);
-
           gl_FragColor = vec4(plasmaCol, alpha);
         }
       `
@@ -591,7 +930,6 @@ export class StarshipMissionVehicle {
     this.plasmaMesh = new THREE.Mesh(plasmaGeo, this.plasmaMat);
     this.starshipGroup.add(this.plasmaMesh);
 
-    // Front nose shockwave cap
     const nosePlasmaGeo = new THREE.SphereGeometry(5.2, 24, 16, Math.PI * 0.5, Math.PI, 0, Math.PI * 0.5);
     nosePlasmaGeo.translate(0, 34 + 14, -0.4);
     const nosePlasma = new THREE.Mesh(nosePlasmaGeo, this.plasmaMat);
@@ -599,13 +937,49 @@ export class StarshipMissionVehicle {
   }
 
   // -------------------------------------------------------------
-  // UPDATE / ANIMATION INTERFACE
+  // ANIMATION & KINEMATICS CONTROL INTERFACE
   // -------------------------------------------------------------
   setMated(mated) {
     this.isMated = mated;
     if (mated) {
       this.starshipGroup.position.set(0, this.boosterHeight + 5.0, 0);
       this.starshipGroup.rotation.set(0, 0, 0);
+    }
+  }
+
+  // Functional Mechazilla Chopsticks Catch (Ref Image 1: 0 = open wide, 1 = clamped tight on booster pins)
+  setChopsticks(catchFactor0to1, carriageHeight = 85.0) {
+    if (!this.chopsticksCarriage || !this.leftChopstickHinge || !this.rightChopstickHinge) return;
+    this.chopsticksCarriage.position.y = carriageHeight;
+
+    // 0 = open awaiting booster (~0.42 rad), 1 = clamped shut (~0.06 rad)
+    const angle = THREE.MathUtils.lerp(0.42, 0.06, catchFactor0to1);
+    this.leftChopstickHinge.rotation.y = angle;
+    this.rightChopstickHinge.rotation.y = -angle;
+  }
+
+  // Gullwing Cargo Bay Doors & Crane Platform on Mars (Ref Image 2, 3)
+  setCargoDoors(openFactor0to1) {
+    if (!this.cargoDoorLeft || !this.cargoDoorRight || !this.cargoPlatform) return;
+    const doorAngle = openFactor0to1 * 1.25;
+    this.cargoDoorLeft.rotation.y = -doorAngle;
+    this.cargoDoorRight.rotation.y = doorAngle;
+
+    if (openFactor0to1 > 0.1) {
+      this.cargoPlatform.visible = true;
+      // Lowers platform from inside bay down towards ground
+      this.cargoPlatform.position.y = -openFactor0to1 * 26.0;
+    } else {
+      this.cargoPlatform.visible = false;
+    }
+  }
+
+  // Deployable Landing Legs for Mars Touchdown (Ref Image 2, 3)
+  setLandingLegs(deployFactor0to1) {
+    if (!this.landingLegs) return;
+    const s = Math.max(0.001, deployFactor0to1);
+    for (const leg of this.landingLegs) {
+      leg.scale.set(s, s, s);
     }
   }
 
@@ -623,7 +997,6 @@ export class StarshipMissionVehicle {
     this.starshipFlame.scale.set(1.0 + throttle * 0.3, throttle * (1.0 + Math.random() * 0.2), 1.0 + throttle * 0.3);
     this.starshipLight.intensity = active ? throttle * 22.0 : 0.0;
 
-    // Trigger vacuum jellyfish plume when above thick atmosphere
     if (this.jellyfishMat) {
       this.jellyfishMat.uniforms.uIntensity.value = (active && isVacuum) ? throttle * 0.95 : 0.0;
     }
@@ -636,7 +1009,6 @@ export class StarshipMissionVehicle {
   }
 
   setFlapDeflection(pitch, roll) {
-    // Articulate flaps for aerodynamic skydive trimming
     const fAngle = THREE.MathUtils.clamp(-pitch * 0.8 + roll * 0.4, -0.85, 0.85);
     const aAngle = THREE.MathUtils.clamp(pitch * 0.8 + roll * 0.4, -0.85, 0.85);
 

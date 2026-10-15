@@ -227,13 +227,32 @@ export default function MarsCanvas() {
       {/* Starship Aerospace Flight HUD */}
       <div id="flight-hud" className="flight-hud-layer">
         <div className="flight-top-panel">
-          <div id="flight-phase-badge" className="flight-phase-badge">PRE-LAUNCH // STARBASE OLM</div>
+          <div className="flight-title-group">
+            <div id="flight-phase-badge" className="flight-phase-badge">PRE-LAUNCH // STARBASE OLM</div>
+            <div id="flight-booster-badge" className="flight-booster-badge" style={{ display: 'none' }}>BOOSTER: ON PAD</div>
+          </div>
+
           <div className="flight-top-actions">
+            <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto Mission">
+              🎬 AUTO: ON
+            </button>
+            <button id="flight-track-booster-btn" className="hud-pill-btn flight-booster-btn" style={{ display: 'none' }} aria-label="Track Booster">
+              🎯 TRACK BOOSTER
+            </button>
             <button id="flight-cam-btn" className="hud-pill-btn flight-cam-btn" aria-label="Toggle Flight Camera">
               📹 <span id="flight-cam-badge">CAM: CHASE</span>
             </button>
             <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">✕ Exit to Rover</button>
           </div>
+        </div>
+
+        {/* Quick Camera Bar for Phone & Desktop */}
+        <div className="flight-cam-bar" id="flight-cam-bar">
+          <button className="cam-tab-btn active" data-cam="CHASE">CHASE</button>
+          <button className="cam-tab-btn" data-cam="GROUND_CAM">🎥 GROUND CAM</button>
+          <button className="cam-tab-btn" data-cam="TOWER_CAM">🗼 TOWER CAM</button>
+          <button className="cam-tab-btn" data-cam="COCKPIT">COCKPIT</button>
+          <button className="cam-tab-btn" data-cam="FREE_ORBIT">ORBIT</button>
         </div>
 
         <div id="flight-action-prompt" className="flight-action-prompt"></div>
