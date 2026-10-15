@@ -235,7 +235,7 @@ export function createMarsTerrainMaterial(options = {}) {
 
 // Terrain Chunk Dimensions & Progressive Streaming Configuration
 export const CHUNK_SIZE = 120.0;
-export const CHUNK_SEGMENTS = 40; // 2.5m cells: resolves bedrock ledges, ramps and steep dunes
+export const CHUNK_SEGMENTS = 36; // 36x36 grid: resolves dunes and rocks with fast initialization
 export const GRID_RADIUS = 3;     // 7x7 = 49 total active chunks covering ~840m x 840m
 
 export class MarsTerrainManager {
@@ -247,6 +247,7 @@ export class MarsTerrainManager {
     this.lastPlayerChunkX = NaN;
     this.lastPlayerChunkZ = NaN;
     this.pendingChunks = []; // Queue for progressive smooth chunk generation without lag spikes
+    this.initializedChunks = false;
   }
 
   getChunkKey(cx, cz) {
@@ -328,7 +329,22 @@ export class MarsTerrainManager {
 
       // Sort closest first
       chunksToGenerate.sort((a, b) => a.distSq - b.distSq);
-      this.pendingChunks = chunksToGenerate;
+
+      if (!this.initializedChunks) {
+        this.initializedChunks = true;
+        // Build immediate 9 chunks surrounding the player instantly
+        const immediate = chunksToGenerate.filter((c) => c.distSq <= 2);
+        const outer = chunksToGenerate.filter((c) => c.distSq > 2);
+        for (const item of immediate) {
+          if (!this.chunks.has(item.key)) {
+            const chunk = this.createChunkMesh(item.cx, item.cz);
+            this.chunks.set(item.key, chunk);
+          }
+        }
+        this.pendingChunks = outer;
+      } else {
+        this.pendingChunks = chunksToGenerate;
+      }
 
       // Remove distant chunks outside active radius
       for (const [key, chunk] of this.chunks.entries()) {
@@ -340,9 +356,9 @@ export class MarsTerrainManager {
       }
     }
 
-    // Smooth Progressive Chunk Generation (max 2 chunks per frame to guarantee 60fps)
+    // Smooth Progressive Chunk Generation (2 chunks per frame)
     if (this.pendingChunks.length > 0) {
-      const budget = 1;
+      const budget = 2;
       for (let b = 0; b < budget && this.pendingChunks.length > 0; b++) {
         const item = this.pendingChunks.shift();
         if (!this.chunks.has(item.key)) {

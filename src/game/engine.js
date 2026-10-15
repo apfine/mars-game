@@ -13,15 +13,21 @@ import { StarshipMissionPhysics, FLIGHT_PHASES } from '../flight/missionPhysics.
 import { MissionFlightHUD } from '../flight/missionUI.js';
 
 export class MarsGameEngine {
-  constructor(container) {
+  constructor(container, options = {}) {
     this.container = container;
+    this.options = options;
     this.quality = 'High';
     this.gridEnabled = false;
     this.disposed = false;
     this.mode = 'rover';
+    this.loadedNotified = false;
 
+    this.reportProgress(10, 'INITIALIZING SIMULATION ENGINE...');
     this.initRenderer();
+
+    this.reportProgress(20, 'CONFIGURING MARS ENVIRONMENT PIPELINE...');
     this.initScene();
+
     this.initSystems();
     this.initEvents();
 
@@ -30,6 +36,14 @@ export class MarsGameEngine {
 
     this.animate = this.animate.bind(this);
     this.animId = requestAnimationFrame(this.animate);
+  }
+
+  reportProgress(pct, status) {
+    if (this.options?.onProgress) {
+      try {
+        this.options.onProgress(pct, status);
+      } catch (_) {}
+    }
   }
 
   initRenderer() {
@@ -66,16 +80,26 @@ export class MarsGameEngine {
 
   initSystems() {
     // 1. Atmosphere & Sky
+    this.reportProgress(30, 'SYNTHESIZING CO₂ SKYDOME & DUST PARTICLES...');
     this.atmosphere = new MarsAtmosphere(this.scene);
-    this.atmosphere.buildEnvironment(this.renderer);
+    setTimeout(() => {
+      if (!this.disposed && this.atmosphere && this.renderer) {
+        try {
+          this.atmosphere.buildEnvironment(this.renderer);
+        } catch (_) {}
+      }
+    }, 60);
 
     // 2. Terrain & Dunes
+    this.reportProgress(48, 'GENERATING PROCEDURAL DUNES & CRATER SECTORS...');
     this.terrain = new MarsTerrainManager(this.scene, { gridEnabled: 0.0 });
 
     // 3. Martian Scatter (Rocks & POIs)
+    this.reportProgress(65, 'CONSTRUCTING OLYMPUS BASE & MONUMENTS...');
     this.scatter = new MarsScatterManager(this.scene);
 
     // 4. Mars Rover & Physics
+    this.reportProgress(80, 'RIGGING ROVER ROCKER-BOGIE CHASSIS...');
     this.roverModel = new MarsRoverModel();
     this.scene.add(this.roverModel.group);
     this.physics = new MarsRoverPhysics(this.roverModel);
@@ -111,6 +135,7 @@ export class MarsGameEngine {
     });
 
     // 8. SpaceX Starship & Mission Flight System
+    this.reportProgress(92, 'ERECTING 140M MECHAZILLA TOWER & STARSHIP...');
     this.starship = new StarshipMissionVehicle();
     this.scene.add(this.starship.group);
     this.missionPhysics = new StarshipMissionPhysics(this.starship, new THREE.Vector2(1400, 1150));
@@ -316,6 +341,7 @@ export class MarsGameEngine {
 
       // Render Scene
       this.renderer.render(this.scene, this.camera);
+      this.notifyFirstFrame();
       return;
     }
 
@@ -377,6 +403,19 @@ export class MarsGameEngine {
 
     // 9. Render Scene
     this.renderer.render(this.scene, this.camera);
+    this.notifyFirstFrame();
+  }
+
+  notifyFirstFrame() {
+    if (!this.loadedNotified) {
+      this.loadedNotified = true;
+      this.reportProgress(100, 'EXPEDITION SYSTEMS OPERATIONAL');
+      if (this.options?.onLoaded) {
+        try {
+          this.options.onLoaded();
+        } catch (_) {}
+      }
+    }
   }
 
   destroy() {

@@ -10,26 +10,28 @@ import * as THREE from 'three';
 // 5. Hypersonic ionized plasma re-entry sheath (Ref Image 2)
 // -------------------------------------------------------------
 
+let _cachedSteel = null;
 function createSteelTexture() {
+  if (_cachedSteel) return _cachedSteel;
   const c = document.createElement('canvas');
-  c.width = c.height = 512;
+  c.width = c.height = 256;
   const g = c.getContext('2d');
   g.fillStyle = '#dcdad5';
-  g.fillRect(0, 0, 512, 512);
+  g.fillRect(0, 0, 256, 256);
 
   // Brushed steel vertical grain
-  for (let i = 0; i < 1800; i++) {
+  for (let i = 0; i < 600; i++) {
     g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(100,105,115,0.08)';
-    g.fillRect(Math.random() * 512, 0, 1 + Math.random() * 2, 512);
+    g.fillRect(Math.random() * 256, 0, 1 + Math.random() * 2, 256);
   }
 
   // Welded ring seams every 32px
   g.strokeStyle = 'rgba(75,80,90,0.55)';
   g.lineWidth = 1.5;
-  for (let y = 0; y <= 512; y += 32) {
+  for (let y = 0; y <= 256; y += 32) {
     g.beginPath();
     g.moveTo(0, y);
-    g.lineTo(512, y);
+    g.lineTo(256, y);
     g.stroke();
   }
 
@@ -37,23 +39,26 @@ function createSteelTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(2, 6);
+  _cachedSteel = tex;
   return tex;
 }
 
+let _cachedHeatshield = null;
 function createHeatshieldTexture() {
+  if (_cachedHeatshield) return _cachedHeatshield;
   const c = document.createElement('canvas');
-  c.width = c.height = 256;
+  c.width = c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = '#111215';
-  g.fillRect(0, 0, 256, 256);
+  g.fillRect(0, 0, 128, 128);
 
   // Hexagonal tile seam grid
   g.strokeStyle = 'rgba(40,42,48,0.7)';
   g.lineWidth = 1;
   const r = 8;
   const h = r * Math.sqrt(3);
-  for (let y = 0; y < 270; y += h) {
-    for (let x = 0; x < 270; x += r * 3) {
+  for (let y = 0; y < 140; y += h) {
+    for (let x = 0; x < 140; x += r * 3) {
       drawHex(g, x, y, r);
       drawHex(g, x + r * 1.5, y + h / 2, r);
     }
@@ -63,6 +68,7 @@ function createHeatshieldTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(4, 12);
+  _cachedHeatshield = tex;
   return tex;
 }
 

@@ -858,3 +858,283 @@ html, body {
   }
 }
 
+/* -------------------------------------------------------------
+   Cinematic Martian Loading Screen
+------------------------------------------------------------- */
+.loading-screen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: radial-gradient(circle at 50% 45%, #24140f 0%, #110805 60%, #050202 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #ffffff;
+  transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.65s ease;
+  pointer-events: auto;
+}
+
+.loading-screen-overlay.fade-out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loading-card {
+  width: 100%;
+  max-width: 520px;
+  background: rgba(18, 12, 10, 0.82);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 140, 70, 0.28);
+  border-radius: 18px;
+  padding: 38px 32px 30px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.85), 0 0 45px rgba(230, 80, 20, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.loading-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ff7a33, #ffd166, transparent);
+}
+
+/* Radar Animation */
+.loading-radar {
+  width: 76px;
+  height: 76px;
+  position: relative;
+  margin-bottom: 22px;
+}
+
+.radar-core {
+  width: 16px;
+  height: 16px;
+  background: #ff6622;
+  border-radius: 50%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 16px #ff6622, 0 0 28px rgba(255, 102, 34, 0.7);
+}
+
+.radar-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 120, 60, 0.4);
+}
+
+.radar-ring.r1 {
+  width: 44px;
+  height: 44px;
+  animation: radarPulse 2.4s infinite ease-out;
+}
+
+.radar-ring.r2 {
+  width: 72px;
+  height: 72px;
+  animation: radarPulse 2.4s infinite ease-out 0.8s;
+}
+
+.radar-sweep {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(255, 102, 34, 0.45) 0deg, transparent 65deg, transparent 360deg);
+  animation: radarSpin 2s linear infinite;
+}
+
+@keyframes radarSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes radarPulse {
+  0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0.85; }
+  100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0; }
+}
+
+/* Titles */
+.loading-title-box {
+  margin-bottom: 6px;
+}
+
+.loading-title {
+  font-size: 38px;
+  font-weight: 900;
+  letter-spacing: 8px;
+  color: #ffffff;
+  margin: 0;
+  line-height: 1.1;
+  text-shadow: 0 0 24px rgba(255, 110, 40, 0.5);
+}
+
+.loading-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: #ff9955;
+  letter-spacing: 3.5px;
+  margin-top: 5px;
+  text-transform: uppercase;
+}
+
+.loading-coords {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: rgba(255, 200, 170, 0.65);
+  letter-spacing: 1px;
+  margin: 10px 0 24px;
+  line-height: 1.4;
+}
+
+/* Progress bar */
+.loading-bar-wrap {
+  width: 100%;
+  height: 8px;
+  background: rgba(40, 24, 20, 0.85);
+  border: 1px solid rgba(255, 120, 60, 0.35);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.loading-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d9531e, #ff772e, #ffd166);
+  border-radius: 4px;
+  transition: width 0.16s ease-out;
+  position: relative;
+  box-shadow: 0 0 16px rgba(255, 120, 46, 0.75);
+}
+
+.loading-bar-flare {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  background: #ffffff;
+  box-shadow: 0 0 10px #ffffff, 0 0 18px #ff9944;
+  border-radius: 50%;
+}
+
+.loading-status-row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: #ffb885;
+  letter-spacing: 0.8px;
+  margin-bottom: 24px;
+}
+
+.loading-status-txt {
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 82%;
+}
+
+.loading-pct {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* Hints Footer */
+.loading-hint-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 18px;
+  width: 100%;
+}
+
+.hint-pill {
+  font-size: 11px;
+  color: rgba(255, 225, 210, 0.75);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key-chip {
+  background: rgba(255, 120, 60, 0.25);
+  border: 1px solid rgba(255, 140, 70, 0.45);
+  color: #ffb58a;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+}
+
+.loading-enter-btn {
+  margin-top: 18px;
+  background: linear-gradient(135deg, rgba(255, 102, 34, 0.85), rgba(220, 60, 10, 0.85));
+  border: 1px solid rgba(255, 170, 100, 0.5);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  padding: 10px 24px;
+  border-radius: 20px;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(255, 90, 20, 0.4);
+  transition: transform 0.15s ease, filter 0.15s ease;
+  touch-action: manipulation;
+}
+
+.loading-enter-btn:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+
+.loading-enter-btn:active {
+  transform: scale(0.96);
+}
+
+@media (max-width: 600px) {
+  .loading-card {
+    padding: 26px 18px 20px;
+  }
+  .loading-title {
+    font-size: 28px;
+    letter-spacing: 5px;
+  }
+  .loading-coords {
+    font-size: 9.5px;
+  }
+  .loading-hint-footer {
+    display: none;
+  }
+  .loading-enter-btn {
+    padding: 8px 20px;
+    font-size: 12px;
+  }
+}
+
+

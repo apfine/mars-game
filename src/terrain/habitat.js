@@ -6,41 +6,46 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 // green tanks and parked rovers. Everything is built from shared geometries/materials to stay light.
 // Group origin is the site centre at ground level; colliders are [x, z, radius] in group space.
 
+let _cachedPanel = null;
 function panelTexture(base = '#e8e5de') {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const g = c.getContext('2d');
-  g.fillStyle = base; g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 700; i++) {
-    g.fillStyle = `rgba(${Math.random() > 0.5 ? '255,255,255' : '150,120,100'},${0.03 + Math.random() * 0.05})`;
-    g.fillRect(Math.random() * 256, Math.random() * 256, 2 + Math.random() * 10, 2 + Math.random() * 10);
-  }
-  g.strokeStyle = 'rgba(80,72,66,0.55)'; g.lineWidth = 2;
-  for (let x = 0; x <= 256; x += 64) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 256); g.stroke(); }
-  for (let y = 0; y <= 256; y += 85) { g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke(); }
-  // Windblown rust dust along the base
-  const d = g.createLinearGradient(0, 160, 0, 256);
-  d.addColorStop(0, 'rgba(176,108,72,0)'); d.addColorStop(1, 'rgba(176,108,72,0.45)');
-  g.fillStyle = d; g.fillRect(0, 0, 256, 256);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 4;
-  return t;
-}
-
-function solarTexture() {
+  if (_cachedPanel) return _cachedPanel;
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#12233f'; g.fillRect(0, 0, 128, 128);
-  g.strokeStyle = 'rgba(150,180,220,0.55)'; g.lineWidth = 1.5;
-  for (let i = 0; i <= 128; i += 16) {
-    g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 128); g.stroke();
-    g.beginPath(); g.moveTo(0, i); g.lineTo(128, i); g.stroke();
+  g.fillStyle = base; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 250; i++) {
+    g.fillStyle = `rgba(${Math.random() > 0.5 ? '255,255,255' : '150,120,100'},${0.03 + Math.random() * 0.05})`;
+    g.fillRect(Math.random() * 128, Math.random() * 128, 2 + Math.random() * 6, 2 + Math.random() * 6);
+  }
+  g.strokeStyle = 'rgba(80,72,66,0.55)'; g.lineWidth = 1.5;
+  for (let x = 0; x <= 128; x += 32) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 128); g.stroke(); }
+  for (let y = 0; y <= 128; y += 42) { g.beginPath(); g.moveTo(0, y); g.lineTo(128, y); g.stroke(); }
+  // Windblown rust dust along the base
+  const d = g.createLinearGradient(0, 80, 0, 128);
+  d.addColorStop(0, 'rgba(176,108,72,0)'); d.addColorStop(1, 'rgba(176,108,72,0.45)');
+  g.fillStyle = d; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  _cachedPanel = t;
+  return t;
+}
+
+let _cachedSolar = null;
+function solarTexture() {
+  if (_cachedSolar) return _cachedSolar;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = '#12233f'; g.fillRect(0, 0, 64, 64);
+  g.strokeStyle = 'rgba(150,180,220,0.55)'; g.lineWidth = 1;
+  for (let i = 0; i <= 64; i += 8) {
+    g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 64); g.stroke();
+    g.beginPath(); g.moveTo(0, i); g.lineTo(64, i); g.stroke();
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  _cachedSolar = t;
   return t;
 }
 

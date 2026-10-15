@@ -59,12 +59,16 @@ export class MarsScatterManager {
     this.scene = scene;
     this.worldSeed = (Math.random() * 1e9) | 0;
     
-    // Chunk-based Rock Scatter parameters
+    // Chunk-based Rock Scatter parameters (optimized for instant loading & 60fps)
     this.sectorSize = 60.0; // 60m x 60m per scatter sector
-    this.sectorRadius = 5;  // 11x11 = 121 active sectors around player (~660m diameter)
-    this.maxRocksPerSector = 24;
+    this.sectorRadius = 3;  // 7x7 = 49 active sectors (~420m diameter)
+    this.maxRocksPerSector = 16;
 
     this.activeSectors = new Map();
+    this.pendingSectors = [];
+    this.lastPlayerSx = NaN;
+    this.lastPlayerSz = NaN;
+    this.initializedSectors = false;
 
     this.initRockMeshes();
     this.initHistoricalMonuments();
@@ -650,8 +654,13 @@ export class MarsScatterManager {
       if (variant !== 4 && topH > 0.5) {
         cols.push({ x: wx, z: wz, r: Math.max(sxs, szs) * (variant === 3 ? 0.55 : 0.8), top: wy + topH });
       }
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.instanceColor.needsUpdate = true;
+    }
+
+    // Flag update once per affected variant outside the loop
+    const touchedVariants = new Set(slots.map((s) => s.variant));
+    for (const v of touchedVariants) {
+      this.rockMeshes[v].instanceMatrix.needsUpdate = true;
+      this.rockMeshes[v].instanceColor.needsUpdate = true;
     }
 
     this.activeSectors.set(key, { sx, sz, slots, cols });
@@ -667,11 +676,15 @@ export class MarsScatterManager {
     this.dummy.scale.set(0, 0, 0);
     this.dummy.updateMatrix();
 
+    const touched = new Set();
     for (const { variant, slot } of sector.slots) {
       const mesh = this.rockMeshes[variant];
       mesh.setMatrixAt(slot, this.dummy.matrix);
-      mesh.instanceMatrix.needsUpdate = true;
       this.freeSlots[variant].push(slot);
+      touched.add(variant);
+    }
+    for (const v of touched) {
+      this.rockMeshes[v].instanceMatrix.needsUpdate = true;
     }
 
     this.activeSectors.delete(key);
@@ -680,26 +693,61 @@ export class MarsScatterManager {
   update(playerPos) {
     const centerSx = Math.floor(playerPos.x / this.sectorSize);
     const centerSz = Math.floor(playerPos.z / this.sectorSize);
-    const neededKeys = new Set();
 
-    // 1. Maintain active deterministic rock sectors around player
-    for (let dx = -this.sectorRadius; dx <= this.sectorRadius; dx++) {
-      for (let dz = -this.sectorRadius; dz <= this.sectorRadius; dz++) {
-        const sx = centerSx + dx;
-        const sz = centerSz + dz;
-        const key = `${sx},${sz}`;
-        neededKeys.add(key);
+    if (centerSx !== this.lastPlayerSx || centerSz !== this.lastPlayerSz) {
+      this.lastPlayerSx = centerSx;
+      this.lastPlayerSz = centerSz;
 
-        if (!this.activeSectors.has(key)) {
-          this.populateSectorRocks(sx, sz);
+      const neededKeys = new Set();
+      const candidates = [];
+
+      // 1. Maintain active deterministic rock sectors around player
+      for (let dx = -this.sectorRadius; dx <= this.sectorRadius; dx++) {
+        for (let dz = -this.sectorRadius; dz <= this.sectorRadius; dz++) {
+          const sx = centerSx + dx;
+          const sz = centerSz + dz;
+          const key = `${sx},${sz}`;
+          neededKeys.add(key);
+
+          if (!this.activeSectors.has(key)) {
+            const distSq = dx * dx + dz * dz;
+            candidates.push({ sx, sz, key, distSq });
+          }
+        }
+      }
+
+      // Sort candidate sectors closest first
+      candidates.sort((a, b) => a.distSq - b.distSq);
+
+      if (!this.initializedSectors) {
+        this.initializedSectors = true;
+        // On initial startup, immediately populate closest 9 sectors (radius 1)
+        const immediate = candidates.filter((c) => c.distSq <= 2);
+        const outer = candidates.filter((c) => c.distSq > 2);
+        for (const item of immediate) {
+          this.populateSectorRocks(item.sx, item.sz);
+        }
+        this.pendingSectors = outer;
+      } else {
+        this.pendingSectors = candidates;
+      }
+
+      // Release distant sectors smoothly
+      for (const [key, sector] of this.activeSectors.entries()) {
+        if (!neededKeys.has(key)) {
+          this.releaseSectorRocks(key);
         }
       }
     }
 
-    // Release distant sectors smoothly
-    for (const [key, sector] of this.activeSectors.entries()) {
-      if (!neededKeys.has(key)) {
-        this.releaseSectorRocks(key);
+    // Stream queued outer sectors smoothly (max 2 sectors per frame)
+    if (this.pendingSectors.length > 0) {
+      const budget = 2;
+      for (let b = 0; b < budget && this.pendingSectors.length > 0; b++) {
+        const item = this.pendingSectors.shift();
+        if (!this.activeSectors.has(item.key)) {
+          this.populateSectorRocks(item.sx, item.sz);
+        }
       }
     }
 

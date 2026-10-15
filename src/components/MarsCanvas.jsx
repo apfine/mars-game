@@ -1,26 +1,76 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function MarsCanvas() {
   const containerRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingFade, setLoadingFade] = useState(false);
+  const [progress, setProgress] = useState(12);
+  const [statusText, setStatusText] = useState('ESTABLISHING SATELLITE UPLINK...');
+
+  const dismissLoading = () => {
+    setLoadingFade(true);
+    setTimeout(() => setLoading(false), 500);
+  };
 
   useEffect(() => {
     let engine = null;
     let isMounted = true;
 
-    import('../game/engine.js').then(({ MarsGameEngine }) => {
-      if (isMounted && containerRef.current) {
-        // Clear any previous canvas children
-        while (containerRef.current.firstChild) {
-          containerRef.current.removeChild(containerRef.current.firstChild);
-        }
-        engine = new MarsGameEngine(containerRef.current);
+    // Fast simulated progress increments (0-95% in ~800ms)
+    const timer = setInterval(() => {
+      setProgress((prev) => {
+        if (prev < 92) return prev + Math.floor(Math.random() * 12 + 6);
+        return prev;
+      });
+    }, 75);
+
+    // Safety timeout: ensure loading screen NEVER blocks user for more than 1.4s
+    const safetyTimeout = setTimeout(() => {
+      if (isMounted) {
+        clearInterval(timer);
+        setProgress(100);
+        setStatusText('EXPEDITION SYSTEMS OPERATIONAL');
+        dismissLoading();
       }
+    }, 1400);
+
+    import('../game/engine.js').then(({ MarsGameEngine }) => {
+      if (!isMounted || !containerRef.current) return;
+
+      while (containerRef.current.firstChild) {
+        containerRef.current.removeChild(containerRef.current.firstChild);
+      }
+
+      engine = new MarsGameEngine(containerRef.current, {
+        onProgress: (pct, msg) => {
+          if (!isMounted) return;
+          setProgress((p) => Math.max(p, pct));
+          if (msg) setStatusText(msg);
+        },
+        onLoaded: () => {
+          if (!isMounted) return;
+          clearInterval(timer);
+          clearTimeout(safetyTimeout);
+          setProgress(100);
+          setStatusText('EXPEDITION SYSTEMS OPERATIONAL');
+          setTimeout(() => {
+            if (isMounted) dismissLoading();
+          }, 200);
+        }
+      });
+    }).catch((err) => {
+      console.error('Engine initialization error:', err);
+      clearInterval(timer);
+      clearTimeout(safetyTimeout);
+      dismissLoading();
     });
 
     return () => {
       isMounted = false;
+      clearInterval(timer);
+      clearTimeout(safetyTimeout);
       if (engine) {
         engine.destroy();
       }
@@ -29,6 +79,64 @@ export default function MarsCanvas() {
 
   return (
     <>
+      {/* Cinematic Martian Loading Screen */}
+      {loading && (
+        <div
+          id="mars-loading-screen"
+          className={`loading-screen-overlay ${loadingFade ? 'fade-out' : ''}`}
+          onClick={dismissLoading}
+          onTouchStart={dismissLoading}
+          aria-live="polite"
+        >
+          <div className="loading-card" onClick={(e) => e.stopPropagation()}>
+            {/* Animated Mars Radar Pulse */}
+            <div className="loading-radar">
+              <div className="radar-sweep"></div>
+              <div className="radar-core"></div>
+              <div className="radar-ring r1"></div>
+              <div className="radar-ring r2"></div>
+            </div>
+
+            <div className="loading-title-box">
+              <h1 className="loading-title">DUNES</h1>
+              <div className="loading-badge">RED PLANET EXPEDITION</div>
+            </div>
+
+            <p className="loading-coords">
+              SECTOR: 18.65°N, 226.20°E // OLYMPUS MONS CALDERA // 0.020 kg/m³ CO₂
+            </p>
+
+            {/* Glowing Amber Progress Bar */}
+            <div className="loading-bar-wrap">
+              <div className="loading-bar-fill" style={{ width: `${progress}%` }}>
+                <span className="loading-bar-flare"></span>
+              </div>
+            </div>
+
+            <div className="loading-status-row">
+              <span className="loading-status-txt">{statusText}</span>
+              <span className="loading-pct">{progress}%</span>
+            </div>
+
+            {/* Expedition Quick-Start Hints & Instant Launch Button */}
+            <div className="loading-hint-footer">
+              <div className="hint-pill"><span className="key-chip">WASD</span> Drive Rover</div>
+              <div className="hint-pill"><span className="key-chip">T</span> Starship Mission</div>
+              <div className="hint-pill"><span className="key-chip">G</span> Expedition Map</div>
+              <div className="hint-pill"><span className="key-chip">SPACE</span> Drift / Stage</div>
+            </div>
+
+            <button
+              className="loading-enter-btn"
+              onClick={dismissLoading}
+              aria-label="Enter Simulation"
+            >
+              🚀 ENTER EXPEDITION
+            </button>
+          </div>
+        </div>
+      )}
+
       <div id="canvas-container" ref={containerRef} />
 
       {/* HUD & UI Layer */}
