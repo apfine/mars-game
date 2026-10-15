@@ -262,6 +262,19 @@ export class MarsScatterManager {
     const group = new THREE.Group();
     group.position.copy(monument.position);
 
+    const big = monument.type === 'OLYMPUS_BASE' || monument.type === 'VALLES_RELAY' || monument.type === 'STARBASE_COMPLEX';
+    const accent = {
+      PERSEVERANCE: 0x00f0ff,
+      CURIOSITY: 0x00ff9c,
+      OPPORTUNITY: 0xffb800,
+      VIKING_1: 0xff4466,
+      PATHFINDER: 0x7cffcb,
+      OLYMPUS_BASE: 0x4cc9ff,
+      VALLES_RELAY: 0xb78cff,
+      SPIRIT: 0xffd34d,
+      STARBASE_COMPLEX: 0xff0055
+    }[monument.type] || 0x00f0ff;
+
     const metalDark = new THREE.MeshStandardMaterial({ color: 0x24262b, metalness: 0.85, roughness: 0.3 });
     const goldFoil = new THREE.MeshStandardMaterial({ color: 0xf5b800, metalness: 0.9, roughness: 0.2 });
     const whiteChassis = new THREE.MeshStandardMaterial({ color: 0xdedede, metalness: 0.4, roughness: 0.4 });
@@ -444,9 +457,6 @@ export class MarsScatterManager {
     if (monument.type === 'SPIRIT') { group.rotation.z = 0.14; group.rotation.x = -0.09; group.position.y -= 0.35; }
 
     // Checkpoint dressing: landing pad, glowing ring, tall beam (visible through haze) and spinning halos
-    const accent = { PERSEVERANCE: 0x00f0ff, CURIOSITY: 0x00ff9c, OPPORTUNITY: 0xffb800, VIKING_1: 0xff4466,
-      PATHFINDER: 0x7cffcb, OLYMPUS_BASE: 0x4cc9ff, VALLES_RELAY: 0xb78cff, SPIRIT: 0xffd34d, STARBASE_COMPLEX: 0xff0055 }[monument.type] || 0x00f0ff;
-    const big = monument.type === 'OLYMPUS_BASE' || monument.type === 'VALLES_RELAY' || monument.type === 'STARBASE_COMPLEX';
     const padR = big ? 13 : 6.5;
     const pad = new THREE.Mesh(
       new THREE.CylinderGeometry(padR, padR + 0.5, 1.4, 48),
