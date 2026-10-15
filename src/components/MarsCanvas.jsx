@@ -39,8 +39,15 @@ export default function MarsCanvas() {
           <span className="sub-brand">RED PLANET EXPEDITION</span>
         </div>
 
-        {/* Top-Right Settings Gear */}
+        {/* Top-Right Settings & Actions */}
         <div className="top-right-bar">
+          <button id="launch-mission-btn" className="hud-pill-btn launch-pill" aria-label="Launch Starship Mission">
+            <span>🚀 Mission</span>
+          </button>
+          <button id="map-btn" className="hud-pill-btn" aria-label="Map">
+            <span>Map</span>
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
+          </button>
           <button id="esc-btn" className="hud-pill-btn" aria-label="Settings">
             <span>Esc</span>
             <svg className="gear-icon" viewBox="0 0 24 24" width="16" height="16">
@@ -49,12 +56,17 @@ export default function MarsCanvas() {
           </button>
         </div>
 
+        {/* Minimap radar display */}
+        <canvas id="minimap" width="300" height="300" aria-label="Minimap"></canvas>
+
         {/* 3D Waypoint Projector Badges */}
         <div id="waypoint-badges"></div>
 
         {/* Bottom Left Desktop Hints */}
         <div className="bottom-left-hints">
           <div className="hint-row"><span className="key-label">Drive:</span> WASD / arrow keys</div>
+          <div className="hint-row"><span className="key-label">Launch Starship:</span> T</div>
+          <div className="hint-row"><span className="key-label">Expedition Map:</span> G</div>
           <div className="hint-row"><span className="key-label">Assist:</span> R</div>
           <div className="hint-row"><span className="key-label">Nitro:</span> Shift / N</div>
           <div className="hint-row"><span className="key-label">Handbrake:</span> Space</div>
@@ -100,6 +112,65 @@ export default function MarsCanvas() {
             <button id="btn-assist" className="touch-pill-btn" aria-label="Assist Right">⟲ ASSIST</button>
             <button id="btn-cam" className="touch-pill-btn" aria-label="Switch Camera">📹 CAM</button>
             <button id="btn-mark" className="touch-pill-btn" aria-label="Mark Beacon">📍 MARK</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Starship Aerospace Flight HUD */}
+      <div id="flight-hud" className="flight-hud-layer">
+        <div className="flight-top-panel">
+          <div id="flight-phase-badge" className="flight-phase-badge">PRE-LAUNCH // STARBASE OLM</div>
+          <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">✕ Exit to Rover</button>
+        </div>
+
+        <div id="flight-action-prompt" className="flight-action-prompt"></div>
+
+        {/* Telemetry Ribbons */}
+        <div className="flight-telemetry-panel">
+          <div className="flight-gauge">
+            <span className="gauge-label">ALTITUDE</span>
+            <span id="flight-alt-val" className="gauge-val">0 m</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">VELOCITY</span>
+            <span id="flight-speed-val" className="gauge-val">0 km/h</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">AIRSPEED</span>
+            <span id="flight-mach-val" className="gauge-val">Mach 0.0</span>
+          </div>
+        </div>
+
+        {/* Re-entry Plasma Thermal Gauge (Ref Image 2) */}
+        <div id="flight-heat-container" className="flight-heat-container" style={{ display: 'none' }}>
+          <div className="heat-label">🔥 HYPERSONIC RE-ENTRY PLASMA // SHIELD TEMP</div>
+          <div className="heat-track">
+            <div id="flight-heat-bar" className="heat-fill" style={{ width: '0%' }}></div>
+          </div>
+        </div>
+
+        {/* Throttle Bar & Staging Button */}
+        <div className="flight-bottom-controls">
+          <div className="flight-throttle-box">
+            <span className="throttle-label">RAPTOR THRUST</span>
+            <div className="flight-throttle-track">
+              <div id="flight-throttle-bar" className="flight-throttle-fill" style={{ width: '0%' }}></div>
+            </div>
+          </div>
+          <button id="flight-stage-btn" className="flight-stage-btn" aria-label="Rocket Stage Trigger">🚀 IGNITE</button>
+        </div>
+      </div>
+
+      {/* Full Expedition Map Modal */}
+      <div id="map-modal" className="modal-backdrop">
+        <div className="modal-card map-card">
+          <div className="modal-header">
+            <h2>EXPEDITION MAP</h2>
+            <button id="close-map" className="close-btn">&times;</button>
+          </div>
+          <canvas id="map-full" width="760" height="760"></canvas>
+          <div className="modal-footer">
+            <p>Cyan: Monuments & Starbase · Orange: User Beacons · Press G or Esc to close</p>
           </div>
         </div>
       </div>

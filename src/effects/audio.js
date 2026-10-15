@@ -36,10 +36,82 @@ export class MarsAudioEngine {
       this.setupNitro();
       this.setupTireSand();
       this.setupWindAmbiance();
+      this.setupRocketSound();
 
       this.initialized = true;
     } catch (e) {
       console.warn('Web Audio initialization error:', e);
+    }
+  }
+
+  setupRocketSound() {
+    // Multi-oscillator + lowpass white noise for deafening rocket rumble
+    const noiseBuffer = this.createNoiseBuffer();
+    this.rocketNoise = this.ctx.createBufferSource();
+    this.rocketNoise.buffer = noiseBuffer;
+    this.rocketNoise.loop = true;
+
+    this.rocketFilter = this.ctx.createBiquadFilter();
+    this.rocketFilter.type = 'lowpass';
+    this.rocketFilter.frequency.setValueAtTime(120, this.ctx.currentTime);
+    this.rocketFilter.Q.setValueAtTime(1.8, this.ctx.currentTime);
+
+    this.rocketGain = this.ctx.createGain();
+    this.rocketGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+
+    this.rocketNoise.connect(this.rocketFilter);
+    this.rocketFilter.connect(this.rocketGain);
+    this.rocketGain.connect(this.masterGain);
+    this.rocketNoise.start();
+
+    // Re-entry rushing plasma wind sound
+    this.plasmaNoise = this.ctx.createBufferSource();
+    this.plasmaNoise.buffer = noiseBuffer;
+    this.plasmaNoise.loop = true;
+
+    this.plasmaFilter = this.ctx.createBiquadFilter();
+    this.plasmaFilter.type = 'bandpass';
+    this.plasmaFilter.frequency.setValueAtTime(800, this.ctx.currentTime);
+    this.plasmaFilter.Q.setValueAtTime(3.0, this.ctx.currentTime);
+
+    this.plasmaGain = this.ctx.createGain();
+    this.plasmaGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+
+    this.plasmaNoise.connect(this.plasmaFilter);
+    this.plasmaFilter.connect(this.plasmaGain);
+    this.plasmaGain.connect(this.masterGain);
+    this.plasmaNoise.start();
+  }
+
+  playStageSeparationSound() {
+    if (!this.initialized || this.muted) return;
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(240, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(35, this.ctx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.45);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.46);
+    } catch (_) {}
+  }
+
+  updateRocket(throttle, altitude, heat) {
+    if (!this.initialized || this.muted) return;
+    const t = this.ctx.currentTime;
+    if (this.rocketGain) {
+      const rVol = Math.min(0.55, throttle * 0.52);
+      this.rocketGain.gain.setTargetAtTime(rVol, t, 0.05);
+      this.rocketFilter.frequency.setTargetAtTime(100 + throttle * 320, t, 0.05);
+    }
+    if (this.plasmaGain) {
+      const pVol = Math.min(0.48, heat * 0.45);
+      this.plasmaGain.gain.setTargetAtTime(pVol, t, 0.08);
+      this.plasmaFilter.frequency.setTargetAtTime(400 + heat * 900, t, 0.08);
     }
   }
 

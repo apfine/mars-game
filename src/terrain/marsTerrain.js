@@ -235,7 +235,7 @@ export function createMarsTerrainMaterial(options = {}) {
 
 // Terrain Chunk Dimensions & Progressive Streaming Configuration
 export const CHUNK_SIZE = 120.0;
-export const CHUNK_SEGMENTS = 48; // 2.5m cells: resolves bedrock ledges, ramps and steep dunes
+export const CHUNK_SEGMENTS = 40; // 2.5m cells: resolves bedrock ledges, ramps and steep dunes
 export const GRID_RADIUS = 3;     // 7x7 = 49 total active chunks covering ~840m x 840m
 
 export class MarsTerrainManager {
@@ -342,7 +342,7 @@ export class MarsTerrainManager {
 
     // Smooth Progressive Chunk Generation (max 2 chunks per frame to guarantee 60fps)
     if (this.pendingChunks.length > 0) {
-      const budget = 2;
+      const budget = 1;
       for (let b = 0; b < budget && this.pendingChunks.length > 0; b++) {
         const item = this.pendingChunks.shift();
         if (!this.chunks.has(item.key)) {

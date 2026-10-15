@@ -8,6 +8,9 @@ import { MarsAudioEngine } from '../effects/audio.js';
 import { InputManager } from '../ui/controls.js';
 import { MarsHUD } from '../ui/hud.js';
 import { MarsCameraController } from '../camera.js';
+import { StarshipMissionVehicle } from '../flight/starship.js';
+import { StarshipMissionPhysics, FLIGHT_PHASES } from '../flight/missionPhysics.js';
+import { MissionFlightHUD } from '../flight/missionUI.js';
 
 export class MarsGameEngine {
   constructor(container) {
@@ -15,6 +18,7 @@ export class MarsGameEngine {
     this.quality = 'High';
     this.gridEnabled = false;
     this.disposed = false;
+    this.mode = 'rover';
 
     this.initRenderer();
     this.initScene();
@@ -31,11 +35,15 @@ export class MarsGameEngine {
   initRenderer() {
     this.renderer = new THREE.WebGLRenderer({
       powerPreference: 'high-performance',
-      antialias: true
+      antialias: !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     });
 
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     this.renderer.setPixelRatio(dpr);
+    this.pixelBase = dpr;
+    this.dynPR = dpr;
+    this.avgDt = 0.016;
+    this.perfTick = 0;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -102,13 +110,95 @@ export class MarsGameEngine {
       }
     });
 
+    // 8. SpaceX Starship & Mission Flight System
+    this.starship = new StarshipMissionVehicle();
+    this.scene.add(this.starship.group);
+    this.missionPhysics = new StarshipMissionPhysics(this.starship, new THREE.Vector2(1400, 1150));
+
+    this.flightHud = new MissionFlightHUD({
+      onStage: () => {
+        this.handleFlightStageAction();
+      },
+      onExit: () => {
+        this.setMode('rover');
+      }
+    });
+
+    const launchBtn = document.getElementById('launch-mission-btn');
+    if (launchBtn) {
+      launchBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.toggleMode();
+      });
+    }
+
     if (this.input.isMobile) {
       this.applyQuality('Medium');
     }
   }
 
+  handleFlightStageAction() {
+    if (!this.audio.initialized) this.audio.init();
+    this.audio.ensureRunning();
+
+    if (this.missionPhysics.phase === FLIGHT_PHASES.ON_PAD) {
+      this.missionPhysics.startLaunch();
+    } else if (
+      this.missionPhysics.phase === FLIGHT_PHASES.BOOSTER_ASCENT ||
+      this.missionPhysics.phase === FLIGHT_PHASES.HOT_STAGING
+    ) {
+      this.missionPhysics.triggerStageSeparation();
+      this.audio.playStageSeparationSound();
+      this.cameraController.addShake(0.5);
+    } else if (this.missionPhysics.phase === FLIGHT_PHASES.ORBIT) {
+      this.missionPhysics.triggerDeorbit();
+    } else if (this.missionPhysics.phase === FLIGHT_PHASES.LANDED) {
+      this.physics.resetAt(this.missionPhysics.position.x + 35, this.missionPhysics.position.z + 35);
+      this.setMode('rover');
+    }
+  }
+
+  setMode(targetMode) {
+    if (this.mode === targetMode) return;
+    this.mode = targetMode;
+
+    const roverHud = document.getElementById('hud-layer');
+    const mobileControls = document.getElementById('mobile-controls');
+
+    if (this.mode === 'starship') {
+      this.camera.far = 250000;
+      this.camera.updateProjectionMatrix();
+      this.cameraController.initialized = false;
+
+      if (roverHud) roverHud.style.display = 'none';
+      if (mobileControls) mobileControls.style.display = 'none';
+      this.flightHud.show(true);
+
+      // Silence rover motor while in flight
+      this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
+    } else {
+      this.camera.far = 1400;
+      this.camera.updateProjectionMatrix();
+      this.cameraController.initialized = false;
+
+      this.flightHud.show(false);
+      if (roverHud) roverHud.style.display = 'block';
+      if (mobileControls && this.input.isMobile) {
+        mobileControls.style.display = 'block';
+      }
+
+      this.atmosphere.setAltitude(0);
+      this.audio.updateRocket(0, 0, 0);
+    }
+  }
+
+  toggleMode() {
+    this.setMode(this.mode === 'rover' ? 'starship' : 'rover');
+  }
+
   applyQuality(preset) {
     this.quality = preset;
+    this.perfTick = 0;
     this.atmosphere.setQuality(preset);
     const isLow = preset === 'Low';
     const isMed = preset === 'Medium';
@@ -120,7 +210,7 @@ export class MarsGameEngine {
       this.renderer.shadowMap.enabled = false;
       this.atmosphere.sunLight.castShadow = false;
     } else if (isMed) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.input.isMobile ? 1.0 : 1.25));
       this.renderer.shadowMap.enabled = true;
       this.atmosphere.sunLight.shadow.mapSize.set(1024, 1024);
     } else if (isHigh) {
@@ -132,6 +222,8 @@ export class MarsGameEngine {
       this.renderer.shadowMap.enabled = true;
       this.atmosphere.sunLight.shadow.mapSize.set(4096, 4096);
     }
+    this.pixelBase = this.renderer.getPixelRatio();
+    this.dynPR = this.pixelBase;
   }
 
   initEvents() {
@@ -160,10 +252,72 @@ export class MarsGameEngine {
     if (this.disposed) return;
     this.animId = requestAnimationFrame(this.animate);
 
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const rawDt = this.clock.getDelta();
+    const dt = Math.min(rawDt, 0.05);
+
+    // Adaptive resolution: trade pixel density for frame time so slow devices stay smooth
+    this.avgDt += (Math.min(rawDt, 0.1) - this.avgDt) * 0.06;
+    if (++this.perfTick >= 45) {
+      this.perfTick = 0;
+      let next = this.dynPR;
+      if (this.avgDt > 0.024 && next > 0.6) next = Math.max(0.6, next - 0.12);
+      else if (this.avgDt < 0.0175 && next < this.pixelBase) next = Math.min(this.pixelBase, next + 0.06);
+      if (Math.abs(next - this.dynPR) > 0.001) {
+        this.dynPR = next;
+        this.renderer.setPixelRatio(next);
+        if (this.quality !== 'Low') this.atmosphere.sunLight.castShadow = next > 0.72;
+      }
+    }
 
     // 1. Update Input State
     this.input.update();
+
+    // Mode toggle shortcut (T key)
+    if (this.input.consumeSinglePress('launchToggle')) {
+      this.toggleMode();
+    }
+
+    if (this.mode === 'starship') {
+      // Space key triggers stage action during flight
+      if (this.input.consumeSinglePress('handbrake')) {
+        this.handleFlightStageAction();
+      }
+
+      // Update Starship Flight Physics
+      this.missionPhysics.update(dt, this.input.state);
+
+      // Update Flight HUD
+      this.flightHud.update(this.missionPhysics);
+
+      // Update Flight Audio (Raptor roar, staging pop, plasma roar)
+      this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
+
+      // Atmosphere space blackening & sky fade
+      this.atmosphere.setAltitude(this.missionPhysics.altitude);
+
+      // Center atmosphere and skydome on Starship
+      this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
+      this.atmosphere.update(dt, this.missionPhysics.position, {
+        quaternion: this.missionPhysics.quaternion,
+        velocity: this.missionPhysics.velocity,
+        isNitroActive: false,
+        onGroundCount: this.missionPhysics.altitude < 2 ? 4 : 0,
+        speedKmh: this.missionPhysics.speed * 3.6
+      });
+
+      // Update terrain & scatter around rocket position if near ground
+      if (this.missionPhysics.altitude < 35000) {
+        this.terrain.update(this.missionPhysics.position);
+        this.scatter.update(this.missionPhysics.position);
+      }
+
+      // Update Flight Camera tracking
+      this.cameraController.updateFlight(dt, this.missionPhysics);
+
+      // Render Scene
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
 
     // 2. Single-press triggers
     if (this.input.consumeSinglePress('cameraToggle')) {
@@ -232,6 +386,12 @@ export class MarsGameEngine {
     window.removeEventListener('keydown', this.startAudio);
     window.removeEventListener('touchstart', this.startAudio);
     window.removeEventListener('mousedown', this.startAudio);
+    if (this.flightHud) {
+      this.flightHud.show(false);
+    }
+    if (this.audio) {
+      this.audio.updateRocket(0, 0, 0);
+    }
     if (this.scene.environment && typeof this.scene.environment.dispose === 'function') {
       this.scene.environment.dispose();
     }

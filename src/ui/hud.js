@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MarsMap } from './map.js';
 
 // HUD Telemetry, drune.io-style Waypoint Badges, Mobile Touch Controls & Settings Modal
 export class MarsHUD {
@@ -33,6 +34,8 @@ export class MarsHUD {
     this.initMobileTouch();
     this.initSettingsModal();
     this.initPredefinedWaypoints();
+    this.map = new MarsMap(this);
+    this.frameCount = 0;
   }
 
   initPredefinedWaypoints() {
@@ -239,7 +242,12 @@ export class MarsHUD {
     }
 
     // 3. Update 3D projected waypoint badges (drune.io style!)
-    this.updateWaypointBadges(physics.position, camera, scatterPOIs);
+    // Badge DOM rewrites are throttled (innerHTML every frame causes layout churn on phones)
+    this.frameCount++;
+    if (this.frameCount % 3 === 0) this.updateWaypointBadges(physics.position, camera, scatterPOIs);
+
+    // 4. Minimap / full map
+    this.map.update(physics, scatterPOIs);
   }
 
   updateWaypointBadges(playerPos, camera, scatterPOIs) {

@@ -10,7 +10,8 @@ export class InputManager {
       assist: false,
       cameraToggle: false,
       markBeacon: false,
-      toggleLights: false
+      toggleLights: false,
+      launchToggle: false
     };
 
     this.keys = {};
@@ -37,6 +38,7 @@ export class InputManager {
       if (e.code === 'KeyC') this.state.cameraToggle = true;
       if (e.code === 'KeyM') this.state.markBeacon = true;
       if (e.code === 'KeyL') this.state.toggleLights = true;
+      if (e.code === 'KeyT') this.state.launchToggle = true;
 
       // Prevent scrolling
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {

@@ -169,15 +169,17 @@ function rawHeight(x, z) {
 }
 
 // Landmark sites are levelled so pads and monuments sit flat (coordinates match scatter.js catalog)
-const SITES = [[380, 520], [-650, 420], [-420, -780], [850, -420], [-950, -320], [1200, 1100], [-1350, 950]]
-  .map(([sx, sz]) => ({ x: sx, z: sz, h: rawHeight(sx, sz) }));
+// [x, z, fullFlatRadius, fadeRadius]
+const SITES = [[380, 520, 15, 28], [-650, 420, 15, 28], [-420, -780, 15, 28], [850, -420, 15, 28], [-950, -320, 15, 28],
+  [1200, 1100, 48, 70], [-1350, 950, 32, 48], [-250, -1150, 15, 28]]
+  .map(([sx, sz, r0, r1]) => ({ x: sx, z: sz, r0, r1, h: rawHeight(sx, sz) }));
 
 export function getMarsHeight(x, z) {
   let h = rawHeight(x, z);
   for (const s of SITES) {
     const dx = x - s.x, dz = z - s.z;
-    if (dx > 30 || dx < -30 || dz > 30 || dz < -30) continue;
-    const w = 1 - sstep(15, 28, Math.hypot(dx, dz));
+    if (dx > s.r1 || dx < -s.r1 || dz > s.r1 || dz < -s.r1) continue;
+    const w = 1 - sstep(s.r0, s.r1, Math.hypot(dx, dz));
     if (w > 0) h += (s.h - h) * w;
   }
   return h;

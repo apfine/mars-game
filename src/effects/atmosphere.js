@@ -42,7 +42,8 @@ export class MarsAtmosphere {
         uSkyZenith: { value: new THREE.Color(0xcd8a66) },     // Butterscotch overhead
         uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Pale dusty salmon horizon (matches terrain haze + scene fog)
         uSunColor: { value: new THREE.Color(0xfff5e6) },      // Brilliant Martian sun
-        uSunHaloBlue: { value: new THREE.Color(0x5ca0d3) }    // Signature Mars twilight blue scattering halo
+        uSunHaloBlue: { value: new THREE.Color(0x5ca0d3) },   // Signature Mars twilight blue scattering halo
+        uSpaceFade: { value: 0.0 }                            // 0 = surface, 1 = orbit/space
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -59,6 +60,7 @@ export class MarsAtmosphere {
         uniform vec3 uSkyHorizon;
         uniform vec3 uSunColor;
         uniform vec3 uSunHaloBlue;
+        uniform float uSpaceFade;
         varying vec3 vWorldPosition;
 
         float h11(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -100,17 +102,29 @@ export class MarsAtmosphere {
           float cloud = smoothstep(0.50, 0.78, c1) * smoothstep(0.05, 0.30, e) * (1.0 - smoothstep(0.7, 1.0, e) * 0.5);
           float thin = smoothstep(0.42, 0.62, fbm2(cp * vec2(0.5, 5.0) - wind * 1.5)) * smoothstep(0.08, 0.4, e) * 0.35;
           vec3 cloudCol = mix(vec3(0.95, 0.74, 0.62), vec3(1.0, 0.92, 0.84), pow(sc, 2.0));
-          sky = mix(sky, cloudCol, clamp(cloud * 0.15 + thin * 0.4, 0.0, 0.25));
+          sky = mix(sky, cloudCol, clamp(cloud * 0.15 + thin * 0.4, 0.0, 0.25) * (1.0 - uSpaceFade));
 
           // Mars forward-scattering: blue corona around the sun + warm glare lobes
           float blueHalo = pow(sc, 14.0) * 0.1 * (1.0 - band * 0.3);
-          sky = mix(sky, uSunHaloBlue, blueHalo);
+          sky = mix(sky, uSunHaloBlue, blueHalo * (1.0 - uSpaceFade));
           float glare = pow(sc, 6.0) * 0.30 + pow(sc, 40.0) * 0.6 + pow(sc, 420.0) * 1.8;
           sky += uSunColor * glare * 0.6;
 
-          // Sharp Sun disk (Mars sun appears ~2/3 size of Earth sun)
+          // Sharp Sun disk
           float sunDisk = smoothstep(0.9988, 0.9995, sc);
           vec3 col = sky + uSunColor * sunDisk * 1.1;
+
+          // Transition to deep space black when climbing altitude
+          if (uSpaceFade > 0.01) {
+            vec3 spaceBlack = vec3(0.002, 0.003, 0.007);
+            // Procedural Starfield in deep space
+            vec2 starCoord = floor(dir.xz / (abs(dir.y) + 0.08) * 220.0);
+            float starHash = h11(starCoord + vec2(17.3, 49.1));
+            float star = step(0.988, starHash) * pow(h11(starCoord * 2.3), 3.0) * 1.6;
+
+            col = mix(col, spaceBlack, uSpaceFade);
+            col += vec3(star) * uSpaceFade;
+          }
 
           gl_FragColor = vec4(col, 1.0);
           #include <colorspace_fragment>
@@ -704,6 +718,19 @@ export class MarsAtmosphere {
 
     this.dustPool.update(dt, this.wind);
     this.fxPool.update(dt, null);
+  }
+
+  setAltitude(alt) {
+    const spaceFade = THREE.MathUtils.clamp((alt - 16000) / 55000, 0.0, 1.0);
+    if (this.skyMat) {
+      this.skyMat.uniforms.uSpaceFade.value = spaceFade;
+    }
+    if (this.distantMountains) {
+      this.distantMountains.visible = alt < 28000;
+    }
+    if (this.scene.fog) {
+      this.scene.fog.far = THREE.MathUtils.lerp(520, 45000, spaceFade);
+    }
   }
 
   update(dt, playerPos, physics) {
