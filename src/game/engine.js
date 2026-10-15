@@ -144,6 +144,22 @@ export class MarsGameEngine {
       onStage: () => {
         this.handleFlightStageAction();
       },
+      onToggleCamera: () => {
+        const nextMode = this.cameraController.nextFlightMode();
+        this.flightHud.notifyCameraMode(nextMode);
+      },
+      onThrottleUp: () => {
+        this.missionPhysics.throttle = Math.min(1.0, this.missionPhysics.throttle + 0.15);
+      },
+      onThrottleDown: () => {
+        this.missionPhysics.throttle = Math.max(0.0, this.missionPhysics.throttle - 0.15);
+      },
+      onTouchPitch: (val) => {
+        this.input.state.pitch = val;
+      },
+      onTouchYaw: (val) => {
+        this.input.state.steer = val;
+      },
       onExit: () => {
         this.setMode('rover');
       }
@@ -197,7 +213,7 @@ export class MarsGameEngine {
 
       if (roverHud) roverHud.style.display = 'none';
       if (mobileControls) mobileControls.style.display = 'none';
-      this.flightHud.show(true);
+      this.flightHud.show(true, this.input.isMobile);
 
       // Silence rover motor while in flight
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
@@ -308,6 +324,12 @@ export class MarsGameEngine {
         this.handleFlightStageAction();
       }
 
+      // Camera toggle shortcut (C key) during flight
+      if (this.input.consumeSinglePress('cameraToggle')) {
+        const nextMode = this.cameraController.nextFlightMode();
+        this.flightHud.notifyCameraMode(nextMode);
+      }
+
       // Update Starship Flight Physics
       this.missionPhysics.update(dt, this.input.state);
 
@@ -330,10 +352,10 @@ export class MarsGameEngine {
         speedKmh: this.missionPhysics.speed * 3.6
       });
 
-      // Update terrain & scatter around rocket position if near ground
-      if (this.missionPhysics.altitude < 35000) {
+      // Update terrain only if stationary on pad or during final slow touchdown
+      // NEVER update rock scatter in flight (eliminates chunk thrashing, normal recomputation, and skipping)
+      if (this.missionPhysics.altitude < 500 && this.missionPhysics.speed < 100) {
         this.terrain.update(this.missionPhysics.position);
-        this.scatter.update(this.missionPhysics.position);
       }
 
       // Update Flight Camera tracking

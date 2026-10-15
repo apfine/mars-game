@@ -84,6 +84,8 @@ export class StarshipMissionPhysics {
     this.countdownTimer = 5.0;
     this.boosterFuel = 100.0;
     this.starshipFuel = 100.0;
+    this.boosterFlameout = false;
+    this.starshipFlameout = false;
 
     this.vehicle.setMated(true);
     this.vehicle.setBoosterThrottle(0);
@@ -147,6 +149,19 @@ export class StarshipMissionPhysics {
     this.dynamicPressure = 0.5 * marsDensity * this.speed * this.speed;
 
     // Flight Phase Finite State Machine
+    // 1. Throttle Pilot Control
+    if (this.phase === FLIGHT_PHASES.BOOSTER_ASCENT ||
+        this.phase === FLIGHT_PHASES.STARSHIP_ASCENT ||
+        this.phase === FLIGHT_PHASES.ORBIT ||
+        this.phase === FLIGHT_PHASES.LANDING_FLIP ||
+        this.phase === FLIGHT_PHASES.TOUCHDOWN) {
+      if (input.fullThrottle) this.throttle = 1.0;
+      else if (input.throttleCut) this.throttle = 0.0;
+      else if (input.throttleUp) this.throttle = Math.min(1.0, this.throttle + dt * 0.9);
+      else if (input.throttleDown) this.throttle = Math.max(0.0, this.throttle - dt * 0.9);
+    }
+
+    // 2. Flight Phase Finite State Machine
     switch (this.phase) {
       case FLIGHT_PHASES.ON_PAD:
         this.throttle = 0;
@@ -156,7 +171,7 @@ export class StarshipMissionPhysics {
       case FLIGHT_PHASES.COUNTDOWN:
         this.countdownTimer -= dt;
         if (this.countdownTimer <= 2.0) {
-          // Raptors spool up at T-2s
+          // 33 Raptors spool up at T-2s
           this.throttle = THREE.MathUtils.lerp(this.throttle, 1.0, dt * 2.0);
           this.vehicle.setBoosterThrottle(this.throttle);
         }
@@ -170,23 +185,40 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.BOOSTER_ASCENT:
         this.missionTime += dt;
-        this.boosterFuel = Math.max(0, this.boosterFuel - 1.2 * dt);
+
+        // Stage 1 Propellant Depletion (LOX + CH4)
+        if (this.throttle > 0.01 && this.boosterFuel > 0) {
+          this.boosterFuel = Math.max(0, this.boosterFuel - this.throttle * 0.78 * dt);
+        }
+        if (this.boosterFuel <= 0) {
+          this.throttle = 0;
+          this.boosterFlameout = true;
+        }
 
         // Pilot attitude control (Pitch & Yaw)
-        if (input.throttle !== undefined) {
-          this.pitch += input.steer * 0.4 * dt;
+        if (input.pitch && Math.abs(input.pitch) > 0.05) {
+          this.pitch = THREE.MathUtils.clamp(this.pitch + input.pitch * 0.75 * dt, -0.3, 1.55);
+        } else {
+          // Gravity turn pitch program (natural gravity tilt into orbital plane)
+          const targetPitch = THREE.MathUtils.clamp((this.altitude / 65000) * 1.35, 0.0, 1.35);
+          this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch, dt * 0.18);
         }
-        // Gravity turn pitch program (natural gravity tilt into orbital plane)
-        const targetPitch = THREE.MathUtils.clamp((this.altitude / 65000) * 1.35, 0.0, 1.35);
-        this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch, dt * 0.25);
 
-        // Rocket thrust acceleration (33 Raptors ~ 72 MN thrust / ~4500 tonnes)
-        const boosterThrust = 26.0 * (1.0 + (100 - this.boosterFuel) * 0.012); // TWR increases as fuel burns
+        if (input.steer && Math.abs(input.steer) > 0.05) {
+          this.yaw += input.steer * 0.75 * dt;
+        }
+        if (input.roll) {
+          this.roll += input.roll * 1.2 * dt;
+        }
+
+        // Rocket thrust acceleration (33 Raptors ~ 72 MN thrust)
+        const boosterMaxThrust = 28.0 * (1.0 + (100 - this.boosterFuel) * 0.012);
+        const activeBoosterThrust = boosterMaxThrust * this.throttle;
         const thrustVec = new THREE.Vector3(
           Math.sin(this.pitch) * Math.sin(this.yaw),
           Math.cos(this.pitch),
           Math.sin(this.pitch) * Math.cos(this.yaw)
-        ).normalize().multiplyScalar(boosterThrust);
+        ).normalize().multiplyScalar(activeBoosterThrust);
 
         // Gravity & Atmospheric Drag
         const boosterDrag = new THREE.Vector3().copy(this.velocity).multiplyScalar(-this.dynamicPressure * 0.0004);
@@ -197,6 +229,7 @@ export class StarshipMissionPhysics {
         this.altitude = this.position.y - this.padElevation;
 
         this.vehicle.setBoosterThrottle(this.throttle);
+        this.vehicle.setGridFinSteering(input.steer || 0, input.pitch || 0);
 
         // Auto prompt or staging at altitude ~22 km
         if (this.altitude >= 22000 && this.phase === FLIGHT_PHASES.BOOSTER_ASCENT) {
@@ -215,18 +248,34 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.STARSHIP_ASCENT:
         this.missionTime += dt;
-        this.starshipFuel = Math.max(0, this.starshipFuel - 0.7 * dt);
 
-        // Steer Starship towards orbital insertion
-        const steerPitch = (input.steer || 0) * 0.5 * dt;
-        this.pitch = THREE.MathUtils.clamp(this.pitch + steerPitch, 0.2, 1.55);
+        // Stage 2 Propellant Depletion (6 Vacuum & Sea-level Raptors)
+        if (this.throttle > 0.01 && this.starshipFuel > 0) {
+          this.starshipFuel = Math.max(0, this.starshipFuel - this.throttle * 0.42 * dt);
+        }
+        if (this.starshipFuel <= 0) {
+          this.throttle = 0;
+          this.starshipFlameout = true;
+        }
 
-        const shipThrust = 32.0 * (1.0 + (100 - this.starshipFuel) * 0.015);
+        // Full Pilot attitude control
+        if (input.pitch && Math.abs(input.pitch) > 0.05) {
+          this.pitch = THREE.MathUtils.clamp(this.pitch + input.pitch * 0.85 * dt, -0.2, 1.55);
+        }
+        if (input.steer && Math.abs(input.steer) > 0.05) {
+          this.yaw += input.steer * 0.85 * dt;
+        }
+        if (input.roll) {
+          this.roll += input.roll * 1.2 * dt;
+        }
+
+        const shipMaxThrust = 34.0 * (1.0 + (100 - this.starshipFuel) * 0.015);
+        const activeShipThrust = shipMaxThrust * this.throttle;
         const shipThrustVec = new THREE.Vector3(
           Math.sin(this.pitch) * Math.sin(this.yaw),
           Math.cos(this.pitch),
           Math.sin(this.pitch) * Math.cos(this.yaw)
-        ).normalize().multiplyScalar(shipThrust);
+        ).normalize().multiplyScalar(activeShipThrust);
 
         const shipDrag = new THREE.Vector3().copy(this.velocity).multiplyScalar(-this.dynamicPressure * 0.0002);
         this.acceleration.copy(shipThrustVec).add(shipDrag).add(new THREE.Vector3(0, -this.marsGravity, 0));
@@ -238,14 +287,14 @@ export class StarshipMissionPhysics {
         // Twilight Space Jellyfish Plume active in thin upper atmosphere (Ref Image 1)
         this.vehicle.setStarshipThrottle(this.throttle, this.altitude > 28000);
 
-        // Reach Orbit insertion at ~120 km and ~3,400 m/s orbital velocity
+        // Reach Orbit insertion at ~110 km and ~3,400 m/s orbital velocity
         if (this.altitude >= 110000 || this.speed >= 3400) {
           this.phase = FLIGHT_PHASES.ORBIT;
           this.throttle = 0;
           this.vehicle.setStarshipThrottle(0, false);
         }
 
-        // Update booster return animation (drifting back towards pad)
+        // Update booster return trajectory
         this.boosterPosition.addScaledVector(this.boosterVelocity, dt);
         this.boosterVelocity.y -= this.marsGravity * dt * 0.5;
         this.vehicle.boosterGroup.position.copy(this.boosterPosition);
@@ -253,16 +302,31 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.ORBIT:
         this.missionTime += dt;
-        // Microgravity orbital coast
+        // Microgravity orbital mechanics
         const orbitalGravity = (this.marsGravity * 0.85);
-        // Centrifugal balance in circular orbit
         const centAccel = (this.speed * this.speed) / 3400000;
         this.velocity.y += (centAccel - orbitalGravity) * dt * 0.1;
+
+        // Manual orbital burn if throttle > 0
+        if (this.throttle > 0.01 && this.starshipFuel > 0) {
+          this.starshipFuel = Math.max(0, this.starshipFuel - this.throttle * 0.42 * dt);
+          const orbitThrustVec = new THREE.Vector3(
+            Math.sin(this.pitch) * Math.sin(this.yaw),
+            Math.cos(this.pitch),
+            Math.sin(this.pitch) * Math.cos(this.yaw)
+          ).normalize().multiplyScalar(28.0 * this.throttle);
+          this.velocity.addScaledVector(orbitThrustVec, dt);
+          this.vehicle.setStarshipThrottle(this.throttle, true);
+        } else {
+          this.vehicle.setStarshipThrottle(0, false);
+        }
+
         this.position.addScaledVector(this.velocity, dt * 0.2);
         this.altitude = this.position.y - this.padElevation;
 
-        // RCS orientation in space
-        if (input.steer) this.yaw += input.steer * 0.6 * dt;
+        // Full RCS attitude control in space
+        if (input.steer) this.yaw += input.steer * 0.85 * dt;
+        if (input.pitch) this.pitch = THREE.MathUtils.clamp(this.pitch + input.pitch * 0.85 * dt, -1.5, 1.5);
         this.vehicle.setFlapDeflection(Math.sin(this.missionTime * 0.8) * 0.1, 0);
         break;
 
@@ -283,17 +347,16 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.HYPERSONIC_ENTRY:
         this.missionTime += dt;
-        // Belly-flop orientation: 70° high angle-of-attack into oncoming wind (Ref Image 2)
-        const bellyFlopAngle = 1.15; // ~66 degrees
+        // Belly-flop orientation: ~66 degrees high angle-of-attack (Ref Image 2)
+        const bellyFlopAngle = 1.15;
         this.pitch = THREE.MathUtils.lerp(this.pitch, bellyFlopAngle, dt * 1.5);
 
         // Flap actuation based on player steering inputs for aerodynamic trim!
-        const flapPitch = (input.throttle || 0);
+        const flapPitch = (input.pitch || 0);
         const flapRoll = (input.steer || 0);
         this.vehicle.setFlapDeflection(flapPitch, flapRoll);
 
         // Hypersonic aerodynamic drag and compression heating!
-        // Heat ~ dynamic pressure * velocity^3
         const heating = (this.dynamicPressure * Math.pow(this.speed / 2800, 2.5));
         this.heat = THREE.MathUtils.clamp(heating * 0.8, 0.0, 1.0);
         this.vehicle.setReentryHeat(this.heat);
@@ -307,7 +370,7 @@ export class StarshipMissionPhysics {
         this.position.addScaledVector(this.velocity, dt);
         this.altitude = this.position.y - this.padElevation;
 
-        // When decelerated below Mach 1.5 and altitude < 15km, transition to terminal belly-flop
+        // Transition to terminal belly-flop when decelerated below Mach 1.5
         if (this.altitude < 12000 || this.speed < 400) {
           this.phase = FLIGHT_PHASES.BELLYFLOP;
           this.vehicle.setReentryHeat(0);
@@ -316,11 +379,14 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.BELLYFLOP:
         this.missionTime += dt;
-        // Subsonic skydiving at terminal velocity (~85 m/s)
-        this.pitch = THREE.MathUtils.lerp(this.pitch, Math.PI / 2, dt * 2.0); // fully horizontal
+        // Subsonic skydiving at terminal velocity (~80 m/s)
+        this.pitch = THREE.MathUtils.lerp(this.pitch, Math.PI / 2, dt * 2.0);
         this.velocity.x *= 0.98;
         this.velocity.z *= 0.98;
         this.velocity.y = THREE.MathUtils.lerp(this.velocity.y, -80.0, dt * 2.5);
+
+        // Trim flaps during skydiving
+        this.vehicle.setFlapDeflection(input.pitch || 0, input.steer || 0);
 
         this.position.addScaledVector(this.velocity, dt);
         const groundUnderBelly = getMarsHeight(this.position.x, this.position.z);
@@ -336,12 +402,16 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.LANDING_FLIP:
         this.missionTime += dt;
-        // 3 Center Raptors ignite and gimbal to violently flip the vehicle vertical!
-        this.pitch = THREE.MathUtils.lerp(this.pitch, 0.0, dt * 4.5); // fast flip to vertical
-        this.velocity.y = THREE.MathUtils.lerp(this.velocity.y, -12.0, dt * 3.5); // rapid deceleration
+        // 3 Center Raptors ignite and flip the vehicle vertical!
+        this.pitch = THREE.MathUtils.lerp(this.pitch, 0.0, dt * 4.5);
+        this.velocity.y = THREE.MathUtils.lerp(this.velocity.y, -12.0, dt * 3.5);
 
-        // Pilot throttle cushion control
-        if (input.throttle > 0) this.velocity.y += 20.0 * dt;
+        // Pilot manual throttle cushion control
+        if (this.starshipFuel > 0) {
+          this.starshipFuel = Math.max(0, this.starshipFuel - this.throttle * 0.5 * dt);
+          this.velocity.y += (this.throttle * 24.0 - this.marsGravity) * dt;
+        }
+        this.vehicle.setStarshipThrottle(this.throttle, false);
 
         this.position.addScaledVector(this.velocity, dt);
         const groundUnderFlip = getMarsHeight(this.position.x, this.position.z);
@@ -353,9 +423,16 @@ export class StarshipMissionPhysics {
         break;
 
       case FLIGHT_PHASES.TOUCHDOWN:
-        // Final touchdown cushion
+        // Final touchdown cushion with pilot throttle authority
         const currentGround = getMarsHeight(this.position.x, this.position.z);
-        this.velocity.y = THREE.MathUtils.lerp(this.velocity.y, -1.5, dt * 4.0);
+        if (this.starshipFuel > 0 && this.throttle > 0.05) {
+          this.starshipFuel = Math.max(0, this.starshipFuel - this.throttle * 0.5 * dt);
+          this.velocity.y = THREE.MathUtils.lerp(this.velocity.y, -1.5 * (1.1 - this.throttle), dt * 4.0);
+        } else {
+          this.velocity.y = THREE.MathUtils.lerp(this.velocity.y, -8.0, dt * 2.0);
+        }
+        this.vehicle.setStarshipThrottle(this.throttle, false);
+
         this.position.y += this.velocity.y * dt;
         this.altitude = this.position.y - currentGround;
 
@@ -373,6 +450,11 @@ export class StarshipMissionPhysics {
         this.throttle = 0;
         break;
     }
+
+    // Telemetry calculations
+    const horizDist = new THREE.Vector2(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y).length();
+    this.downrange = (horizDist / 1000).toFixed(1);
+    this.gForce = Math.max(0.0, (this.acceleration.length() / this.marsGravity)).toFixed(1);
 
     // Compute vehicle Euler & Quaternion
     const euler = new THREE.Euler(this.pitch, this.yaw, this.roll, 'YXZ');

@@ -228,12 +228,17 @@ export default function MarsCanvas() {
       <div id="flight-hud" className="flight-hud-layer">
         <div className="flight-top-panel">
           <div id="flight-phase-badge" className="flight-phase-badge">PRE-LAUNCH // STARBASE OLM</div>
-          <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">✕ Exit to Rover</button>
+          <div className="flight-top-actions">
+            <button id="flight-cam-btn" className="hud-pill-btn flight-cam-btn" aria-label="Toggle Flight Camera">
+              📹 <span id="flight-cam-badge">CAM: CHASE</span>
+            </button>
+            <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">✕ Exit to Rover</button>
+          </div>
         </div>
 
         <div id="flight-action-prompt" className="flight-action-prompt"></div>
 
-        {/* Telemetry Ribbons */}
+        {/* Telemetry Ribbons & Propellant Gauges */}
         <div className="flight-telemetry-panel">
           <div className="flight-gauge">
             <span className="gauge-label">ALTITUDE</span>
@@ -247,6 +252,37 @@ export default function MarsCanvas() {
             <span className="gauge-label">AIRSPEED</span>
             <span id="flight-mach-val" className="gauge-val">Mach 0.0</span>
           </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">ACCELERATION</span>
+            <span id="flight-gforce-val" className="gauge-val">1.0 G</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">DOWNRANGE</span>
+            <span id="flight-downrange-val" className="gauge-val">0.0 km</span>
+          </div>
+        </div>
+
+        {/* Propellant Tanks (LOX + CH4) */}
+        <div className="flight-propellant-panel">
+          <div className="propellant-item booster-tank" id="flight-booster-tank-box">
+            <div className="tank-header">
+              <span className="tank-label">STAGE 1 BOOSTER FUEL</span>
+              <span id="flight-booster-fuel-val" className="tank-val">100%</span>
+            </div>
+            <div className="tank-track">
+              <div id="flight-booster-fuel-bar" className="tank-fill booster-fill" style={{ width: '100%' }}></div>
+            </div>
+          </div>
+
+          <div className="propellant-item ship-tank">
+            <div className="tank-header">
+              <span className="tank-label">STAGE 2 SHIP FUEL</span>
+              <span id="flight-ship-fuel-val" className="tank-val">100%</span>
+            </div>
+            <div className="tank-track">
+              <div id="flight-ship-fuel-bar" className="tank-fill ship-fill" style={{ width: '100%' }}></div>
+            </div>
+          </div>
         </div>
 
         {/* Re-entry Plasma Thermal Gauge (Ref Image 2) */}
@@ -257,15 +293,46 @@ export default function MarsCanvas() {
           </div>
         </div>
 
-        {/* Throttle Bar & Staging Button */}
+        {/* Flight Control Hints */}
+        <div className="flight-controls-hint">
+          <span className="hint-tag">[W/S] PITCH</span>
+          <span className="hint-tag">[A/D] YAW</span>
+          <span className="hint-tag">[SHIFT/CTRL] THROTTLE</span>
+          <span className="hint-tag">[Z/X] MAX/CUT</span>
+          <span className="hint-tag">[C] CAMERA</span>
+          <span className="hint-tag">[SPACE] STAGE</span>
+        </div>
+
+        {/* Throttle Bar, Quick Throttle & Staging Button */}
         <div className="flight-bottom-controls">
           <div className="flight-throttle-box">
-            <span className="throttle-label">RAPTOR THRUST</span>
+            <div className="throttle-header-row">
+              <span className="throttle-label">RAPTOR THRUST</span>
+              <span id="flight-throttle-val" className="throttle-pct-label">0%</span>
+            </div>
             <div className="flight-throttle-track">
               <div id="flight-throttle-bar" className="flight-throttle-fill" style={{ width: '0%' }}></div>
             </div>
           </div>
+
+          <div className="flight-quick-throttle">
+            <button id="flight-btn-throttle-up" className="hud-pill-btn throttle-sub-btn" aria-label="Throttle Up">▲ +THR</button>
+            <button id="flight-btn-throttle-down" className="hud-pill-btn throttle-sub-btn" aria-label="Throttle Down">▼ -THR</button>
+          </div>
+
           <button id="flight-stage-btn" className="flight-stage-btn" aria-label="Rocket Stage Trigger">🚀 IGNITE</button>
+        </div>
+
+        {/* Mobile On-Screen Flight Steering Cluster */}
+        <div id="flight-mobile-steering" className="flight-mobile-steering" style={{ display: 'none' }}>
+          <div className="flight-touch-dpad">
+            <button id="flight-btn-pitch-down" className="touch-btn flight-dir-btn" aria-label="Pitch Down">▲</button>
+            <div className="flight-dpad-middle">
+              <button id="flight-btn-yaw-left" className="touch-btn flight-dir-btn" aria-label="Yaw Left">◀</button>
+              <button id="flight-btn-yaw-right" className="touch-btn flight-dir-btn" aria-label="Yaw Right">▶</button>
+            </div>
+            <button id="flight-btn-pitch-up" className="touch-btn flight-dir-btn" aria-label="Pitch Up">▼</button>
+          </div>
         </div>
       </div>
 

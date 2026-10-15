@@ -663,6 +663,38 @@ html, body {
   text-transform: uppercase;
 }
 
+.flight-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.flight-cam-btn {
+  background: rgba(18, 22, 32, 0.75) !important;
+  border-color: rgba(90, 190, 255, 0.5) !important;
+  color: #70d0ff !important;
+  font-family: monospace;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.flight-cam-btn:hover {
+  background: rgba(30, 42, 60, 0.9) !important;
+  box-shadow: 0 0 16px rgba(80, 200, 255, 0.6);
+}
+
+.flight-cam-btn .pulse {
+  animation: badge-pulse 0.4s ease-out;
+}
+
+@keyframes badge-pulse {
+  0% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.15); filter: brightness(1.6); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
 .flight-exit-btn {
   background: rgba(22, 20, 24, 0.65) !important;
   border-color: rgba(255, 100, 100, 0.5) !important;
@@ -698,14 +730,15 @@ html, body {
   left: 24px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  background: rgba(14, 16, 22, 0.65);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  gap: 10px;
+  background: rgba(14, 16, 22, 0.68);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.16);
   padding: 14px 18px;
   border-radius: 16px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
 }
 
 .flight-gauge {
@@ -722,24 +755,90 @@ html, body {
 
 .gauge-val {
   font-family: monospace;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
   color: #ffffff;
+}
+
+/* Propellant Tanks Panel */
+.flight-propellant-panel {
+  position: absolute;
+  top: 90px;
+  right: 24px;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(14, 16, 22, 0.68);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 14px 18px;
+  border-radius: 16px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.propellant-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: opacity 0.3s ease;
+}
+
+.tank-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.booster-tank .tank-label { color: #ffaa55; }
+.booster-tank .tank-val { color: #ffb877; font-size: 12px; }
+.ship-tank .tank-label { color: #55d0ff; }
+.ship-tank .tank-val { color: #88e0ff; font-size: 12px; }
+
+.tank-track {
+  width: 100%;
+  height: 9px;
+  background: rgba(20, 24, 34, 0.85);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.tank-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.1s linear;
+}
+
+.booster-fill {
+  background: linear-gradient(90deg, #d9531e, #ff8833, #ffd166);
+  box-shadow: 0 0 10px rgba(255, 120, 40, 0.75);
+}
+
+.ship-fill {
+  background: linear-gradient(90deg, #0077cc, #00bbff, #88ffff);
+  box-shadow: 0 0 10px rgba(0, 190, 255, 0.75);
 }
 
 /* Hypersonic Re-entry Plasma Thermal Bar */
 .flight-heat-container {
   position: absolute;
-  top: 105px;
+  top: 220px;
   right: 24px;
-  width: 220px;
-  background: rgba(22, 12, 24, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  width: 240px;
+  background: rgba(22, 12, 24, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(220, 80, 255, 0.45);
   padding: 10px 14px;
   border-radius: 14px;
   box-shadow: 0 0 20px rgba(180, 40, 240, 0.35);
+  pointer-events: auto;
 }
 
 .heat-label {
@@ -766,21 +865,46 @@ html, body {
   transition: width 0.1s ease;
 }
 
+/* Flight Controls Hint */
+.flight-controls-hint {
+  position: absolute;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.hint-tag {
+  background: rgba(16, 18, 24, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #b0c0d8;
+  letter-spacing: 0.5px;
+}
+
 /* Flight Controls (Throttle & Staging) */
 .flight-bottom-controls {
   position: absolute;
-  bottom: 30px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   pointer-events: auto;
-  background: rgba(14, 16, 22, 0.65);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(14, 16, 22, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.18);
-  padding: 12px 24px;
+  padding: 10px 22px;
   border-radius: 28px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
@@ -791,6 +915,12 @@ html, body {
   gap: 4px;
 }
 
+.throttle-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .throttle-label {
   font-family: monospace;
   font-size: 10px;
@@ -799,8 +929,15 @@ html, body {
   letter-spacing: 1px;
 }
 
+.throttle-pct-label {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 900;
+  color: #ffee44;
+}
+
 .flight-throttle-track {
-  width: 160px;
+  width: 150px;
   height: 12px;
   background: rgba(20, 30, 45, 0.85);
   border-radius: 6px;
@@ -815,15 +952,35 @@ html, body {
   transition: width 0.08s ease;
 }
 
+.flight-quick-throttle {
+  display: flex;
+  gap: 6px;
+}
+
+.throttle-sub-btn {
+  padding: 6px 10px !important;
+  font-size: 10px !important;
+  font-family: monospace !important;
+  font-weight: 800 !important;
+  background: rgba(26, 32, 45, 0.8) !important;
+  border-color: rgba(90, 190, 255, 0.35) !important;
+  color: #a0d8ff !important;
+}
+
+.throttle-sub-btn:active {
+  background: rgba(40, 120, 200, 0.6) !important;
+  transform: scale(0.95);
+}
+
 .flight-stage-btn {
   background: linear-gradient(135deg, #ff6622, #dd2200);
   border: 2px solid #ffaa66;
   color: #ffffff;
   font-family: system-ui, sans-serif;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 900;
   letter-spacing: 1px;
-  padding: 10px 22px;
+  padding: 9px 20px;
   border-radius: 20px;
   cursor: pointer;
   box-shadow: 0 4px 18px rgba(230, 60, 20, 0.6);
@@ -836,25 +993,70 @@ html, body {
   filter: brightness(1.2);
 }
 
+/* Mobile Flight Steering D-Pad */
+.flight-mobile-steering {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  left: calc(env(safe-area-inset-left, 0px) + 20px);
+  pointer-events: auto;
+  z-index: 100;
+}
+
+.flight-touch-dpad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.flight-dpad-middle {
+  display: flex;
+  gap: 36px;
+}
+
+.flight-dir-btn {
+  width: 58px !important;
+  height: 58px !important;
+  border-radius: 18px !important;
+  font-size: 18px !important;
+  background: rgba(255, 255, 255, 0.09) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+.flight-dir-btn:active, .flight-dir-btn.active {
+  background: rgba(80, 190, 255, 0.55) !important;
+  border-color: #88d0ff !important;
+  box-shadow: 0 0 20px rgba(80, 190, 255, 0.7) !important;
+}
+
 @media (max-width: 768px) {
   .flight-telemetry-panel {
-    top: calc(env(safe-area-inset-top, 0px) + 60px);
-    left: calc(env(safe-area-inset-left, 0px) + 12px);
+    top: calc(env(safe-area-inset-top, 0px) + 52px);
+    left: calc(env(safe-area-inset-left, 0px) + 10px);
     padding: 8px 12px;
+    gap: 4px;
+  }
+  .gauge-val { font-size: 14px; }
+  .flight-propellant-panel {
+    top: calc(env(safe-area-inset-top, 0px) + 52px);
+    right: calc(env(safe-area-inset-right, 0px) + 10px);
+    width: 150px;
+    padding: 8px 10px;
     gap: 6px;
   }
-  .gauge-val { font-size: 15px; }
+  .tank-header { font-size: 8px; }
   .flight-heat-container {
-    top: calc(env(safe-area-inset-top, 0px) + 60px);
-    right: calc(env(safe-area-inset-right, 0px) + 12px);
+    top: 170px;
+    right: calc(env(safe-area-inset-right, 0px) + 10px);
     width: 150px;
   }
-  .flight-throttle-track { width: 110px; }
-  .flight-stage-btn { font-size: 12px; padding: 8px 16px; }
+  .flight-controls-hint { display: none; }
+  .flight-throttle-track { width: 90px; }
+  .flight-stage-btn { font-size: 11px; padding: 7px 14px; }
   .flight-bottom-controls {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-    padding: 8px 16px;
-    gap: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    padding: 6px 14px;
+    gap: 8px;
   }
 }
 

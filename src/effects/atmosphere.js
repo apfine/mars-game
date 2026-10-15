@@ -82,51 +82,69 @@ export class MarsAtmosphere {
           float e = max(dir.y, 0.0);
           vec3 sunDir = normalize(uSunPos);
 
-          // Base gradient: pale dusty tan horizon rising to a deeper butterscotch zenith
-          vec3 sky = mix(uSkyHorizon, uSkyZenith, pow(e, 0.42));
+          // 1. Martian Atmospheric Gradient
+          // Mars atmosphere is thin: concentrated near the horizon (e < 0.25).
+          // As altitude increases (uSpaceFade -> 1.0), this compresses into a razor-thin planetary limb.
+          float atmoCompression = mix(4.8, 36.0, uSpaceFade);
+          float atmoDensity = exp(-e * atmoCompression) * (1.0 - uSpaceFade * 0.95);
 
-          // Suspended-dust haze band hugging the horizon
-          float band = exp(-e * 7.0);
-          sky = mix(sky, uSkyHorizon * 1.08, band * 0.6);
-          sky *= 1.0 - 0.12 * smoothstep(0.55, 1.0, e);
+          // Atmospheric color gradient: warm dusty salmon at horizon blending towards butterscotch
+          vec3 atmoCol = mix(uSkyHorizon, uSkyZenith, clamp(e * 2.8, 0.0, 1.0));
 
-          // Sun-side brightening (dust forward scatters sunlight over a wide area)
+          // Forward-scattered dust illumination on the sun-facing side
           float sc = max(dot(dir, sunDir), 0.0);
-          sky += vec3(0.30, 0.20, 0.12) * pow(sc, 3.0) * 0.45;
+          atmoCol += vec3(0.28, 0.18, 0.12) * pow(sc, 3.0) * atmoDensity;
 
-          // Wispy water-ice cirrus clouds streaked by high winds
-          vec2 cp = dir.xz / (dir.y + 0.28);
-          vec2 wind = vec2(uTime * 0.010, uTime * 0.004);
-          vec2 q = cp * vec2(0.9, 2.6) + wind;
-          float c1 = fbm2(q + fbm2(q * 0.7) * 1.2);
-          float cloud = smoothstep(0.50, 0.78, c1) * smoothstep(0.05, 0.30, e) * (1.0 - smoothstep(0.7, 1.0, e) * 0.5);
-          float thin = smoothstep(0.42, 0.62, fbm2(cp * vec2(0.5, 5.0) - wind * 1.5)) * smoothstep(0.08, 0.4, e) * 0.35;
-          vec3 cloudCol = mix(vec3(0.95, 0.74, 0.62), vec3(1.0, 0.92, 0.84), pow(sc, 2.0));
-          sky = mix(sky, cloudCol, clamp(cloud * 0.15 + thin * 0.4, 0.0, 0.25) * (1.0 - uSpaceFade));
+          // 2. Pure pitch-black space directly after the Martian gradient
+          vec3 spaceBlack = vec3(0.0005, 0.0007, 0.0016);
+          vec3 sky = mix(spaceBlack, atmoCol, clamp(atmoDensity, 0.0, 1.0));
 
-          // Mars forward-scattering: blue corona around the sun + warm glare lobes
-          float blueHalo = pow(sc, 14.0) * 0.1 * (1.0 - band * 0.3);
-          sky = mix(sky, uSunHaloBlue, blueHalo * (1.0 - uSpaceFade));
-          float glare = pow(sc, 6.0) * 0.30 + pow(sc, 40.0) * 0.6 + pow(sc, 420.0) * 1.8;
-          sky += uSunColor * glare * 0.6;
-
-          // Sharp Sun disk
-          float sunDisk = smoothstep(0.9988, 0.9995, sc);
-          vec3 col = sky + uSunColor * sunDisk * 1.1;
-
-          // Transition to deep space black when climbing altitude
-          if (uSpaceFade > 0.01) {
-            vec3 spaceBlack = vec3(0.002, 0.003, 0.007);
-            // Procedural Starfield in deep space
-            vec2 starCoord = floor(dir.xz / (abs(dir.y) + 0.08) * 220.0);
-            float starHash = h11(starCoord + vec2(17.3, 49.1));
-            float star = step(0.988, starHash) * pow(h11(starCoord * 2.3), 3.0) * 1.6;
-
-            col = mix(col, spaceBlack, uSpaceFade);
-            col += vec3(star) * uSpaceFade;
+          // 3. Wispy water-ice cirrus clouds hugging the lower atmosphere
+          if (uSpaceFade < 0.85 && e < 0.35) {
+            vec2 cp = dir.xz / (dir.y + 0.28);
+            vec2 wind = vec2(uTime * 0.010, uTime * 0.004);
+            vec2 q = cp * vec2(0.9, 2.6) + wind;
+            float c1 = fbm2(q + fbm2(q * 0.7) * 1.2);
+            float cloud = smoothstep(0.50, 0.78, c1) * smoothstep(0.02, 0.18, e) * (1.0 - smoothstep(0.24, 0.38, e));
+            vec3 cloudCol = mix(vec3(0.95, 0.74, 0.62), vec3(1.0, 0.92, 0.84), pow(sc, 2.0));
+            sky = mix(sky, cloudCol, clamp(cloud * 0.22, 0.0, 0.30) * (1.0 - uSpaceFade));
           }
 
-          gl_FragColor = vec4(col, 1.0);
+          // 4. Mars forward-scattering: twilight blue corona around the sun
+          float blueHalo = pow(sc, 16.0) * 0.25 * (1.0 - uSpaceFade * 0.7);
+          sky = mix(sky, uSunHaloBlue, blueHalo);
+
+          // Solar glare and disk
+          float glare = pow(sc, 8.0) * 0.32 + pow(sc, 45.0) * 0.7 + pow(sc, 450.0) * 2.0;
+          sky += uSunColor * glare * (1.0 - uSpaceFade * 0.25);
+          float sunDisk = smoothstep(0.9988, 0.9996, sc);
+          sky += uSunColor * sunDisk * 1.6;
+
+          // 5. Starfield visible in the black of space (zenith from surface & entire sky in orbit)
+          float starElevationMask = smoothstep(0.06, 0.30, e);
+          float starVisibility = max(uSpaceFade, starElevationMask * (1.0 - atmoDensity));
+
+          if (starVisibility > 0.01) {
+            vec3 starDir = dir;
+            vec2 starCoord = floor(starDir.xz / (abs(starDir.y) + 0.12) * 280.0);
+            float starHash = h11(starCoord + vec2(17.3, 49.1));
+            float starBright = step(0.982, starHash) * pow(h11(starCoord * 3.1 + vec2(5.2, 9.4)), 3.5) * 2.4;
+
+            // Twinkling effect
+            float twinkle = 0.82 + 0.18 * sin(uTime * 3.2 + starHash * 35.0);
+
+            // Bright prominent navigational stars
+            vec2 majorCoord = floor(starDir.xz / (abs(starDir.y) + 0.12) * 85.0);
+            float majorHash = h11(majorCoord + vec2(83.1, 19.7));
+            float majorStar = step(0.991, majorHash) * 2.0;
+
+            vec3 starColor = mix(vec3(0.85, 0.92, 1.0), vec3(1.0, 0.94, 0.8), starHash);
+            vec3 stars = starColor * (starBright * twinkle + majorStar) * starVisibility;
+
+            sky += stars;
+          }
+
+          gl_FragColor = vec4(sky, 1.0);
           #include <colorspace_fragment>
         }
       `
@@ -721,15 +739,19 @@ export class MarsAtmosphere {
   }
 
   setAltitude(alt) {
-    const spaceFade = THREE.MathUtils.clamp((alt - 16000) / 55000, 0.0, 1.0);
+    const spaceFade = THREE.MathUtils.clamp((alt - 1500) / 14500, 0.0, 1.0);
     if (this.skyMat) {
       this.skyMat.uniforms.uSpaceFade.value = spaceFade;
     }
     if (this.distantMountains) {
-      this.distantMountains.visible = alt < 28000;
+      this.distantMountains.visible = alt < 12000;
     }
     if (this.scene.fog) {
-      this.scene.fog.far = THREE.MathUtils.lerp(520, 45000, spaceFade);
+      this.scene.fog.near = THREE.MathUtils.lerp(110, 80000, spaceFade);
+      this.scene.fog.far = THREE.MathUtils.lerp(520, 250000, spaceFade);
+    }
+    if (this.dustPoints) {
+      this.dustPoints.visible = alt < 600;
     }
   }
 
