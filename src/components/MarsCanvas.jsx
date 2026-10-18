@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { getPresenceClient } from '../utils/presenceClient.js';
 
 export default function MarsCanvas() {
   const containerRef = useRef(null);
@@ -17,6 +18,7 @@ export default function MarsCanvas() {
   useEffect(() => {
     let engine = null;
     let isMounted = true;
+    const presence = getPresenceClient();
 
     // Fast simulated progress increments (0-95% in ~800ms)
     const timer = setInterval(() => {
@@ -141,28 +143,67 @@ export default function MarsCanvas() {
 
       {/* HUD & UI Layer */}
       <div id="hud-layer">
-        {/* Top-Left Branding */}
-        <div className="top-left-brand">
-          <span className="brand-text">DUNES</span>
-          <span className="sub-brand">RED PLANET EXPEDITION</span>
+        {/* Top-Left Scientific Mission Branding */}
+        <div className="top-left-brand scientific-brand">
+          <div className="mission-tag-row">
+            <span className="mission-agency">NASA-JPL // SPX</span>
+            <span className="mission-dot">·</span>
+            <span className="mission-name">ARES-VI EXPEDITION</span>
+            <span className="sys-status-badge">SYS NOMINAL</span>
+          </div>
+          <div className="brand-main-row">
+            <span className="brand-text">MARS TELEMETRY</span>
+          </div>
+          <div className="scientific-sub-telemetry">
+            <span id="sol-clock" className="sol-chip">SOL 492 · LMST 14:38:22</span>
+            <span className="telemetry-pipe">|</span>
+            <span id="met-clock" className="met-chip">MET +00:00:00.0</span>
+          </div>
+        </div>
+
+        {/* Top-Center Scientific Planetary Environmental Ribbon */}
+        <div className="top-center-scientific-bar">
+          <div className="sci-chip">
+            <span className="sci-lbl">COORDS</span>
+            <span id="sci-coords-val" className="sci-val">18.42°N 226.05°W</span>
+          </div>
+          <div className="sci-chip">
+            <span className="sci-lbl">ELEV (MOLA)</span>
+            <span id="sci-elev-val" className="sci-val">-1,420 m</span>
+          </div>
+          <div className="sci-chip">
+            <span className="sci-lbl">ATM. PRESS</span>
+            <span id="sci-press-val" className="sci-val">0.636 kPa</span>
+          </div>
+          <div className="sci-chip">
+            <span className="sci-lbl">SURF TEMP</span>
+            <span id="sci-temp-val" className="sci-val">-62.4°C</span>
+          </div>
+          <div className="sci-chip hide-mobile">
+            <span className="sci-lbl">RAD FLUX</span>
+            <span id="sci-rad-val" className="sci-val">0.24 mSv/d</span>
+          </div>
         </div>
 
         {/* Top-Right Settings & Actions */}
         <div className="top-right-bar">
-          <div className="online-pill" id="online-counter-pill">
+          <div className="online-pill scientific-online-pill" id="online-counter-pill" title="Deep Space Network Canberra 70m Dish">
             <span className="online-dot"></span>
-            <span id="online-count-val">43</span> ONLINE
+            <span id="online-count-val" className="online-count-num">1</span>
+            <span className="online-lbl">ONLINE</span>
+            <span className="dsn-carrier-badge">DSN-43</span>
+            <span className="dsn-rtt-val" id="telemetry-rtt-val">24ms</span>
           </div>
-          <button id="launch-mission-btn" className="hud-pill-btn launch-pill" aria-label="Launch Starship Mission">
-            <span>🚀 Mission</span>
+          <button id="launch-mission-btn" className="hud-pill-btn launch-pill scientific-btn" aria-label="Launch Starship Mission">
+            <span>🚀 STARSHIP</span>
           </button>
-          <button id="map-btn" className="hud-pill-btn" aria-label="Map">
-            <span>Map</span>
-            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
+          <button id="map-btn" className="hud-pill-btn scientific-btn" aria-label="Map">
+            <span>MAP</span>
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
           </button>
-          <button id="esc-btn" className="hud-pill-btn" aria-label="Settings">
-            <span>Esc</span>
-            <svg className="gear-icon" viewBox="0 0 24 24" width="16" height="16">
+          <button id="esc-btn" className="hud-pill-btn scientific-btn" aria-label="Settings">
+            <span>SYS</span>
+            <svg className="gear-icon" viewBox="0 0 24 24" width="14" height="14">
               <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
             </svg>
           </button>
@@ -187,21 +228,47 @@ export default function MarsCanvas() {
           <div className="hint-row"><span className="key-label">Headlights:</span> L</div>
         </div>
 
-        {/* Bottom Center Telemetry & Speedometer */}
-        <div className="bottom-center-telemetry">
-          {/* Nitro Thruster Gauge */}
-          <div className="nitro-container">
-            <div className="nitro-label">NITRO <span id="nitro-pct">100%</span></div>
-            <div className="nitro-track">
-              <div id="nitro-fill" className="nitro-fill" style={{ width: '100%' }}></div>
+        {/* Bottom Center Scientific Telemetry & Diagnostics Dashboard */}
+        <div className="bottom-center-telemetry scientific-dashboard">
+          {/* Scientific Vehicle Diagnostics Bar */}
+          <div className="rover-diagnostics-bar">
+            <div className="diag-chip">
+              <span className="diag-lbl">ATTITUDE</span>
+              <span id="rover-gyro-val" className="diag-val">PITCH +0.0° · ROLL +0.0°</span>
+            </div>
+            <div className="diag-chip">
+              <span className="diag-lbl">AZIMUTH</span>
+              <span id="rover-heading-val" className="diag-val">000° N</span>
+            </div>
+            <div className="diag-chip">
+              <span className="diag-lbl">ODOMETER</span>
+              <span id="rover-odom-val" className="diag-val">0 m</span>
+            </div>
+            <div className="diag-chip hide-mobile">
+              <span className="diag-lbl">POWER</span>
+              <span className="diag-val highlight-green">RTG 110 W · 28.4 V</span>
             </div>
           </div>
 
-          {/* Main Speedometer */}
-          <div className="speedometer">
-            <div className="speed-number"><span id="speed-val">0</span> <span className="speed-unit">km/h</span></div>
-            <div className="speed-bar-container">
-              <div id="speed-bar" className="speed-bar"></div>
+          <div className="telemetry-gauges-row">
+            {/* Cold Gas Thruster Gauge */}
+            <div className="nitro-container scientific-gauge-box">
+              <div className="nitro-label">COLD GAS GN₂ <span id="nitro-pct">100%</span> · 240 bar</div>
+              <div className="nitro-track">
+                <div id="nitro-fill" className="nitro-fill" style={{ width: '100%' }}></div>
+              </div>
+            </div>
+
+            {/* Scientific Main Speedometer */}
+            <div className="speedometer scientific-speedometer">
+              <div className="speed-number">
+                <span id="speed-val" className="speed-digits">0</span>
+                <span className="speed-unit">km/h</span>
+                <span className="speed-sub-unit" id="speed-ms-val">0.0 m/s</span>
+              </div>
+              <div className="speed-bar-container">
+                <div id="speed-bar" className="speed-bar"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -235,9 +302,12 @@ export default function MarsCanvas() {
             <div id="flight-phase-badge" className="flight-phase-badge">PRE-LAUNCH // STARBASE OLM</div>
             <div className="flight-badge-row">
               <div id="flight-booster-badge" className="flight-booster-badge" style={{ display: 'none' }}>BOOSTER: ON PAD</div>
-              <div className="flight-online-badge">
+              <div className="flight-online-badge scientific-online-pill" title="Deep Space Network Link">
                 <span className="online-dot"></span>
-                <span id="flight-online-val">43</span> ONLINE
+                <span id="flight-online-val" className="online-count-num">1</span>
+                <span className="online-lbl">ONLINE</span>
+                <span className="dsn-carrier-badge">DSN-43</span>
+                <span className="dsn-rtt-val">24ms</span>
               </div>
             </div>
           </div>
@@ -299,19 +369,46 @@ export default function MarsCanvas() {
 
         <div id="flight-action-prompt" className="flight-action-prompt"></div>
 
-        {/* Telemetry Ribbons & Propellant Gauges */}
-        <div className="flight-telemetry-panel">
+        {/* Aerospace Scientific Telemetry Ribbon & Orbital Metrics */}
+        <div className="flight-telemetry-panel scientific-flight-panel">
           <div className="flight-gauge">
-            <span className="gauge-label">ALTITUDE</span>
+            <span className="gauge-label">ALTITUDE (Z)</span>
             <span id="flight-alt-val" className="gauge-val">0 m</span>
           </div>
           <div className="flight-gauge">
-            <span className="gauge-label">VELOCITY</span>
+            <span className="gauge-label">INERTIAL VELOCITY</span>
             <span id="flight-speed-val" className="gauge-val">0 km/h</span>
           </div>
           <div className="flight-gauge">
             <span className="gauge-label">AIRSPEED</span>
             <span id="flight-mach-val" className="gauge-val">Mach 0.0</span>
+          </div>
+          <div className="flight-gauge">
+            <div className="gauge-label-row">
+              <span className="gauge-label">DYN. PRESSURE (Q)</span>
+              <span id="flight-maxq-badge" className="maxq-badge" style={{ display: 'none' }}>MAX-Q</span>
+            </div>
+            <span id="flight-dynq-val" className="gauge-val highlight-amber">0.0 kPa</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">APOAPSIS (Ap)</span>
+            <span id="flight-apogee-val" className="gauge-val highlight-cyan">0.0 km</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">PERIAPSIS (Pe)</span>
+            <span id="flight-periapsis-val" className="gauge-val">SUBORBITAL</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">DELTA-V (Δv)</span>
+            <span id="flight-deltav-val" className="gauge-val">3,820 m/s</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">CHAMBER Pc</span>
+            <span id="flight-chamber-pc-val" className="gauge-val">0 bar</span>
+          </div>
+          <div className="flight-gauge">
+            <span className="gauge-label">ATTITUDE (P/Y/R)</span>
+            <span id="flight-attitude-val" className="gauge-val">P: +0° · Y: 000° · R: 0°</span>
           </div>
           <div className="flight-gauge">
             <span className="gauge-label">ACCELERATION</span>

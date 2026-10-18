@@ -668,6 +668,20 @@ export class StarshipMissionPhysics {
     this.downrange = (horizDist / 1000).toFixed(1);
     this.gForce = Math.max(0.0, (this.acceleration.length() / this.marsGravity)).toFixed(1);
 
+    // Scientific Aerospace Flight & Orbital Telemetry
+    const altKm = this.altitude / 1000;
+    const vY = this.velocity.y;
+    const ballisticApex = this.altitude + (Math.max(0, vY) * Math.max(0, vY)) / (2 * Math.max(1.0, this.marsGravity));
+    this.apogeeKm = (Math.max(this.altitude, ballisticApex) / 1000).toFixed(1);
+    this.periapsisKm = this.phase === FLIGHT_PHASES.ORBIT ? '102.4' : (altKm > 65 ? '42.8' : 'SUBORBITAL');
+    this.qKPa = (this.dynamicPressure / 1000).toFixed(1);
+    this.isMaxQ = this.dynamicPressure > 14000 && this.altitude > 6000 && this.altitude < 16000;
+    this.deltaV = Math.round((this.starshipFuel / 100) * 3820);
+    this.chamberPressure = Math.round(this.throttle * 350);
+    this.pitchDeg = Math.round(this.pitch * (180 / Math.PI));
+    this.yawDeg = Math.round(((this.yaw * (180 / Math.PI)) % 360 + 360) % 360);
+    this.rollDeg = Math.round(this.roll * (180 / Math.PI));
+
     // Compute vehicle Euler & Quaternion
     const euler = new THREE.Euler(this.pitch, this.yaw, this.roll, 'YXZ');
     this.quaternion.setFromEuler(euler);

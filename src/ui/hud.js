@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { MarsMap } from './map.js';
+import { getPresenceClient } from '../utils/presenceClient.js';
 
 // HUD Telemetry, drune.io-style Waypoint Badges, Mobile Touch Controls & Settings Modal
 export class MarsHUD {
@@ -8,11 +9,13 @@ export class MarsHUD {
     this.options = options;
     this.userBeacons = [];
     this.beaconIdCounter = 1;
+    this.startTime = performance.now();
 
     this.dom = {
       container: document.getElementById('hud-layer'),
       speedometer: document.getElementById('speed-val'),
       speedBar: document.getElementById('speed-bar'),
+      speedMsVal: document.getElementById('speed-ms-val'),
       nitroBar: document.getElementById('nitro-fill'),
       nitroText: document.getElementById('nitro-pct'),
       badgeContainer: document.getElementById('waypoint-badges'),
@@ -20,7 +23,21 @@ export class MarsHUD {
       settingsModal: document.getElementById('settings-modal'),
       escBtn: document.getElementById('esc-btn'),
       closeSettingsBtn: document.getElementById('close-settings'),
-      roverOnlineVal: document.getElementById('online-players-count')
+      roverOnlineVal: document.getElementById('online-count-val') || document.getElementById('online-players-count'),
+
+      // Scientific Clocks & Sensors
+      solClock: document.getElementById('sol-clock'),
+      metClock: document.getElementById('met-clock'),
+      coordsVal: document.getElementById('sci-coords-val'),
+      elevVal: document.getElementById('sci-elev-val'),
+      pressVal: document.getElementById('sci-press-val'),
+      tempVal: document.getElementById('sci-temp-val'),
+      radVal: document.getElementById('sci-rad-val'),
+
+      // Vehicle Diagnostics
+      gyroVal: document.getElementById('rover-gyro-val'),
+      headingVal: document.getElementById('rover-heading-val'),
+      odomVal: document.getElementById('rover-odom-val')
     };
 
     this.onlineCount = 43;
@@ -221,13 +238,103 @@ export class MarsHUD {
   }
 
   update(physics, camera, scatterPOIs = []) {
-    // 0. Update Online Explorer Count
-    const now = performance.now();
-    if (!this.lastOnlineUpdate || now - this.lastOnlineUpdate > 12000) {
-      this.lastOnlineUpdate = now;
-      const delta = (Math.random() > 0.48 ? 1 : -1) * (Math.random() < 0.25 ? 2 : 1);
-      this.onlineCount = Math.max(39, Math.min(52, (this.onlineCount || 43) + delta));
-      if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = this.onlineCount;
+    // 0. Update Online Explorer Count via Real Presence Client
+    const presence = getPresenceClient();
+    if (presence) {
+      this.onlineCount = presence.onlineCount;
+      if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = presence.onlineCount;
+    }
+
+    // 0.1 Clocks: LMST Martian Solar Time & MET Mission Elapsed Time
+    const elapsedSec = (performance.now() - this.startTime) / 1000;
+    if (this.dom.metClock) {
+      const metH = Math.floor(elapsedSec / 3600).toString().padStart(2, '0');
+      const metM = Math.floor((elapsedSec % 3600) / 60).toString().padStart(2, '0');
+      const metS = Math.floor(elapsedSec % 60).toString().padStart(2, '0');
+      const metTenths = Math.floor((elapsedSec * 10) % 10);
+      this.dom.metClock.textContent = `MET +${metH}:${metM}:${metS}.${metTenths}`;
+    }
+
+    if (this.dom.solClock) {
+      const earthSec = Date.now() / 1000;
+      // Mars sol is 88775.244 seconds (1.02749125 Earth seconds per Mars second)
+      const lmstSec = Math.floor((earthSec * 1.02749125) % 86400);
+      const solH = Math.floor(lmstSec / 3600).toString().padStart(2, '0');
+      const solM = Math.floor((lmstSec % 3600) / 60).toString().padStart(2, '0');
+      const solS = Math.floor(lmstSec % 60).toString().padStart(2, '0');
+      this.dom.solClock.textContent = `SOL 492 · LMST ${solH}:${solM}:${solS}`;
+    }
+
+    // 0.2 Planetary Environmental Sensors
+    if (physics.position) {
+      const posX = physics.position.x;
+      const posY = physics.position.y;
+      const posZ = physics.position.z;
+
+      // Martian Coordinates centered at Jezero Crater / Starbase (18.38°N, 226.02°W)
+      // 1 deg ~ 59.3 km = 59,300 m
+      const lat = 18.38 + (posZ / 59300);
+      const lon = 226.02 - (posX / 59300);
+      if (this.dom.coordsVal) {
+        const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
+        const lonStr = `${Math.abs(lon).toFixed(2)}°W`;
+        this.dom.coordsVal.textContent = `${latStr} ${lonStr}`;
+      }
+
+      // Elevation MOLA (datum offset approx -1420m)
+      const molaElev = Math.round(-1420 + posY);
+      if (this.dom.elevVal) {
+        this.dom.elevVal.textContent = `${molaElev >= 0 ? '+' : ''}${molaElev.toLocaleString()} m`;
+      }
+
+      // Barometric formula on Mars: P0 = 0.636 kPa, scale height H ~ 11.1 km
+      const pressKPa = 0.636 * Math.exp(-posY / 11100);
+      if (this.dom.pressVal) {
+        this.dom.pressVal.textContent = `${pressKPa.toFixed(3)} kPa`;
+      }
+
+      // Martian Surface Temperature: ~ -62.4°C base with slight lapse rate
+      const tempC = -62.4 - (posY * 0.0025);
+      if (this.dom.tempVal) {
+        this.dom.tempVal.textContent = `${tempC.toFixed(1)}°C`;
+      }
+
+      // Cosmic Radiation Flux ~ 0.24 mSv/d
+      if (this.dom.radVal) {
+        this.dom.radVal.textContent = `0.24 mSv/d`;
+      }
+    }
+
+    // 0.3 Vehicle Diagnostics
+    const pitchDeg = Math.round(((physics.pitch || 0) * 180) / Math.PI);
+    const rollDeg = Math.round(((physics.roll || 0) * 180) / Math.PI);
+    if (this.dom.gyroVal) {
+      const pSign = pitchDeg >= 0 ? '+' : '';
+      const rSign = rollDeg >= 0 ? '+' : '';
+      this.dom.gyroVal.textContent = `PITCH ${pSign}${pitchDeg}° · ROLL ${rSign}${rollDeg}°`;
+    }
+
+    let yawDeg = Math.round((((physics.yaw || 0) * 180) / Math.PI) % 360);
+    if (yawDeg < 0) yawDeg += 360;
+    const compassDirections = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const compassIdx = Math.round(yawDeg / 45) % 8;
+    const compassDir = compassDirections[compassIdx];
+    if (this.dom.headingVal) {
+      this.dom.headingVal.textContent = `${yawDeg.toString().padStart(3, '0')}° ${compassDir}`;
+    }
+
+    const odomMeters = Math.round(physics.distanceTraveled || 0);
+    if (this.dom.odomVal) {
+      if (odomMeters >= 1000) {
+        this.dom.odomVal.textContent = `${(odomMeters / 1000).toFixed(2)} km`;
+      } else {
+        this.dom.odomVal.textContent = `${odomMeters} m`;
+      }
+    }
+
+    if (this.dom.speedMsVal) {
+      const speedMs = (physics.speed || 0).toFixed(1);
+      this.dom.speedMsVal.textContent = `${speedMs} m/s`;
     }
 
     // 1. Update Speedometer

@@ -1,4 +1,5 @@
 import { FLIGHT_PHASES } from './missionPhysics.js';
+import { getPresenceClient } from '../utils/presenceClient.js';
 
 // Aerospace Mission Flight HUD & Mobile Touch Flight Controls
 export class MissionFlightHUD {
@@ -18,6 +19,15 @@ export class MissionFlightHUD {
       machVal: document.getElementById('flight-mach-val'),
       gforceVal: document.getElementById('flight-gforce-val'),
       downrangeVal: document.getElementById('flight-downrange-val'),
+
+      // Aerospace Scientific Telemetry Ribbon
+      apogeeVal: document.getElementById('flight-apogee-val'),
+      periapsisVal: document.getElementById('flight-periapsis-val'),
+      dynQVal: document.getElementById('flight-dynq-val'),
+      maxQBadge: document.getElementById('flight-maxq-badge'),
+      deltaVVal: document.getElementById('flight-deltav-val'),
+      chamberPcVal: document.getElementById('flight-chamber-pc-val'),
+      attitudeVal: document.getElementById('flight-attitude-val'),
 
       // Propellant Gauges
       boosterBox: document.getElementById('flight-booster-tank-box'),
@@ -215,14 +225,12 @@ export class MissionFlightHUD {
   update(physics) {
     if (!this.dom.container || !this.dom.container.classList.contains('active')) return;
 
-    // 0. Live Online Explorer Fluctuation
-    const now = performance.now();
-    if (!this.lastOnlineUpdate || now - this.lastOnlineUpdate > 12000) {
-      this.lastOnlineUpdate = now;
-      const delta = (Math.random() > 0.48 ? 1 : -1) * (Math.random() < 0.25 ? 2 : 1);
-      this.onlineCount = Math.max(39, Math.min(52, (this.onlineCount || 43) + delta));
-      if (this.dom.flightOnlineVal) this.dom.flightOnlineVal.textContent = this.onlineCount;
-      if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = this.onlineCount;
+    // 0. Live Real-Time Online Explorer Count
+    const presence = getPresenceClient();
+    if (presence) {
+      this.onlineCount = presence.onlineCount;
+      if (this.dom.flightOnlineVal) this.dom.flightOnlineVal.textContent = presence.onlineCount;
+      if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = presence.onlineCount;
     }
 
     // 1. Altitude
@@ -274,6 +282,33 @@ export class MissionFlightHUD {
     }
     if (this.dom.downrangeVal) {
       this.dom.downrangeVal.textContent = `${physics.downrange || 0.0} km`;
+    }
+
+    // 2.1 Aerospace Scientific Telemetry Ribbon
+    if (this.dom.apogeeVal) {
+      this.dom.apogeeVal.textContent = `${physics.apogeeKm || (alt / 1000).toFixed(1)} km`;
+    }
+    if (this.dom.periapsisVal) {
+      this.dom.periapsisVal.textContent = physics.periapsisKm === 'SUBORBITAL' ? 'SUBORBITAL' : `${physics.periapsisKm} km`;
+    }
+    if (this.dom.dynQVal) {
+      this.dom.dynQVal.textContent = `${physics.qKPa || '0.0'} kPa`;
+    }
+    if (this.dom.maxQBadge) {
+      this.dom.maxQBadge.style.display = physics.isMaxQ ? 'inline-block' : 'none';
+    }
+    if (this.dom.deltaVVal) {
+      this.dom.deltaVVal.textContent = `${(physics.deltaV || 0).toLocaleString()} m/s`;
+    }
+    if (this.dom.chamberPcVal) {
+      this.dom.chamberPcVal.textContent = `${physics.chamberPressure || 0} bar`;
+    }
+    if (this.dom.attitudeVal) {
+      const pSign = (physics.pitchDeg || 0) >= 0 ? '+' : '';
+      const p = `${pSign}${physics.pitchDeg || 0}°`;
+      const y = `${(physics.yawDeg || 0).toString().padStart(3, '0')}°`;
+      const r = `${physics.rollDeg || 0}°`;
+      this.dom.attitudeVal.textContent = `P: ${p} · Y: ${y} · R: ${r}`;
     }
 
     // 3. Propellant Tanks (LOX + CH4)

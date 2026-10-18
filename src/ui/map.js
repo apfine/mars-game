@@ -68,10 +68,29 @@ export class MarsMap {
     ctx.fillStyle = 'rgba(30,12,6,0.18)';
     ctx.fillRect(0, 0, W, H);
 
-    // Range rings
-    ctx.strokeStyle = 'rgba(255,230,210,0.25)'; ctx.lineWidth = 1;
+    // Tactical Crosshairs
+    ctx.strokeStyle = 'rgba(255,180,120,0.18)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2);
+    ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Scientific Range Rings & Metric Annotations
+    ctx.strokeStyle = 'rgba(255,200,160,0.28)'; ctx.lineWidth = 1;
     const rings = isFull ? [500, 1000, 1500] : [100, 200];
-    for (const r of rings) { ctx.beginPath(); ctx.arc(W / 2, H / 2, r * s, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.font = '600 8.5px monospace, sans-serif';
+    ctx.fillStyle = 'rgba(255,220,190,0.65)';
+    ctx.textAlign = 'left';
+    for (const r of rings) {
+      ctx.beginPath();
+      ctx.arc(W / 2, H / 2, r * s, 0, Math.PI * 2);
+      ctx.stroke();
+      const rLabel = r >= 1000 ? `${(r / 1000).toFixed(1)}k` : `${r}m`;
+      ctx.fillText(rLabel, W / 2 + 4, H / 2 - (r * s) + 10);
+    }
 
     const R = W / 2 - (isFull ? 14 : 10);
     const marker = (wx, wz, color, label, big) => {
@@ -95,7 +114,7 @@ export class MarsMap {
       }
       ctx.closePath(); ctx.stroke(); ctx.fill();
       if (isFull && label) {
-        ctx.font = '600 12px system-ui, sans-serif';
+        ctx.font = '600 11px monospace, sans-serif';
         ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3;
         const km = Math.hypot(wx - p.x, wz - p.z);
         const t = `${label} · ${km < 1000 ? Math.round(km) + ' m' : (km / 1000).toFixed(1) + ' km'}`;
@@ -114,10 +133,16 @@ export class MarsMap {
     ctx.restore();
 
     if (!isFull) {
+      // Outer Tactical Bezel
       ctx.strokeStyle = 'rgba(255,200,160,0.85)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(W / 2, H / 2, W / 2 - 1, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('N', W / 2, 13);
+
+      // Cardinal Azimuth Marks
+      ctx.fillStyle = '#ffffff'; ctx.font = '700 9px monospace, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('000° N', W / 2, 13);
+      ctx.fillText('090° E', W - 22, H / 2 + 3);
+      ctx.fillText('180° S', W / 2, H - 5);
+      ctx.fillText('270° W', 22, H / 2 + 3);
     }
   }
 
