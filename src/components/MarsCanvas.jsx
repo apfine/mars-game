@@ -194,6 +194,9 @@ export default function MarsCanvas() {
             <span className="dsn-carrier-badge">DSN-43</span>
             <span className="dsn-rtt-val" id="telemetry-rtt-val">24ms</span>
           </div>
+          <button id="rover-speed-btn" className="hud-pill-btn scientific-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x)">
+            <span>⏩ 1X</span>
+          </button>
           <button id="launch-mission-btn" className="hud-pill-btn launch-pill scientific-btn" aria-label="Launch Starship Mission">
             <span>🚀 STARSHIP</span>
           </button>
@@ -322,6 +325,9 @@ export default function MarsCanvas() {
           <div className="spx-top-right">
             <button id="flight-track-booster-btn" className="hud-pill-btn flight-booster-btn" aria-label="Track Booster Return">
               🎯 TRACK BOOSTER
+            </button>
+            <button id="flight-speed-btn" className="hud-pill-btn flight-speed-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x)">
+              ⏩ 1X
             </button>
             <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto Mission">
               AUTO: ON

@@ -21,6 +21,9 @@ export class MarsGameEngine {
     this.disposed = false;
     this.mode = 'rover';
     this.loadedNotified = false;
+    this.timeScales = [1, 2, 4, 8];
+    this.timeScaleIdx = 0;
+    this.timeScale = 1;
 
     this.reportProgress(10, 'INITIALIZING SIMULATION ENGINE...');
     this.initRenderer();
@@ -212,10 +215,41 @@ export class MarsGameEngine {
       });
     }
 
+    const bindSpeedBtn = (id) => {
+      const btn = document.getElementById(id);
+      if (btn) {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          this.cycleTimeScale();
+        });
+      }
+    };
+    bindSpeedBtn('flight-speed-btn');
+    bindSpeedBtn('rover-speed-btn');
+
     const optimalPreset = this.detectOptimalQuality();
     this.applyQuality(optimalPreset);
     const qualitySelect = document.getElementById('quality-select');
     if (qualitySelect) qualitySelect.value = optimalPreset;
+  }
+
+  cycleTimeScale() {
+    this.timeScaleIdx = (this.timeScaleIdx + 1) % this.timeScales.length;
+    this.timeScale = this.timeScales[this.timeScaleIdx];
+    const label = `⏩ ${this.timeScale}X`;
+    const isWarped = this.timeScale > 1;
+
+    const flightBtn = document.getElementById('flight-speed-btn');
+    if (flightBtn) {
+      flightBtn.textContent = label;
+      flightBtn.classList.toggle('active', isWarped);
+    }
+
+    const roverBtn = document.getElementById('rover-speed-btn');
+    if (roverBtn) {
+      roverBtn.innerHTML = `<span>${label}</span>`;
+      roverBtn.classList.toggle('active', isWarped);
+    }
   }
 
   handleFlightStageAction() {
@@ -403,8 +437,12 @@ export class MarsGameEngine {
         this.flightHud.notifyCameraMode(nextMode);
       }
 
-      // Update Starship Flight Physics
-      this.missionPhysics.update(dt, this.input.state);
+      // Update Starship Flight Physics (sub-stepped so 2x/4x/8x time warp preserves 100% accurate trajectories & landings)
+      const steps = this.timeScale || 1;
+      const scaledDt = Math.min(dt * steps, 0.25);
+      for (let s = 0; s < steps; s++) {
+        this.missionPhysics.update(dt, this.input.state);
+      }
 
       // Allow keyboard/D-pad gimbal rotation when viewing stationary Ground Cam or Tower Cam (when Auto Mode is active or on pad)
       const activeFlightCam = this.cameraController.getFlightMode();
@@ -421,7 +459,7 @@ export class MarsGameEngine {
       }
 
       // Update Flight Camera first so atmosphere/skydome anchors to the active camera (fixes black sky in Ground/Tower cam!)
-      this.cameraController.updateFlight(dt, this.missionPhysics);
+      this.cameraController.updateFlight(scaledDt, this.missionPhysics);
 
       // Update Flight HUD
       this.flightHud.update(this.missionPhysics);
@@ -444,7 +482,7 @@ export class MarsGameEngine {
       }
 
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
-      this.atmosphere.update(dt, this.camera.position, {
+      this.atmosphere.update(scaledDt, this.camera.position, {
         altitude: camAltitude,
         speed: this.missionPhysics.speed,
         quaternion: this.missionPhysics.quaternion,
@@ -483,8 +521,12 @@ export class MarsGameEngine {
       }
     }
 
-    // 3. Update Vehicle Physics
-    this.physics.update(dt, this.input.state);
+    // 3. Update Vehicle Physics (sub-stepped for time warp)
+    const steps = this.timeScale || 1;
+    const scaledDt = Math.min(dt * steps, 0.20);
+    for (let s = 0; s < steps; s++) {
+      this.physics.update(dt, this.input.state);
+    }
 
     // Distance-cull Starbase launch complex in rover mode when beyond fog range (680m)
     const sbDx = this.physics.position.x - 1400;
@@ -517,13 +559,13 @@ export class MarsGameEngine {
 
     // 5. Update Atmosphere & Particles
     this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
-    this.atmosphere.update(dt, this.physics.position, this.physics);
+    this.atmosphere.update(scaledDt, this.physics.position, this.physics);
 
     // 6. Update Audio
     this.audio.update(this.physics);
 
     // 7. Update Dynamic Camera
-    this.cameraController.update(dt, this.physics);
+    this.cameraController.update(scaledDt, this.physics);
 
     // 8. Update HUD & Waypoints
     const nearbyPOIs = this.scatter.getNearbyPOIs(this.physics.position);

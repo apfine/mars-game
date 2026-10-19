@@ -1046,6 +1046,26 @@ html, body {
   box-shadow: 0 0 14px rgba(60, 190, 255, 0.55);
 }
 
+.flight-speed-btn {
+  background: rgba(14, 18, 24, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  color: #d8e6f4 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px !important;
+  font-weight: 800 !important;
+  padding: 6px 11px !important;
+  border-radius: 4px !important;
+  cursor: pointer;
+}
+
+.flight-speed-btn.active,
+#rover-speed-btn.active {
+  background: rgba(255, 170, 50, 0.22) !important;
+  border-color: #ffb84d !important;
+  color: #ffd480 !important;
+  box-shadow: 0 0 12px rgba(255, 170, 50, 0.35);
+}
+
 .flight-auto-btn {
   background: rgba(14, 18, 24, 0.85) !important;
   border: 1px solid rgba(255, 255, 255, 0.25) !important;
