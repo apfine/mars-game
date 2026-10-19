@@ -126,12 +126,15 @@ export function createMarsTerrainMaterial(options = {}) {
       vec3 toCam = cameraPosition - vWorldPosition;
       float camDist = length(toCam);
       float horizDist = length(toCam.xz);
+      float airFactor = clamp((uCamAltitude - 35.0) / 85.0, 0.0, 1.0);
 
-      // Use horizontal distance for fog when at high altitude so ground directly beneath is crystal clear during landing!
-      float effectiveFogDist = mix(camDist, horizDist, clamp(uCamAltitude / 350.0, 0.0, 1.0));
+      // When airborne, clip the 840m square corners into a clean 400m circle so it never looks like a square patch from above!
+      if (airFactor > 0.01 && horizDist > 402.0) {
+        discard;
+      }
 
-      // Early exit if completely obscured by distant horizon dust haze
-      if (effectiveFogDist >= uFogFar) {
+      // Ground-level early exit when completely obscured by horizon dust haze
+      if (airFactor < 0.01 && camDist >= uFogFar) {
         gl_FragColor = vec4(uMarsDustHazeColor, 1.0);
         return;
       }
@@ -231,13 +234,17 @@ export function createMarsTerrainMaterial(options = {}) {
         finalColor = mix(finalColor, uGridColor, gridIntensity * gridFade * 0.45);
       }
 
-      // 4. Seamless Atmospheric Distance Fog (blends edge of chunk grid into regional surface & horizon)
-      float fogFactor = clamp((effectiveFogDist - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
-      fogFactor = fogFactor * (fogFactor * 0.4 + 0.6);
-
+      // 4. Seamless Ground Horizon Fog (fades out when airborne so chunk edges feather directly into the regional surface)
+      float fogFactor = clamp((camDist - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
+      fogFactor = fogFactor * (fogFactor * 0.4 + 0.6) * (1.0 - airFactor);
       finalColor = mix(finalColor, uMarsDustHazeColor, fogFactor);
 
-      gl_FragColor = vec4(finalColor, 1.0);
+      // Circular perimeter & altitude alpha feathering when airborne
+      float radialAlpha = 1.0 - smoothstep(210.0, 398.0, horizDist);
+      float altAlpha = 1.0 - smoothstep(420.0, 900.0, uCamAltitude);
+      float outAlpha = mix(1.0, radialAlpha * altAlpha, airFactor);
+
+      gl_FragColor = vec4(finalColor, outAlpha);
     }
   `;
 
@@ -245,6 +252,8 @@ export function createMarsTerrainMaterial(options = {}) {
     uniforms,
     vertexShader,
     fragmentShader,
+    transparent: true,
+    depthWrite: true,
     wireframe: false,
     flatShading: false
   });
@@ -258,6 +267,9 @@ export const GRID_RADIUS = 3;     // 7x7 = 49 total active chunks covering ~840m
 export class MarsTerrainManager {
   constructor(scene, options = {}) {
     this.scene = scene;
+    this.group = new THREE.Group();
+    this.group.renderOrder = -500;
+    this.scene.add(this.group);
     this.material = createMarsTerrainMaterial(options);
     this.chunks = new Map();
     this.chunkPool = []; // Recycled chunk meshes to eliminate geometry clone/dispose GC spikes
@@ -276,9 +288,12 @@ export class MarsTerrainManager {
   setCameraAltitude(alt) {
     const a = Math.max(0, alt);
     this.material.uniforms.uCamAltitude.value = a;
-    // Keep chunk border fog aligned with the 420m chunk grid radius so chunks blend seamlessly into the regional planet surface
-    this.material.uniforms.uFogNear.value = 110.0 + Math.min(140.0, a * 0.25);
-    this.material.uniforms.uFogFar.value = 395.0;
+    this.material.uniforms.uFogNear.value = 110.0;
+    this.material.uniforms.uFogFar.value = 520.0;
+    // Hide the 840m near-ground 3D chunk grid above 920m so it never appears as a tiny square from high altitude
+    if (this.group) {
+      this.group.visible = a < 920.0;
+    }
   }
 
   getChunkKey(cx, cz) {
@@ -315,9 +330,10 @@ export class MarsTerrainManager {
     } else {
       geo = this.getGeometry();
       mesh = new THREE.Mesh(geo, this.material);
+      mesh.renderOrder = -500;
       mesh.receiveShadow = false; // Custom ShaderMaterial doesn't sample Three.js shadowMap
       mesh.matrixAutoUpdate = false;
-      this.scene.add(mesh);
+      this.group.add(mesh);
     }
 
     const posAttr = geo.attributes.position;
@@ -421,15 +437,18 @@ export class MarsTerrainManager {
 
   dispose() {
     for (const chunk of this.chunks.values()) {
-      this.scene.remove(chunk.mesh);
+      this.group.remove(chunk.mesh);
       chunk.mesh.geometry.dispose();
     }
     for (const mesh of this.chunkPool) {
-      this.scene.remove(mesh);
+      this.group.remove(mesh);
       mesh.geometry.dispose();
     }
     this.chunks.clear();
     this.chunkPool.length = 0;
+    if (this.group && this.scene) {
+      this.scene.remove(this.group);
+    }
     this.material.dispose();
     if (this.geometryTemplate) {
       this.geometryTemplate.dispose();

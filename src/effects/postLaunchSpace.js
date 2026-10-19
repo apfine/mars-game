@@ -274,16 +274,17 @@ export class PostLaunchSpace {
   initPlanetGlobe() {
     const planetTexture = createProceduralMarsTexture();
 
-    // Hyper-Realistic GPU Planet Shader:
-    // Combines the global Mars map with procedural 3D multi-scale FBM, crater relief bump normals,
-    // Oren-Nayar dusty regolith reflectance, drifting water-ice cirrus clouds, and dual Rayleigh/Mie atmospheric scattering.
+    // Rotate SphereGeometry by 90° around X so the mesh poles (and polar ice caps) sit 165km away on the ±Z horizon,
+    // placing the smooth Martian equator (Valles Marineris, Olympus Mons, Tharsis ochre plains) directly beneath the rocket (+Y)!
     const planetGeo = new THREE.SphereGeometry(this.planetRadius, 64, 48);
+    planetGeo.rotateX(Math.PI / 2);
+
     const planetMat = new THREE.ShaderMaterial({
       uniforms: {
         uMap: { value: planetTexture },
         uSunDir: { value: this.sunDirection.clone() },
         uFade: { value: 0.0 },
-        uAtmosphereColor: { value: new THREE.Color(0xe2a888) },
+        uAtmosphereColor: { value: new THREE.Color(0xc8825c) },
         uAirglowBlue: { value: new THREE.Color(0x5ca8e6) },
         uTime: { value: 0.0 }
       },
@@ -318,7 +319,6 @@ export class PostLaunchSpace {
         varying vec3 vPositionWorld;
         varying vec3 vViewDir;
 
-        // Fast 3D sin-less hash for infinite-resolution spherical terrain & craters
         float hash31(vec3 p3) {
           p3 = fract(p3 * 0.1031);
           p3 += dot(p3, p3.yzx + 33.33);
@@ -355,24 +355,13 @@ export class PostLaunchSpace {
           return v;
         }
 
-        // 3D Spherical Crater Bowl & Rim Generator
-        float crater3D(vec3 p) {
-          vec3 i = floor(p);
-          vec3 f = fract(p) - 0.5;
-          float h = hash31(i);
-          if (h < 0.52) return 0.0;
-          float r = 0.22 + (h - 0.52) * 0.52;
-          float d = length(f) / r;
-          if (d > 1.2) return 0.0;
-          float bowl = d < 0.82 ? -cos(d / 0.82 * 1.5708) * 0.55 : 0.0;
-          float rim = exp(-pow((d - 0.88) * 7.0, 2.0)) * 0.45;
-          return bowl + rim;
-        }
-
+        // Domain-warped 3D Martian canyon & highland relief (zero circular cheerio grid artifacts)
         float sampleRelief(vec3 sphereDir) {
-          float detail = fbm3D(sphereDir * 36.0) * 0.65 + fbm3D(sphereDir * 140.0) * 0.35;
-          float craters = crater3D(sphereDir * 28.0) * 0.7 + crater3D(sphereDir * 72.0) * 0.35;
-          return detail + craters;
+          vec3 p = sphereDir * 24.0;
+          vec3 warp = vec3(fbm3D(p), fbm3D(p + vec3(4.1, 7.3, 2.9)), fbm3D(p + vec3(9.2, 1.8, 5.4)));
+          float macro = fbm3D(p + warp * 1.1);
+          float detail = fbm3D(sphereDir * 95.0 + warp * 2.0);
+          return macro * 0.68 + detail * 0.32;
         }
 
         void main() {
@@ -383,79 +372,71 @@ export class PostLaunchSpace {
           vec3 L = normalize(uSunDir);
           vec3 V = normalize(vViewDir);
 
-          // Sample global Mars albedo map
+          // Sample global Mars albedo map (already decoded to linear RGB by SRGBColorSpace)
           vec3 baseAlbedo = texture2D(uMap, vUv).rgb;
 
-          // Multi-scale procedural 3D relief & analytical bump normal perturbation
-          float eps = 0.0018;
-          vec3 tangent = normalize(cross(vec3(0.0, 1.0, 0.0), S + vec3(0.0001)));
+          // Tangent basis aligned with Z-poles so the top hemisphere (+Y) has zero singularity!
+          float eps = 0.0022;
+          vec3 tangent = normalize(cross(vec3(0.0, 0.0, 1.0), S + vec3(0.0001)));
           vec3 bitangent = normalize(cross(S, tangent));
 
           float h0 = sampleRelief(S);
           float hx = sampleRelief(normalize(S + tangent * eps));
           float hy = sampleRelief(normalize(S + bitangent * eps));
 
-          vec3 bumpN = normalize(N + (tangent * (h0 - hx) + bitangent * (h0 - hy)) * 0.95);
+          vec3 bumpN = normalize(N + (tangent * (h0 - hx) + bitangent * (h0 - hy)) * 0.75);
 
-          //Modulate albedo with high-frequency geological micro-detail & crater ejecta
-          float microTex = fbm3D(S * 260.0);
-          baseAlbedo *= 0.86 + 0.28 * h0;
-          baseAlbedo *= 0.92 + 0.16 * microTex;
+          // Modulate with rich Martian geological detail matched to regionalSurfaceMesh & marsTerrain
+          float microTex = noise3D(S * 210.0);
+          baseAlbedo *= 0.78 + 0.32 * h0;
+          baseAlbedo *= 0.90 + 0.18 * microTex;
 
-          // Orographic water-ice clouds drifting slowly across equatorial & volcanic regions
-          float latMask = 1.0 - smoothstep(0.15, 0.75, abs(S.y));
+          // Subtle equatorial water-ice cirrus wisps
+          float latMask = 1.0 - smoothstep(0.15, 0.75, abs(S.z));
           float cloudNoise = fbm3D(S * 14.0 + vec3(uTime * 0.002, 0.0, uTime * 0.001));
-          float cloudFactor = smoothstep(0.60, 0.82, cloudNoise) * latMask * 0.38;
-          baseAlbedo = mix(baseAlbedo, vec3(0.96, 0.92, 0.90), cloudFactor);
+          float cloudFactor = smoothstep(0.64, 0.85, cloudNoise) * latMask * 0.24;
+          baseAlbedo = mix(baseAlbedo, vec3(0.82, 0.68, 0.58), cloudFactor);
 
-          // Day/Night Solar Terminator with Lommel-Seeliger / Oren-Nayar dusty regolith reflectance
+          // Day/Night Solar Terminator with calibrated dusty regolith reflectance (never bleaches white!)
           float NdotL = dot(bumpN, L);
           float macroNdotL = dot(N, L);
-          float NdotV = max(0.05, dot(bumpN, V));
-
           float dayFactor = smoothstep(-0.14, 0.28, macroNdotL);
-          float regolithDiffuse = clamp((NdotL + 0.12) / 1.12, 0.0, 1.0);
-          // Dusty planetary backscatter (Lommel-Seeliger boost near limb/opposition)
-          float lommel = regolithDiffuse / (max(0.15, regolithDiffuse) + NdotV * 0.65);
-          float finalDiffuse = mix(regolithDiffuse, lommel * 1.35, 0.45) * dayFactor;
+          float diff = clamp((NdotL + 0.26) * 0.78, 0.04, 1.0) * dayFactor;
 
-          // Deep crimson-amber twilight scattering along the solar terminator
           float twilight = smoothstep(-0.22, 0.06, macroNdotL) * (1.0 - smoothstep(0.04, 0.40, macroNdotL));
 
-          vec3 dayLight = vec3(1.18, 1.08, 0.98);
-          vec3 nightLight = vec3(0.004, 0.006, 0.014);
-          vec3 surfaceColor = baseAlbedo * mix(nightLight, dayLight, finalDiffuse);
+          vec3 dayLight = vec3(0.96, 0.82, 0.70);
+          vec3 nightLight = vec3(0.005, 0.006, 0.012);
+          vec3 surfaceColor = baseAlbedo * (vec3(0.22, 0.13, 0.10) * dayFactor + mix(nightLight, dayLight, diff));
 
           // Warm dust scattering along the terminator
-          surfaceColor += vec3(0.88, 0.40, 0.20) * twilight * 0.32;
+          surfaceColor += vec3(0.62, 0.25, 0.12) * twilight * 0.28;
 
           // Rayleigh + Mie Atmospheric Haze & Planetary Limb Fresnel
           float fresnel = 1.0 - max(0.0, dot(N, V));
-          float innerDustHaze = pow(fresnel, 2.2);
-          float midAtmoBand = pow(fresnel, 4.2);
-          float outerAirglow = pow(fresnel, 7.5);
+          float innerDustHaze = pow(fresnel, 2.4);
+          float midAtmoBand = pow(fresnel, 4.5);
+          float outerAirglow = pow(fresnel, 8.0);
 
           float sunIllum = max(0.10, macroNdotL * 0.75 + 0.25);
 
-          // Blend surface into warm lower-atmosphere dust towards the horizon
-          surfaceColor = mix(surfaceColor, uAtmosphereColor * sunIllum, innerDustHaze * 0.48);
+          surfaceColor = mix(surfaceColor, uAtmosphereColor * sunIllum, innerDustHaze * 0.45);
 
-          vec3 limbGlow = mix(uAtmosphereColor, uAirglowBlue, 0.52) * midAtmoBand * 0.72 * sunIllum;
-          limbGlow += uAirglowBlue * outerAirglow * 1.45 * sunIllum;
+          vec3 limbGlow = mix(uAtmosphereColor, uAirglowBlue, 0.52) * midAtmoBand * 0.55 * sunIllum;
+          limbGlow += uAirglowBlue * outerAirglow * 1.15 * sunIllum;
 
           vec3 finalColor = surfaceColor + limbGlow;
 
           gl_FragColor = vec4(finalColor, uFade);
-          #include <colorspace_fragment>
         }
       `,
       transparent: true,
-      depthWrite: true
+      depthWrite: false,
+      depthTest: true
     });
 
     this.planetMesh = new THREE.Mesh(planetGeo, planetMat);
-    this.planetMesh.renderOrder = 1;
-    this.planetMesh.rotation.y = -Math.PI * 0.42;
+    this.planetMesh.renderOrder = -800;
     this.planetMat = planetMat;
     this.group.add(this.planetMesh);
   }
@@ -509,9 +490,9 @@ export class PostLaunchSpace {
 
           // Dual-layer color: inner salmon dust troposphere, outer electric blue mesosphere
           vec3 haloCol = mix(uDustColor, uAirglowCyan, smoothstep(0.28, 0.88, 1.0 - NdotV));
-          vec3 finalGlow = haloCol * edge * sunLit * 1.65;
+          vec3 finalGlow = haloCol * edge * sunLit * 1.45;
 
-          gl_FragColor = vec4(finalGlow, edge * uFade * 0.92);
+          gl_FragColor = vec4(finalGlow, edge * uFade * 0.88);
         }
       `,
       side: THREE.BackSide,
@@ -521,7 +502,7 @@ export class PostLaunchSpace {
     });
 
     this.airglowMesh = new THREE.Mesh(airglowGeo, airglowMat);
-    this.airglowMesh.renderOrder = 2;
+    this.airglowMesh.renderOrder = -790;
     this.airglowMat = airglowMat;
     this.group.add(this.airglowMesh);
   }
@@ -657,8 +638,8 @@ export class PostLaunchSpace {
   }
 
   update(dt, alt, speed, shipPos) {
-    // Smooth cross-fade between the 36km regional Martian surface (0 - 16km) and the 165km 3D planetary globe (4.5km - 100km+)
-    const fade = THREE.MathUtils.smoothstep(alt, 4200.0, 15500.0);
+    // Smooth cross-fade between the 36km regional Martian surface (0 - 14km) and the 165km 3D planetary globe (3km - 100km+)
+    const fade = THREE.MathUtils.smoothstep(alt, 3000.0, 12500.0);
     this.group.visible = fade > 0.005;
 
     if (!this.group.visible) return;
@@ -680,11 +661,11 @@ export class PostLaunchSpace {
     this.planetMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
     this.airglowMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
 
-    // Rotate the planet surface smoothly as the spacecraft travels downrange and orbits
+    // Roll the planet surface along its equator (Z-axis polar spin) as the spacecraft travels downrange (+X) and orbits
     this.orbitRotation += dt * (0.0025 + Math.max(0, speed - 400) * 0.000004);
     const downrangeLon = (shipPos.x - this.padCoords.x) * 0.000008;
     const downrangeLat = (shipPos.z - this.padCoords.y) * 0.000008;
-    this.planetMesh.rotation.y = -Math.PI * 0.42 + this.orbitRotation * 0.12 - downrangeLon;
+    this.planetMesh.rotation.z = -0.35 + this.orbitRotation * 0.12 + downrangeLon;
     this.planetMesh.rotation.x = THREE.MathUtils.clamp(downrangeLat, -0.35, 0.35);
 
     // Orbit Phobos across the Martian space sky

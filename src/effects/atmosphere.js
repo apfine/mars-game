@@ -41,16 +41,17 @@ export class MarsAtmosphere {
   }
 
   createSky() {
-    // Hyper-Realistic 360° Mars Physical Sky Dome (uses local direction to prevent altitude/position compression)
-    const skyGeo = new THREE.SphereGeometry(1800, 32, 24);
+    // Hyper-Realistic 360° Mars Physical Sky Dome (radius 850m so it is never clipped in Rover or Flight mode)
+    const skyGeo = new THREE.SphereGeometry(850, 32, 24);
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
+      depthTest: false,
       uniforms: {
         uTime: { value: 0 },
         uSunPos: { value: SUN_DIR.clone() },
         uSkyZenith: { value: new THREE.Color(0xc47e5a) },     // Deep Martian butterscotch zenith
-        uSkyHorizon: { value: new THREE.Color(0xe2ad8e) },    // Luminous dusty salmon horizon
+        uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Luminous dusty salmon horizon matched to terrain fog
         uSunColor: { value: new THREE.Color(0xfff6ea) },      // High-altitude solar disk
         uSunHaloBlue: { value: new THREE.Color(0x62a8dc) },   // Authentic Mars fine-dust blue Mie halo
         uSpaceFade: { value: 0.0 },                           // 0 = surface, 1 = orbit/space
@@ -155,12 +156,12 @@ export class MarsAtmosphere {
           vec3 sky = mix(cosmosCol, daySky, clamp(skyCoverage, 0.0, 1.0));
           sky += limbGlow * (1.0 - skyCoverage * 0.65);
 
-          // Lower hemisphere ground haze fill when inside the atmosphere (prevents dark void below horizon during landing/ascent)
+          // Lower hemisphere ground fill when inside the atmosphere (prevents dark void below horizon during landing/ascent)
           if (elevAboveHorizon < 0.04) {
             float belowFactor = smoothstep(0.04, -0.18, elevAboveHorizon);
-            vec3 groundHaze = mix(uSkyHorizon, vec3(0.76, 0.45, 0.30), smoothstep(0.0, -0.5, elevAboveHorizon));
+            vec3 groundFill = mix(uSkyHorizon, vec3(0.58, 0.31, 0.20), smoothstep(0.0, -0.45, elevAboveHorizon));
             float groundVis = clamp(atmoDensity * 1.15, 0.0, 1.0);
-            sky = mix(sky, groundHaze, belowFactor * groundVis);
+            sky = mix(sky, groundFill, belowFactor * groundVis);
           }
 
           // Solar Disk & Corona (visible above planetary limb)
@@ -180,7 +181,7 @@ export class MarsAtmosphere {
     this.skyMat = skyMat;
 
     this.skyMesh = new THREE.Mesh(skyGeo, skyMat);
-    this.skyMesh.renderOrder = -10;
+    this.skyMesh.renderOrder = -1000;
     this.skyMesh.frustumCulled = false;
     this.scene.add(this.skyMesh);
 
@@ -217,18 +218,19 @@ export class MarsAtmosphere {
 
   createRegionalSurface() {
     // 36 km radius curved regional Martian desert surface that sits beneath the near-field 3D chunks.
-    // Provides realistic macro-craters, canyons, basalt plains, and atmospheric scattering during launch, booster catch, and landing!
-    const regGeo = new THREE.PlaneGeometry(72000, 72000, 64, 64);
+    // Uses depthWrite: false and renderOrder: -700 so it NEVER Z-fights with planetMesh (-800) or marsTerrain (-500)!
+    const regGeo = new THREE.PlaneGeometry(72000, 72000, 48, 48);
     regGeo.rotateX(-Math.PI / 2);
 
     this.regionalMat = new THREE.ShaderMaterial({
       transparent: true,
-      depthWrite: true,
+      depthWrite: false,
+      depthTest: true,
       uniforms: {
         uSunDir: { value: SUN_DIR.clone() },
         uAltitude: { value: 0.0 },
         uOpacity: { value: 1.0 },
-        uHazeColor: { value: new THREE.Color(0xe0aa8c) }
+        uHazeColor: { value: new THREE.Color(0xc8825c) }
       },
       vertexShader: `
         uniform float uAltitude;
@@ -237,7 +239,6 @@ export class MarsAtmosphere {
         void main() {
           vLocalXZ = position.xz;
           vec4 wp = modelMatrix * vec4(position, 1.0);
-          // Subtle planetary curvature drop over 36 km radius
           float r2 = dot(position.xz, position.xz);
           wp.y -= r2 / (2.0 * 3389500.0);
           vWorldPos = wp.xyz;
@@ -280,19 +281,13 @@ export class MarsAtmosphere {
           return v;
         }
 
-        // Procedural impact craters for realistic aerial descent view
-        float craterField(vec2 p) {
-          vec2 cell = floor(p);
-          vec2 f = fract(p) - 0.5;
-          float h = hash12(cell);
-          if (h < 0.55) return 0.0;
-          vec2 center = (vec2(hash12(cell + 5.1), hash12(cell + 9.3)) - 0.5) * 0.35;
-          float r = 0.14 + (h - 0.55) * 0.48;
-          float d = length(f - center) / r;
-          if (d > 1.25) return 0.0;
-          float bowl = d < 0.85 ? -cos(d / 0.85 * 1.5708) * 0.65 : 0.0;
-          float rim = exp(-pow((d - 0.92) * 7.5, 2.0)) * 0.55;
-          return bowl + rim;
+        // Domain-warped Martian canyon & eolian dune topography (organic, zero grid-circle artifacts)
+        float sampleTopo(vec2 xz) {
+          vec2 p = xz * 0.00055;
+          vec2 warp = vec2(fbm(p), fbm(p + vec2(5.2, 1.3)));
+          float macro = fbm(p + warp * 1.35);
+          float ridges = 1.0 - abs(vnoise(xz * 0.0022 + warp * 2.0) * 2.0 - 1.0);
+          return macro * 0.72 + ridges * ridges * 0.28;
         }
 
         void main() {
@@ -300,57 +295,45 @@ export class MarsAtmosphere {
           float radialDist = length(vLocalXZ);
           if (radialDist > 35500.0) discard;
 
-          // Multi-scale Martian regional topography & normal perturbation
-          vec2 uvMacro = vWorldPos.xz * 0.00028;
-          vec2 uvMid = vWorldPos.xz * 0.0018;
-          vec2 uvDetail = vWorldPos.xz * 0.012;
-
-          float hMacro = fbm(uvMacro);
-          float hMid = fbm(uvMid);
-          float c1 = craterField(vWorldPos.xz * 0.0009);
-          float c2 = craterField(vWorldPos.xz * 0.0032 + 11.4) * 0.5;
-
-          // Compute analytical bump normal from height gradient
-          float eps = 12.0;
-          float hx = fbm((vWorldPos.xz + vec2(eps, 0.0)) * 0.0018) + craterField((vWorldPos.xz + vec2(eps, 0.0)) * 0.0009);
-          float hz = fbm((vWorldPos.xz + vec2(0.0, eps)) * 0.0018) + craterField((vWorldPos.xz + vec2(0.0, eps)) * 0.0009);
-          float h0 = hMid + c1;
-          vec3 N = normalize(vec3((h0 - hx) * 2.4, 1.0, (h0 - hz) * 2.4));
+          float eps = 18.0;
+          float h0 = sampleTopo(vWorldPos.xz);
+          float hx = sampleTopo(vWorldPos.xz + vec2(eps, 0.0));
+          float hz = sampleTopo(vWorldPos.xz + vec2(0.0, eps));
+          vec3 N = normalize(vec3((h0 - hx) * 2.2, 1.0, (h0 - hz) * 2.2));
 
           float NdotL = dot(N, normalize(uSunDir));
-          float diff = clamp((NdotL + 0.28) * 0.78, 0.08, 1.0);
+          float diff = clamp((NdotL + 0.32) * 0.7575, 0.08, 1.0);
 
-          // Rich Martian geological color palette (ochre highlands, dark basalt mare, bright dust basins)
-          vec3 ochreSand = vec3(0.82, 0.53, 0.37);
-          vec3 brightDust = vec3(0.89, 0.64, 0.46);
-          vec3 darkBasalt = vec3(0.38, 0.22, 0.16);
-          vec3 canyonRust = vec3(0.64, 0.34, 0.22);
+          // Calibrated to match marsTerrain.js linear color palette so chunk transitions are 100% invisible!
+          vec3 sandColor = vec3(0.68, 0.34, 0.19);
+          vec3 sandLight = vec3(0.82, 0.46, 0.27);
+          vec3 bedrockCol = vec3(0.46, 0.20, 0.12);
+          vec3 basaltCol = vec3(0.22, 0.12, 0.09);
 
-          vec3 albedo = mix(canyonRust, ochreSand, smoothstep(0.25, 0.72, hMacro));
-          albedo = mix(albedo, darkBasalt, smoothstep(0.58, 0.84, fbm(uvMacro * 1.7 + 4.2)) * 0.68);
-          albedo = mix(albedo, brightDust, smoothstep(0.55, 0.85, hMid) * 0.45);
-          albedo *= 0.88 + 0.24 * vnoise(uvDetail);
-          albedo += vec3(0.10, 0.06, 0.04) * (c1 + c2);
+          float flowMask = fbm(vWorldPos.xz * 0.00025 + vec2(3.7, 8.1));
+          float detailTex = vnoise(vWorldPos.xz * 0.008);
 
-          vec3 litColor = albedo * (vec3(0.38, 0.25, 0.20) + vec3(1.0, 0.90, 0.82) * diff);
+          vec3 albedo = mix(bedrockCol, sandColor, smoothstep(0.25, 0.72, h0));
+          albedo = mix(albedo, basaltCol, smoothstep(0.62, 0.86, flowMask) * 0.55);
+          albedo = mix(albedo, sandLight, smoothstep(0.35, 0.85, NdotL) * 0.35);
+          albedo *= 0.86 + 0.28 * detailTex;
 
-          // Blend near-field (< 420m) smoothly with the 3D terrain chunks' horizon haze
-          float nearChunkBlend = 1.0 - smoothstep(260.0, 520.0, radialDist);
-          float chunkBlendStrength = 1.0 - smoothstep(80.0, 600.0, uAltitude);
-          litColor = mix(litColor, uHazeColor, nearChunkBlend * chunkBlendStrength);
+          vec3 lighting = vec3(0.36, 0.21, 0.16) + vec3(0.95, 0.76, 0.62) * diff;
+          vec3 litColor = albedo * lighting;
 
-          // Distance atmospheric Rayleigh/dust scattering towards the 35 km horizon
-          float horizonFog = smoothstep(4500.0, 34500.0, radialDist);
-          vec3 finalCol = mix(litColor, uHazeColor, horizonFog);
+          // Distance atmospheric scattering towards the 35 km horizon
+          float horizonFog = smoothstep(5500.0, 34500.0, radialDist);
+          vec3 finalCol = mix(litColor, uHazeColor, horizonFog * 0.65);
 
-          float edgeAlpha = (1.0 - smoothstep(28000.0, 35500.0, radialDist)) * uOpacity;
+          float edgeAlpha = (1.0 - smoothstep(26000.0, 35500.0, radialDist)) * uOpacity;
           gl_FragColor = vec4(finalCol, edgeAlpha);
         }
       `
     });
 
     this.regionalSurfaceMesh = new THREE.Mesh(regGeo, this.regionalMat);
-    this.regionalSurfaceMesh.renderOrder = -2;
+    this.regionalSurfaceMesh.renderOrder = -700;
+    this.regionalSurfaceMesh.visible = false;
     this.regionalSurfaceMesh.frustumCulled = false;
     this.scene.add(this.regionalSurfaceMesh);
   }
@@ -383,7 +366,7 @@ export class MarsAtmosphere {
   createDistantMountains() {
     // 360-degree distant Martian mountain silhouettes (Olympus Mons caldera peak and crater rims)
     const segs = 120;
-    const radius = 950.0;
+    const radius = 820.0;
     const geo = new THREE.BufferGeometry();
     const positions = [];
 
@@ -411,6 +394,7 @@ export class MarsAtmosphere {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     const mat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
+      depthWrite: false,
       fog: false,
       uniforms: {
         uHaze: { value: new THREE.Color(0xe0aa8c) },
@@ -436,6 +420,7 @@ export class MarsAtmosphere {
     });
 
     this.distantMountains = new THREE.Mesh(geo, mat);
+    this.distantMountains.renderOrder = -900;
     this.distantMountains.frustumCulled = false;
     this.scene.add(this.distantMountains);
   }
@@ -1104,8 +1089,8 @@ export class MarsAtmosphere {
       this.distantMountains.visible = a < 180;
     }
     if (this.regionalSurfaceMesh && this.regionalMat) {
-      // Regional 36km Martian surface visible from 0m up to 16km, seamlessly cross-fading into the 3D planet globe
-      const regOpacity = 1.0 - THREE.MathUtils.smoothstep(a, 5500, 16500);
+      // Regional 36km Martian surface visible in flight mode from 0m up to 14km, seamlessly cross-fading into the 3D planet globe
+      const regOpacity = this.isFlight ? (1.0 - THREE.MathUtils.smoothstep(a, 3500, 14000)) : 0.0;
       this.regionalSurfaceMesh.visible = regOpacity > 0.01;
       this.regionalMat.uniforms.uAltitude.value = a;
       this.regionalMat.uniforms.uOpacity.value = regOpacity;

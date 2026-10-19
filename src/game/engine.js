@@ -86,8 +86,8 @@ export class MarsGameEngine {
     this.camera = new THREE.PerspectiveCamera(
       65,
       window.innerWidth / window.innerHeight,
-      0.2,
-      1400
+      0.25,
+      2500
     );
   }
 
@@ -255,6 +255,7 @@ export class MarsGameEngine {
     const mobileControls = document.getElementById('mobile-controls');
 
     if (this.mode === 'starship') {
+      this.camera.near = 0.4;
       this.camera.far = 500000;
       this.camera.updateProjectionMatrix();
       this.cameraController.initialized = false;
@@ -271,11 +272,13 @@ export class MarsGameEngine {
       // Silence rover motor while in flight
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
     } else {
-      this.camera.far = 1400;
+      this.camera.near = 0.25;
+      this.camera.far = 2500;
       this.camera.updateProjectionMatrix();
       this.cameraController.initialized = false;
 
       this.roverModel.group.visible = true;
+      if (this.scatter?.group) this.scatter.group.visible = true;
 
       this.flightHud.show(false);
       if (roverHud) roverHud.style.display = 'block';
@@ -428,8 +431,17 @@ export class MarsGameEngine {
 
       // Anchor atmosphere skydome & altitude to the active camera so Ground/Tower/Booster cams keep Starbase's sky!
       const camAltitude = Math.max(0, this.camera.position.y - this.missionPhysics.padElevation);
+      const targetNear = camAltitude > 2500 ? 4.5 : camAltitude > 400 ? 1.5 : 0.4;
+      if (Math.abs(this.camera.near - targetNear) > 0.05) {
+        this.camera.near = targetNear;
+        this.camera.updateProjectionMatrix();
+      }
+
       this.atmosphere.setAltitude(camAltitude, this.missionPhysics.speed);
       this.terrain.setCameraAltitude(camAltitude);
+      if (this.scatter?.group) {
+        this.scatter.group.visible = camAltitude < 900;
+      }
 
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
       this.atmosphere.update(dt, this.camera.position, {
@@ -442,10 +454,10 @@ export class MarsGameEngine {
         speedKmh: this.missionPhysics.speed * 3.6
       });
 
-      // Keep terrain & surface rocks updated around the active camera during launch and landing descent (< 8,000m)
-      if (camAltitude < 8000) {
+      // Keep terrain & surface rocks updated around the active camera during launch and landing descent (< 5,000m)
+      if (camAltitude < 5000) {
         this.terrain.update(this.camera.position);
-        if (camAltitude < 1800) {
+        if (camAltitude < 950) {
           this.scatter.update(this.camera.position);
         }
       }
