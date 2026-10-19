@@ -659,8 +659,8 @@ export class StarshipMissionVehicle {
     barrel.castShadow = barrel.receiveShadow = true;
     S.add(barrel);
 
-    // Black Ceramic Heat Shield Layer on Belly
-    const shieldBellyGeo = new THREE.CylinderGeometry(r * 1.01, r * 1.01, barrelH, 28, 1, false, Math.PI * 0.5, Math.PI);
+    // Black Ceramic Heat Shield Layer on +Z Windward Belly (faces planet & plasma during +pitch reentry/bellyflop)
+    const shieldBellyGeo = new THREE.CylinderGeometry(r * 1.01, r * 1.01, barrelH, 28, 1, false, -Math.PI * 0.5, Math.PI);
     const shieldBelly = new THREE.Mesh(shieldBellyGeo, this.matHeatshield);
     shieldBelly.position.y = barrelH / 2;
     S.add(shieldBelly);
@@ -680,17 +680,24 @@ export class StarshipMissionVehicle {
     nose.castShadow = true;
     S.add(nose);
 
-    // Nosecone Heatshield half
-    const noseShieldGeo = new THREE.LatheGeometry(ogivePoints, 28, Math.PI * 0.5, Math.PI);
+    // Nosecone Heatshield half on +Z Windward Belly
+    const noseShieldGeo = new THREE.LatheGeometry(ogivePoints, 28, -Math.PI * 0.5, Math.PI);
     noseShieldGeo.scale(1.008, 1.0, 1.008);
     const noseShield = new THREE.Mesh(noseShieldGeo, this.matHeatshield);
     noseShield.position.y = barrelH;
     S.add(noseShield);
 
-    // Raceway conduit down the leeward spine
+    // Raceway conduit down the -Z leeward stainless steel spine
     const raceway = new THREE.Mesh(new THREE.BoxGeometry(0.35, barrelH + noseH * 0.6, 0.4), this.matDarkMetal);
-    raceway.position.set(0, (barrelH + noseH * 0.6) / 2, r + 0.1);
+    raceway.position.set(0, (barrelH + noseH * 0.6) / 2, -(r + 0.1));
     S.add(raceway);
+
+    // Starship Forward Structural Load-Bearing Catch Pins (for Mechazilla Tower Catch)
+    for (const sx of [-1, 1]) {
+      const shipPin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.85), this.matDarkMetal);
+      shipPin.position.set(sx * (r + 0.65), barrelH - 2.2, 0);
+      S.add(shipPin);
+    }
 
     // 4 Articulating Aerodynamic Flaps
     this.forwardFlaps = [];
@@ -746,9 +753,9 @@ export class StarshipMissionVehicle {
       this.landingLegs.push(legPivot);
     }
 
-    // Gullwing Cargo Bay Doors & Interior Crane
+    // Gullwing Cargo Bay Doors & Interior Crane on -Z Leeward Spine
     this.cargoBayGroup = new THREE.Group();
-    this.cargoBayGroup.position.set(0, 26.0, r);
+    this.cargoBayGroup.position.set(0, 26.0, -r);
 
     const doorGeo = new THREE.BoxGeometry(0.25, 9.0, 3.8);
     this.cargoDoorLeft = new THREE.Mesh(doorGeo, this.matSteel);
@@ -862,9 +869,9 @@ export class StarshipMissionVehicle {
     this.jellyfishMesh.visible = false;
     this.starshipGroup.add(this.jellyfishMesh);
 
-    // HYPERSONIC IONIZED PLASMA SHEATH
-    const plasmaGeo = new THREE.CylinderGeometry(5.2, 5.8, 38, 20, 1, true, Math.PI * 0.45, Math.PI * 1.1);
-    plasmaGeo.translate(0, 19, -0.2);
+    // HYPERSONIC IONIZED PLASMA SHEATH ON +Z WINDWARD BLACK HEATSHIELD BELLY
+    const plasmaGeo = new THREE.CylinderGeometry(5.15, 5.65, 38, 24, 1, true, -Math.PI * 0.54, Math.PI * 1.08);
+    plasmaGeo.translate(0, 19, 0.25);
 
     this.plasmaMat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
@@ -879,11 +886,13 @@ export class StarshipMissionVehicle {
         varying vec3 vNormal;
         varying vec3 vPos;
         uniform float uTime;
+        uniform float uHeat;
         void main() {
           vNormal = normalize(normalMatrix * normal);
           vPos = position;
           vec3 pos = position;
-          pos += normal * (sin(pos.y * 0.5 - uTime * 25.0) * 0.15);
+          float wave = sin(pos.y * 0.45 - uTime * 22.0) * 0.12 * uHeat;
+          pos += normal * wave;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
         }
       `,
@@ -895,18 +904,27 @@ export class StarshipMissionVehicle {
 
         void main() {
           if (uHeat <= 0.005) discard;
-          vec3 stagnation = vec3(1.0, 0.95, 0.7);
-          vec3 ionizedMagenta = vec3(0.95, 0.2, 0.75);
+          // Sequential color temperature progression from incipient orange/violet to white-hot stagnation
+          vec3 incipientOrange = vec3(1.0, 0.42, 0.12);
+          vec3 ionizedMagenta = vec3(0.96, 0.22, 0.72);
           vec3 ionizedViolet = vec3(0.55, 0.25, 1.0);
-          vec3 ribbonCyan = vec3(0.1, 0.75, 1.0);
+          vec3 stagnationWhite = vec3(1.0, 0.96, 0.82);
 
-          float t = clamp(abs(vPos.y) / 25.0, 0.0, 1.0);
-          vec3 plasmaCol = mix(stagnation, ionizedMagenta, smoothstep(0.1, 0.5, t));
-          plasmaCol = mix(plasmaCol, ionizedViolet, smoothstep(0.5, 0.8, t));
-          plasmaCol = mix(plasmaCol, ribbonCyan, smoothstep(0.8, 1.0, t));
+          // Windward wrap factor: strongest directly on +Z belly center (vPos.z > 0), fading at side edges
+          float bellyCenter = clamp(vPos.z / 5.0, 0.0, 1.0);
+          float axialDist = abs(vPos.y - 24.0) / 26.0;
+          float envelope = clamp(bellyCenter * (1.15 - axialDist * 0.45), 0.0, 1.0);
 
-          float rim = 1.0 - abs(vNormal.z);
-          float alpha = clamp(rim * sqrt(rim) * uHeat * 1.3, 0.0, 0.95);
+          // Sequential coverage: at low uHeat, only the stagnation belly center glows; at peak uHeat, full sheath ignites
+          float activeMask = smoothstep(1.0 - uHeat * 0.95, 1.05, envelope + uHeat * 0.35);
+          float stream = 0.88 + 0.12 * sin(vPos.y * 0.7 - uTime * 28.0 + vPos.x * 1.5);
+
+          vec3 lowHeatCol = mix(ionizedViolet, incipientOrange, bellyCenter);
+          vec3 highHeatCol = mix(ionizedMagenta, stagnationWhite, pow(bellyCenter, 1.4));
+          vec3 plasmaCol = mix(lowHeatCol, highHeatCol, smoothstep(0.2, 0.85, uHeat));
+
+          float rim = 0.35 + 0.65 * (1.0 - abs(vNormal.z));
+          float alpha = clamp(activeMask * rim * stream * pow(uHeat, 1.15) * 1.25, 0.0, 0.92);
           gl_FragColor = vec4(plasmaCol, alpha);
         }
       `
@@ -915,8 +933,9 @@ export class StarshipMissionVehicle {
     this.plasmaMesh.visible = false;
     this.starshipGroup.add(this.plasmaMesh);
 
-    const nosePlasmaGeo = new THREE.SphereGeometry(5.2, 16, 10, Math.PI * 0.5, Math.PI, 0, Math.PI * 0.5);
-    nosePlasmaGeo.translate(0, 34 + 14, -0.4);
+    // Nosecone bow-shock plasma cap on +Z windward nose
+    const nosePlasmaGeo = new THREE.SphereGeometry(5.15, 20, 12, 0, Math.PI, 0, Math.PI * 0.5);
+    nosePlasmaGeo.translate(0, 34 + 10, 0.32);
     this.nosePlasma = new THREE.Mesh(nosePlasmaGeo, this.plasmaMat);
     this.nosePlasma.visible = false;
     this.starshipGroup.add(this.nosePlasma);
@@ -997,6 +1016,14 @@ export class StarshipMissionVehicle {
     if (this.nosePlasma) this.nosePlasma.visible = active;
     if (this.plasmaMat) {
       this.plasmaMat.uniforms.uHeat.value = h;
+    }
+    if (this.matHeatshield) {
+      if (active) {
+        this.matHeatshield.emissive = this.matHeatshield.emissive || new THREE.Color(0x000000);
+        this.matHeatshield.emissive.setRGB(h * 0.55, h * 0.14, h * 0.03);
+      } else if (this.matHeatshield.emissive) {
+        this.matHeatshield.emissive.setRGB(0, 0, 0);
+      }
     }
   }
 

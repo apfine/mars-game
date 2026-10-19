@@ -228,9 +228,16 @@ export class MarsAtmosphere {
       depthTest: true,
       uniforms: {
         uSunDir: { value: SUN_DIR.clone() },
+        uSunColor: { value: new THREE.Color(0xffe2c6) },
+        uAmbientColor: { value: new THREE.Color(0x704238) },
+        uMarsSandColor: { value: new THREE.Color(0xd8885c) },
+        uMarsSandLightColor: { value: new THREE.Color(0xf0ab80) },
+        uMarsDuneShadowColor: { value: new THREE.Color(0x8c4228) },
+        uMarsBedrockColor: { value: new THREE.Color(0xa9593b) },
+        uMarsBasaltRockColor: { value: new THREE.Color(0x4b2e26) },
+        uHazeColor: { value: new THREE.Color(0xe0aa8c) },
         uAltitude: { value: 0.0 },
-        uOpacity: { value: 1.0 },
-        uHazeColor: { value: new THREE.Color(0xc8825c) }
+        uOpacity: { value: 1.0 }
       },
       vertexShader: `
         uniform float uAltitude;
@@ -247,9 +254,16 @@ export class MarsAtmosphere {
       `,
       fragmentShader: `
         uniform vec3 uSunDir;
+        uniform vec3 uSunColor;
+        uniform vec3 uAmbientColor;
+        uniform vec3 uMarsSandColor;
+        uniform vec3 uMarsSandLightColor;
+        uniform vec3 uMarsDuneShadowColor;
+        uniform vec3 uMarsBedrockColor;
+        uniform vec3 uMarsBasaltRockColor;
+        uniform vec3 uHazeColor;
         uniform float uAltitude;
         uniform float uOpacity;
-        uniform vec3 uHazeColor;
         varying vec3 vWorldPos;
         varying vec2 vLocalXZ;
 
@@ -281,7 +295,7 @@ export class MarsAtmosphere {
           return v;
         }
 
-        // Domain-warped Martian canyon & eolian dune topography (organic, zero grid-circle artifacts)
+        // Domain-warped Martian canyon & eolian dune topography
         float sampleTopo(vec2 xz) {
           vec2 p = xz * 0.00055;
           vec2 warp = vec2(fbm(p), fbm(p + vec2(5.2, 1.3)));
@@ -299,31 +313,31 @@ export class MarsAtmosphere {
           float h0 = sampleTopo(vWorldPos.xz);
           float hx = sampleTopo(vWorldPos.xz + vec2(eps, 0.0));
           float hz = sampleTopo(vWorldPos.xz + vec2(0.0, eps));
-          vec3 N = normalize(vec3((h0 - hx) * 2.2, 1.0, (h0 - hz) * 2.2));
+          vec3 N = normalize(vec3((h0 - hx) * 1.8, 1.0, (h0 - hz) * 1.8));
 
           float NdotL = dot(N, normalize(uSunDir));
-          float diff = clamp((NdotL + 0.32) * 0.7575, 0.08, 1.0);
+          float diff = clamp((NdotL + 0.32) * 0.757575, 0.0, 1.0);
 
-          // Calibrated to match marsTerrain.js linear color palette so chunk transitions are 100% invisible!
-          vec3 sandColor = vec3(0.68, 0.34, 0.19);
-          vec3 sandLight = vec3(0.82, 0.46, 0.27);
-          vec3 bedrockCol = vec3(0.46, 0.20, 0.12);
-          vec3 basaltCol = vec3(0.22, 0.12, 0.09);
+          // Exact same surfaceAlbedo & lighting formula as marsTerrain.js for a 100% seamless transition!
+          float sandMix = smoothstep(0.55, 0.88, vnoise(vWorldPos.xz * 0.03 + 4.0)) * 0.55;
+          vec3 slabCol = mix(uMarsBedrockColor, uMarsSandLightColor, 0.275);
+          vec3 surfaceAlbedo = mix(slabCol, uMarsSandColor, sandMix);
 
-          float flowMask = fbm(vWorldPos.xz * 0.00025 + vec2(3.7, 8.1));
-          float detailTex = vnoise(vWorldPos.xz * 0.008);
+          float mottleMacro = vnoise(vWorldPos.xz * 0.004);
+          float mottleLarge = vnoise(vWorldPos.xz * 0.045);
+          surfaceAlbedo *= 0.82 + 0.36 * h0;
+          surfaceAlbedo = mix(surfaceAlbedo, uMarsBasaltRockColor * 0.75, smoothstep(0.58, 0.85, mottleMacro) * 0.35);
+          surfaceAlbedo = mix(surfaceAlbedo, uMarsDuneShadowColor, smoothstep(0.62, 0.9, mottleLarge) * 0.28);
+          surfaceAlbedo = mix(surfaceAlbedo, uMarsSandLightColor, smoothstep(0.3, 0.8, NdotL) * 0.4);
+          surfaceAlbedo = mix(uMarsDuneShadowColor, surfaceAlbedo, smoothstep(-0.25, 0.35, NdotL));
 
-          vec3 albedo = mix(bedrockCol, sandColor, smoothstep(0.25, 0.72, h0));
-          albedo = mix(albedo, basaltCol, smoothstep(0.62, 0.86, flowMask) * 0.55);
-          albedo = mix(albedo, sandLight, smoothstep(0.35, 0.85, NdotL) * 0.35);
-          albedo *= 0.86 + 0.28 * detailTex;
+          vec3 lighting = uAmbientColor + uSunColor * diff;
+          vec3 litColor = surfaceAlbedo * lighting;
 
-          vec3 lighting = vec3(0.36, 0.21, 0.16) + vec3(0.95, 0.76, 0.62) * diff;
-          vec3 litColor = albedo * lighting;
-
-          // Distance atmospheric scattering towards the 35 km horizon
-          float horizonFog = smoothstep(5500.0, 34500.0, radialDist);
-          vec3 finalCol = mix(litColor, uHazeColor, horizonFog * 0.65);
+          // Smooth atmospheric horizon haze blending 100% into uHazeColor so there is NEVER a sharp flat horizon line!
+          float fogStart = 1200.0 + min(5000.0, uAltitude * 0.8);
+          float horizonFog = smoothstep(fogStart, 31000.0, radialDist);
+          vec3 finalCol = mix(litColor, uHazeColor, horizonFog);
 
           float edgeAlpha = (1.0 - smoothstep(26000.0, 35500.0, radialDist)) * uOpacity;
           gl_FragColor = vec4(finalCol, edgeAlpha);

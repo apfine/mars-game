@@ -654,9 +654,12 @@ export class PostLaunchSpace {
     }
 
     // Keep the 165km Mars globe horizontally centered directly beneath the active camera (shipPos.x, shipPos.z)
-    // so the spacecraft NEVER flies off the edge of the planet during downrange ascent or landing!
-    const groundElev = shipPos.y - Math.max(0, alt);
-    const globeCenterY = groundElev - this.planetRadius - Math.min(Math.max(0, alt), 100000.0) * 0.14;
+    // and keep visual altitude close to the planetary surface during atmospheric entry (12km - 50km)
+    const clampedAlt = Math.max(0.0, alt);
+    const visualSpaceAlt = clampedAlt <= 3500.0
+      ? clampedAlt
+      : 3500.0 + (clampedAlt - 3500.0) * 0.30;
+    const globeCenterY = shipPos.y - this.planetRadius - visualSpaceAlt;
 
     this.planetMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
     this.airglowMesh.position.set(shipPos.x, globeCenterY, shipPos.z);

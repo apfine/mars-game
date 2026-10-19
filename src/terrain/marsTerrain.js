@@ -22,7 +22,8 @@ export function createMarsTerrainMaterial(options = {}) {
     uFogNear: { value: 100.0 },
     uFogFar: { value: 520.0 },
     uQuality: { value: 2.0 },    // 0 = Low, 1 = Medium, 2 = High/Ultra
-    uCamAltitude: { value: 0.0 }
+    uCamAltitude: { value: 0.0 },
+    uFlightMode: { value: 0.0 }
   };
 
   const vertexShader = `
@@ -59,6 +60,7 @@ export function createMarsTerrainMaterial(options = {}) {
     uniform float uFogFar;
     uniform float uQuality;
     uniform float uCamAltitude;
+    uniform float uFlightMode;
 
     varying vec3 vWorldPosition;
     varying vec3 vNormal;
@@ -126,14 +128,14 @@ export function createMarsTerrainMaterial(options = {}) {
       vec3 toCam = cameraPosition - vWorldPosition;
       float camDist = length(toCam);
       float horizDist = length(toCam.xz);
-      float airFactor = clamp((uCamAltitude - 35.0) / 85.0, 0.0, 1.0);
+      float airFactor = max(uFlightMode, clamp((uCamAltitude - 35.0) / 85.0, 0.0, 1.0));
 
-      // When airborne, clip the 840m square corners into a clean 400m circle so it never looks like a square patch from above!
-      if (airFactor > 0.01 && horizDist > 402.0) {
+      // When airborne or in Flight Mode, clip the 840m square corners into a clean 400m circle so it never looks like a square or ring!
+      if (airFactor > 0.01 && horizDist > 400.0) {
         discard;
       }
 
-      // Ground-level early exit when completely obscured by horizon dust haze
+      // Ground-level early exit when completely obscured by horizon dust haze (Rover Mode only)
       if (airFactor < 0.01 && camDist >= uFogFar) {
         gl_FragColor = vec4(uMarsDustHazeColor, 1.0);
         return;
@@ -283,6 +285,10 @@ export class MarsTerrainManager {
   setQuality(preset) {
     const qVal = preset === 'Low' ? 0.0 : preset === 'Medium' ? 1.0 : 2.0;
     this.material.uniforms.uQuality.value = qVal;
+  }
+
+  setFlightMode(isFlight) {
+    this.material.uniforms.uFlightMode.value = isFlight ? 1.0 : 0.0;
   }
 
   setCameraAltitude(alt) {

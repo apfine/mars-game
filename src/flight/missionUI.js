@@ -15,6 +15,8 @@ export class MissionFlightHUD {
       trackBoosterBtn: document.getElementById('flight-track-booster-btn'),
       resetBtn: document.getElementById('flight-reset-btn'),
       camBar: document.getElementById('flight-cam-bar'),
+      trajSwitch: document.getElementById('flight-traj-switch'),
+      trajectoryPrompt: document.getElementById('flight-trajectory-prompt'),
 
       // 360° Gimbal Bar
       gimbalBar: document.getElementById('flight-gimbal-bar'),
@@ -95,13 +97,6 @@ export class MissionFlightHUD {
       });
     }
 
-    if (this.dom.trackBoosterBtn) {
-      this.dom.trackBoosterBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (this.options.onToggleBoosterTracking) this.options.onToggleBoosterTracking();
-      });
-    }
-
     if (this.dom.resetBtn) {
       this.dom.resetBtn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -121,6 +116,23 @@ export class MissionFlightHUD {
         });
       });
     }
+
+    // Bind Orbital vs Suborbital trajectory buttons (both top bar switch and pre-space prompt)
+    const bindTrajButtons = (rootEl, selector) => {
+      if (!rootEl) return;
+      const btns = rootEl.querySelectorAll(selector);
+      btns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const mode = btn.getAttribute('data-traj');
+          if (mode && this.options.onSelectTrajectory) {
+            this.options.onSelectTrajectory(mode);
+          }
+        });
+      });
+    };
+    bindTrajButtons(this.dom.trajSwitch, '.traj-opt-btn');
+    bindTrajButtons(this.dom.trajectoryPrompt, '.traj-prompt-btn');
 
     // 360° Gimbal continuous hold & tap controls
     const bindGimbalBtn = (btn, dYaw, dPitch) => {
@@ -235,17 +247,6 @@ export class MissionFlightHUD {
       const isGimbalCam = modeName === 'GROUND_CAM' || modeName === 'TOWER_CAM';
       this.dom.gimbalBar.style.display = isGimbalCam ? 'flex' : 'none';
     }
-
-    // Sync Track Booster button state
-    if (this.dom.trackBoosterBtn) {
-      const isTrackingBooster = modeName === 'BOOSTER_CAM';
-      this.dom.trackBoosterBtn.textContent = isTrackingBooster ? '🚀 TRACK SHIP' : '🎯 TRACK BOOSTER';
-      if (isTrackingBooster) {
-        this.dom.trackBoosterBtn.classList.add('active');
-      } else {
-        this.dom.trackBoosterBtn.classList.remove('active');
-      }
-    }
   }
 
   show(visible = true, isMobile = false) {
@@ -263,6 +264,9 @@ export class MissionFlightHUD {
       }
       if (this.dom.scoreCard) {
         this.dom.scoreCard.style.display = 'none';
+      }
+      if (this.dom.trajectoryPrompt) {
+        this.dom.trajectoryPrompt.style.display = 'none';
       }
     }
   }
@@ -285,9 +289,15 @@ export class MissionFlightHUD {
   update(physics) {
     if (!this.dom.container || !this.dom.container.classList.contains('active')) return;
     this._frame = (this._frame || 0) + 1;
-    if (this._frame % 2 !== 0 && this._lastPhase === physics.phase && this._lastAuto === physics.autoMission) return;
+    if (
+      this._frame % 2 !== 0 &&
+      this._lastPhase === physics.phase &&
+      this._lastAuto === physics.autoMission &&
+      this._lastTraj === physics.trajectoryMode
+    ) return;
     this._lastPhase = physics.phase;
     this._lastAuto = physics.autoMission;
+    this._lastTraj = physics.trajectoryMode;
 
     // 0. Live Online Count
     const presence = getPresenceClient();
@@ -295,6 +305,24 @@ export class MissionFlightHUD {
       this.onlineCount = presence.onlineCount;
       if (this.dom.flightOnlineVal) this.dom.flightOnlineVal.textContent = presence.onlineCount;
       if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = presence.onlineCount;
+    }
+
+    // 0b. Sync Orbital / Suborbital Trajectory Selector & Pre-Space Decision Banner
+    const trajMode = physics.trajectoryMode || 'ORBITAL';
+    if (this.dom.trajSwitch) {
+      const btns = this.dom.trajSwitch.querySelectorAll('.traj-opt-btn');
+      btns.forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-traj') === trajMode);
+      });
+    }
+    if (this.dom.trajectoryPrompt) {
+      this.dom.trajectoryPrompt.style.display = physics.showTrajectoryPrompt ? 'flex' : 'none';
+      if (physics.showTrajectoryPrompt) {
+        const btns = this.dom.trajectoryPrompt.querySelectorAll('.traj-prompt-btn');
+        btns.forEach(btn => {
+          btn.classList.toggle('active', btn.getAttribute('data-traj') === trajMode);
+        });
+      }
     }
 
     // 1. Mission Clock (T- / T+)
@@ -328,7 +356,7 @@ export class MissionFlightHUD {
         BOOSTBACK: 'BOOSTBACK BURN',
         DESCENT: 'GRID FIN GLIDE',
         APPROACH: 'LANDING BURN',
-        CAUGHT: 'TOWER CAUGHT 🥢'
+        CAUGHT: 'TOWER CAUGHT'
       };
       this.dom.boosterTag.textContent = bTagMap[physics.boosterState] || physics.boosterState;
     }
@@ -357,9 +385,11 @@ export class MissionFlightHUD {
     if (this.dom.shipTag) {
       if (physics.isMaxQ) {
         this.dom.shipTag.textContent = 'MAX-Q · SUPERSONIC';
-      } else if (physics.heat > 0.1) {
-        const tempC = Math.round(200 + physics.heat * 1450);
+      } else if (physics.heat > 0.04) {
+        const tempC = Math.round(220 + physics.heat * 1430);
         this.dom.shipTag.textContent = `PLASMA ${tempC}°C`;
+      } else if (physics.shipCaughtByTower && physics.phase === FLIGHT_PHASES.LANDED) {
+        this.dom.shipTag.textContent = 'TOWER CAUGHT';
       } else {
         this.dom.shipTag.textContent = `MACH ${physics.mach || '0.0'} · ${physics.gForce || '1.0'}G`;
       }
@@ -367,7 +397,7 @@ export class MissionFlightHUD {
 
     // 4. Re-entry Heat Bar
     if (this.dom.heatContainer && this.dom.heatBar) {
-      if (physics.heat > 0.05) {
+      if (physics.heat > 0.03) {
         this.dom.heatContainer.style.display = 'flex';
         this.dom.heatBar.style.width = `${Math.round(physics.heat * 100)}%`;
       } else {
@@ -378,10 +408,10 @@ export class MissionFlightHUD {
     // 5. Auto vs Manual Mode Toggle & Controls
     if (this.dom.autoBtn) {
       if (physics.autoMission) {
-        this.dom.autoBtn.textContent = 'AUTO: ON';
+        this.dom.autoBtn.textContent = 'AUTO';
         this.dom.autoBtn.classList.add('active');
       } else {
-        this.dom.autoBtn.textContent = 'MANUAL MODE';
+        this.dom.autoBtn.textContent = 'MANUAL';
         this.dom.autoBtn.classList.remove('active');
       }
     }
@@ -399,23 +429,7 @@ export class MissionFlightHUD {
       this.dom.mobileSteering.style.display = showTouchPad ? 'flex' : 'none';
     }
 
-    // 6. Booster Badge & Track Booster Button Highlight
-    if (this.dom.boosterBadge) {
-      if (physics.boosterState && physics.boosterState !== 'ATTACHED') {
-        this.dom.boosterBadge.style.display = 'inline-block';
-        const boosterTitles = {
-          BOOSTBACK: 'BOOSTER: BOOSTBACK BURN 🔥',
-          DESCENT: 'BOOSTER: SUPERSONIC GLIDE',
-          APPROACH: 'BOOSTER: CHOPSTICK APPROACH 🥢',
-          CAUGHT: 'BOOSTER: MECHAZILLA CAUGHT! 🥢'
-        };
-        this.dom.boosterBadge.textContent = boosterTitles[physics.boosterState] || `BOOSTER: ${physics.boosterState}`;
-        this.dom.boosterBadge.classList.toggle('caught', physics.boosterState === 'CAUGHT');
-      } else {
-        this.dom.boosterBadge.style.display = 'none';
-      }
-    }
-
+    // 6. Highlight BOOSTER camera tab while Super Heavy is returning to tower
     if (this.dom.trackBoosterBtn) {
       const isSeparated = physics.boosterState && physics.boosterState !== 'ATTACHED' && physics.boosterState !== 'CAUGHT';
       this.dom.trackBoosterBtn.classList.toggle('pulse-highlight', Boolean(isSeparated && this.currentCamMode !== 'BOOSTER_CAM'));
@@ -438,7 +452,6 @@ export class MissionFlightHUD {
         [FLIGHT_PHASES.LANDED]: 8
       };
       const currentIdx = phaseOrder[physics.phase] ?? 0;
-      const steps = ['LIFTOFF', 'MAXQ', 'STAGE', 'CATCH', 'ORBIT', 'ENTRY', 'LANDING'];
       const nodes = this.dom.timeline.querySelectorAll('.spx-tl-step');
       nodes.forEach((node, idx) => {
         const stepNum = idx + 1;
@@ -455,7 +468,7 @@ export class MissionFlightHUD {
         if (this.dom.scoreApogee) this.dom.scoreApogee.textContent = `${sAltKm} km`;
         if (this.dom.scoreVelocity) this.dom.scoreVelocity.textContent = `${Math.round(physics.speed)} m/s`;
         if (this.dom.scoreBooster) {
-          this.dom.scoreBooster.textContent = physics.boosterState === 'CAUGHT' ? 'MECHAZILLA CAUGHT! 🥢' : physics.boosterState;
+          this.dom.scoreBooster.textContent = physics.boosterState === 'CAUGHT' ? 'TOWER CAUGHT' : physics.boosterState;
         }
       } else {
         this.dom.scoreCard.style.display = 'none';
@@ -466,17 +479,21 @@ export class MissionFlightHUD {
     if (this.dom.phaseBadge) {
       const titles = {
         [FLIGHT_PHASES.ON_PAD]: 'STARBASE // PAD AWAITING LAUNCH',
-        [FLIGHT_PHASES.COUNTDOWN]: 'T-MINUS // 33 RAPTOR IGNITION SEQUENCE',
+        [FLIGHT_PHASES.COUNTDOWN]: 'T-MINUS // 33 RAPTOR IGNITION',
         [FLIGHT_PHASES.BOOSTER_ASCENT]: 'STAGE 1 // SUPER HEAVY ASCENT',
-        [FLIGHT_PHASES.HOT_STAGING]: 'HOT-STAGING // INTERSTAGE SEPARATION',
-        [FLIGHT_PHASES.STARSHIP_ASCENT]: 'STAGE 2 // STARSHIP ORBITAL INSERTION',
+        [FLIGHT_PHASES.HOT_STAGING]: 'HOT-STAGING // STAGE SEPARATION',
+        [FLIGHT_PHASES.STARSHIP_ASCENT]: trajMode === 'SUBORBITAL'
+          ? 'STAGE 2 // SUBORBITAL ASCENT'
+          : 'STAGE 2 // ORBITAL INSERTION',
         [FLIGHT_PHASES.ORBIT]: 'SECO // LOW MARS ORBIT COAST',
         [FLIGHT_PHASES.DEORBIT]: 'DEORBIT BURN // RETROGRADE FIRING',
         [FLIGHT_PHASES.HYPERSONIC_ENTRY]: 'ATMOSPHERIC ENTRY // PLASMA INTERFACE',
         [FLIGHT_PHASES.BELLYFLOP]: 'SUBSONIC SKYDIVE // FLAP TRIM',
         [FLIGHT_PHASES.LANDING_FLIP]: 'LANDING BURN // FLIP MANEUVER',
-        [FLIGHT_PHASES.TOUCHDOWN]: 'FINAL DESCENT // LEGS DEPLOYED',
-        [FLIGHT_PHASES.LANDED]: 'TOUCHDOWN CONFIRMED // MARS SURFACE'
+        [FLIGHT_PHASES.TOUCHDOWN]: 'MECHAZILLA APPROACH // TOWER CATCH',
+        [FLIGHT_PHASES.LANDED]: physics.shipCaughtByTower
+          ? 'STARSHIP CAUGHT // MECHAZILLA TOWER'
+          : 'TOUCHDOWN CONFIRMED // MARS SURFACE'
       };
       this.dom.phaseBadge.textContent = titles[physics.phase] || physics.phase;
     }
@@ -484,25 +501,25 @@ export class MissionFlightHUD {
     if (this.dom.stageBtn) {
       if (physics.phase === FLIGHT_PHASES.ON_PAD) {
         this.dom.stageBtn.style.display = 'inline-flex';
-        this.dom.stageBtn.textContent = '🚀 LAUNCH';
+        this.dom.stageBtn.textContent = 'LAUNCH';
         this.dom.stageBtn.className = 'flight-stage-btn launch-ready';
       } else if (physics.phase === FLIGHT_PHASES.LANDED) {
         this.dom.stageBtn.style.display = 'inline-flex';
-        this.dom.stageBtn.textContent = '🚗 DEPLOY ROVER';
+        this.dom.stageBtn.textContent = 'DEPLOY ROVER';
         this.dom.stageBtn.className = 'flight-stage-btn landed-ready';
       } else if (!physics.autoMission) {
         // In Manual Mode: give user explicit stage/maneuver buttons at each phase
         if (physics.phase === FLIGHT_PHASES.BOOSTER_ASCENT || physics.phase === FLIGHT_PHASES.HOT_STAGING) {
           this.dom.stageBtn.style.display = 'inline-flex';
-          this.dom.stageBtn.textContent = '⚡ HOT STAGE';
+          this.dom.stageBtn.textContent = 'HOT STAGE';
           this.dom.stageBtn.className = 'flight-stage-btn manual-stage';
         } else if (physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT || physics.phase === FLIGHT_PHASES.ORBIT) {
           this.dom.stageBtn.style.display = 'inline-flex';
-          this.dom.stageBtn.textContent = '🔥 DEORBIT BURN';
+          this.dom.stageBtn.textContent = 'DEORBIT BURN';
           this.dom.stageBtn.className = 'flight-stage-btn manual-stage';
         } else if (physics.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY || physics.phase === FLIGHT_PHASES.BELLYFLOP) {
           this.dom.stageBtn.style.display = 'inline-flex';
-          this.dom.stageBtn.textContent = '🔄 LANDING FLIP';
+          this.dom.stageBtn.textContent = 'LANDING FLIP';
           this.dom.stageBtn.className = 'flight-stage-btn manual-stage';
         } else {
           this.dom.stageBtn.style.display = 'none';
@@ -516,17 +533,15 @@ export class MissionFlightHUD {
     if (this.dom.actionPrompt) {
       let promptHtml = '';
       if (physics.phase === FLIGHT_PHASES.ON_PAD) {
-        promptHtml = `<span class="glow-text">CLICK 'LAUNCH' OR PRESS [SPACE] TO INITIATE ${physics.autoMission ? 'AUTONOMOUS' : 'MANUAL'} FLIGHT</span>`;
+        promptHtml = `<span class="glow-text">PRESS [SPACE] OR CLICK LAUNCH TO INITIATE ${physics.autoMission ? 'AUTONOMOUS' : 'MANUAL'} FLIGHT</span>`;
       } else if (physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT && (physics.boosterState === 'BOOSTBACK' || physics.boosterState === 'DESCENT' || physics.boosterState === 'APPROACH')) {
         if (this.currentCamMode !== 'BOOSTER_CAM') {
-          promptHtml = `<span class="glow-alert">🥢 SUPER HEAVY RETURNING TO STARBASE — CLICK '🎯 TRACK BOOSTER' TO WATCH CATCH</span>`;
+          promptHtml = `<span class="glow-text">SUPER HEAVY RETURNING TO STARBASE // SELECT 'BOOSTER' CAM TO VIEW TOWER CATCH</span>`;
         } else {
-          promptHtml = `<span class="glow-green">🎯 TRACKING SUPER HEAVY RETURN TO MECHAZILLA CHOPSTICKS</span>`;
+          promptHtml = `<span class="glow-text">TRACKING SUPER HEAVY RETURN TO MECHAZILLA CHOPSTICKS</span>`;
         }
-      } else if (physics.boosterState === 'CAUGHT' && physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT) {
-        promptHtml = `<span class="glow-green">🥢 MECHAZILLA CATCH CONFIRMED! SUPER HEAVY SECURED IN TOWER ARMS</span>`;
       } else if (physics.phase === FLIGHT_PHASES.LANDED) {
-        promptHtml = `<span class="glow-green">STARSHIP LANDED ON MARS // CLICK 'DEPLOY ROVER' OR '↺ PAD' TO RE-LAUNCH</span>`;
+        promptHtml = `<span class="glow-text">${physics.shipCaughtByTower ? 'STARSHIP SECURED IN MECHAZILLA ARMS' : 'STARSHIP LANDED ON MARS'} // CLICK DEPLOY ROVER OR PAD TO RE-LAUNCH</span>`;
       }
       if (this._lastPromptHtml !== promptHtml) {
         this._lastPromptHtml = promptHtml;

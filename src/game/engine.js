@@ -163,6 +163,9 @@ export class MarsGameEngine {
       onToggleAutoMission: () => {
         this.missionPhysics.toggleAutoMission();
       },
+      onSelectTrajectory: (mode) => {
+        this.missionPhysics.setTrajectoryMode(mode);
+      },
       onToggleBoosterTracking: () => {
         const currentCam = this.cameraController.getFlightMode();
         const targetCam = currentCam === 'BOOSTER_CAM' ? 'CHASE' : 'BOOSTER_CAM';
@@ -236,18 +239,17 @@ export class MarsGameEngine {
   cycleTimeScale() {
     this.timeScaleIdx = (this.timeScaleIdx + 1) % this.timeScales.length;
     this.timeScale = this.timeScales[this.timeScaleIdx];
-    const label = `⏩ ${this.timeScale}X`;
     const isWarped = this.timeScale > 1;
 
     const flightBtn = document.getElementById('flight-speed-btn');
     if (flightBtn) {
-      flightBtn.textContent = label;
+      flightBtn.textContent = `${this.timeScale}X`;
       flightBtn.classList.toggle('active', isWarped);
     }
 
     const roverBtn = document.getElementById('rover-speed-btn');
     if (roverBtn) {
-      roverBtn.innerHTML = `<span>${label}</span>`;
+      roverBtn.innerHTML = `<span>${this.timeScale}X</span>`;
       roverBtn.classList.toggle('active', isWarped);
     }
   }
@@ -302,6 +304,7 @@ export class MarsGameEngine {
       this.flightHud.show(true, this.input.isMobile);
       this.flightHud.notifyCameraMode(this.cameraController.getFlightMode());
       this.atmosphere.setFlightMode(true);
+      if (this.terrain) this.terrain.setFlightMode(true);
 
       // Silence rover motor while in flight
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
@@ -321,6 +324,7 @@ export class MarsGameEngine {
       }
 
       this.atmosphere.setFlightMode(false);
+      if (this.terrain) this.terrain.setFlightMode(false);
       this.atmosphere.setAltitude(0, 0);
       this.terrain.setCameraAltitude(0);
       this.audio.updateRocket(0, 0, 0);

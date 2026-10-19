@@ -195,10 +195,10 @@ export default function MarsCanvas() {
             <span className="dsn-rtt-val" id="telemetry-rtt-val">24ms</span>
           </div>
           <button id="rover-speed-btn" className="hud-pill-btn scientific-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x)">
-            <span>⏩ 1X</span>
+            <span>1X</span>
           </button>
           <button id="launch-mission-btn" className="hud-pill-btn launch-pill scientific-btn" aria-label="Launch Starship Mission">
-            <span>🚀 STARSHIP</span>
+            <span>STARSHIP</span>
           </button>
           <button id="map-btn" className="hud-pill-btn scientific-btn" aria-label="Map">
             <span>MAP</span>
@@ -300,50 +300,55 @@ export default function MarsCanvas() {
 
       {/* SpaceX Starship Broadcast HUD */}
       <div id="flight-hud" className="flight-hud-layer">
-        {/* Minimal Top Broadcast Bar */}
+        {/* Clean Minimalist Monochrome SpaceX Top Bar */}
         <div className="spx-top-bar">
           <div className="spx-top-left">
             <div id="flight-phase-badge" className="flight-phase-badge">STARBASE // PAD AWAITING LAUNCH</div>
-            <div id="flight-booster-badge" className="flight-booster-badge" style={{ display: 'none' }}>BOOSTER: ATTACHED</div>
-            <div className="flight-online-badge" title="Starbase Telemetry Link">
-              <span className="online-dot"></span>
-              <span id="flight-online-val" className="online-count-num">1</span>
-              <span className="online-lbl">LIVE</span>
-            </div>
           </div>
 
-          {/* Camera Switcher Pills */}
+          {/* Clean Camera Switcher Strip */}
           <div className="flight-cam-bar" id="flight-cam-bar">
-            <button className="cam-tab-btn active" data-cam="CHASE">🚀 SHIP CAM</button>
-            <button className="cam-tab-btn" data-cam="BOOSTER_CAM">🎯 BOOSTER CAM</button>
-            <button className="cam-tab-btn" data-cam="GROUND_CAM">🎥 GROUND CAM</button>
-            <button className="cam-tab-btn" data-cam="TOWER_CAM">🗼 TOWER CAM</button>
+            <button className="cam-tab-btn active" data-cam="CHASE">SHIP</button>
+            <button className="cam-tab-btn" id="flight-track-booster-btn" data-cam="BOOSTER_CAM">BOOSTER</button>
+            <button className="cam-tab-btn" data-cam="GROUND_CAM">GROUND</button>
+            <button className="cam-tab-btn" data-cam="TOWER_CAM">TOWER</button>
             <button className="cam-tab-btn" data-cam="COCKPIT">COCKPIT</button>
             <button className="cam-tab-btn" data-cam="FREE_ORBIT">ORBIT</button>
           </div>
 
           <div className="spx-top-right">
-            <button id="flight-track-booster-btn" className="hud-pill-btn flight-booster-btn" aria-label="Track Booster Return">
-              🎯 TRACK BOOSTER
-            </button>
+            {/* Orbital vs Suborbital Profile Selector */}
+            <div className="spx-traj-switch" id="flight-traj-switch" title="Flight Trajectory Profile">
+              <button className="traj-opt-btn active" data-traj="ORBITAL">ORBITAL</button>
+              <button className="traj-opt-btn" data-traj="SUBORBITAL">SUBORBITAL</button>
+            </div>
             <button id="flight-speed-btn" className="hud-pill-btn flight-speed-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x)">
-              ⏩ 1X
+              1X
             </button>
             <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto Mission">
-              AUTO: ON
+              AUTO
             </button>
             <button id="flight-reset-btn" className="hud-pill-btn flight-reset-btn" aria-label="Reset to Launch Pad">
-              ↺ PAD
+              PAD
             </button>
             <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">
-              ✕ EXIT
+              EXIT
             </button>
+          </div>
+        </div>
+
+        {/* Pre-Space Trajectory Decision Prompt (Appears during Stage 2 Ascent before SECO) */}
+        <div id="flight-trajectory-prompt" className="spx-trajectory-prompt" style={{ display: 'none' }}>
+          <span className="traj-prompt-lbl">APPROACHING SPACE INSERTION // SELECT PROFILE</span>
+          <div className="traj-prompt-actions">
+            <button className="traj-prompt-btn active" data-traj="ORBITAL">ORBITAL INSERTION (88 KM)</button>
+            <button className="traj-prompt-btn" data-traj="SUBORBITAL">SUBORBITAL RTLS CATCH (50 KM)</button>
           </div>
         </div>
 
         {/* 360° Gimbal Control Bar (Visible in Ground Cam & Tower Cam) */}
         <div id="flight-gimbal-bar" className="spx-gimbal-bar" style={{ display: 'none' }}>
-          <span className="gimbal-lbl">🎥 360° GIMBAL VIEW (DRAG SCREEN OR PAN)</span>
+          <span className="gimbal-lbl">360° GIMBAL OPTICS</span>
           <div className="gimbal-pad-btns">
             <button id="gimbal-left" className="gimbal-btn" aria-label="Pan Left">◀</button>
             <button id="gimbal-up" className="gimbal-btn" aria-label="Tilt Up">▲</button>
@@ -370,15 +375,15 @@ export default function MarsCanvas() {
             <div className="score-metrics-grid">
               <div className="metric-box">
                 <span className="metric-lbl">APOGEE</span>
-                <span className="metric-val" id="score-apogee-val">102.4 km</span>
+                <span className="metric-val" id="score-apogee-val">88.4 km</span>
               </div>
               <div className="metric-box">
                 <span className="metric-lbl">VELOCITY</span>
-                <span className="metric-val" id="score-velocity-val">3,380 m/s</span>
+                <span className="metric-val" id="score-velocity-val">3,180 m/s</span>
               </div>
               <div className="metric-box">
                 <span className="metric-lbl">BOOSTER CATCH</span>
-                <span className="metric-val highlight" id="score-booster-val">MECHAZILLA CAUGHT! 🥢</span>
+                <span className="metric-val highlight" id="score-booster-val">TOWER CAUGHT</span>
               </div>
               <div className="metric-box">
                 <span className="metric-lbl">NEXT PHASE</span>
@@ -479,7 +484,7 @@ export default function MarsCanvas() {
           <div className="spx-center-bridge">
             <div className="spx-action-row">
               <button id="flight-stage-btn" className="flight-stage-btn" aria-label="Primary Launch or Stage Action">
-                🚀 LAUNCH
+                LAUNCH
               </button>
 
               {/* Manual Throttle Controls (Shown when AUTO: OFF) */}
