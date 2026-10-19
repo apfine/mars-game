@@ -1,4 +1,4 @@
-import { getMarsHeight } from '../terrain/noise.js';
+import { getMarsHeightFast } from '../terrain/noise.js';
 
 // Minimap (always on, heading arrow, off-screen landmark pointers) and full-screen expedition map.
 // Terrain layers are hill-shaded off-screen canvases rebuilt only when needed to stay cheap.
@@ -10,8 +10,9 @@ export class MarsMap {
     this.modal = document.getElementById('map-modal');
     this.open = false;
     this.frame = 0;
-    this.miniLayer = { c: document.createElement('canvas'), cx: 1e9, cz: 1e9, span: 560, res: 80 };
-    this.fullLayer = { c: document.createElement('canvas'), cx: 0, cz: 0, span: 3600, res: 128 };
+    this.miniLayer = { c: document.createElement('canvas'), cx: 1e9, cz: 1e9, span: 560, res: 64 };
+    this.fullLayer = { c: document.createElement('canvas'), cx: 0, cz: 0, span: 3600, res: 96 };
+    this._hGrid = new Float32Array(97 * 97);
 
     const toggle = () => this.toggle();
     document.getElementById('map-btn')?.addEventListener('click', toggle);
@@ -31,23 +32,40 @@ export class MarsMap {
 
   buildLayer(L, cx, cz) {
     const { c, res, span } = L;
-    c.width = c.height = res;
-    const g = c.getContext('2d');
-    const img = g.createImageData(res, res);
+    if (c.width !== res) {
+      c.width = c.height = res;
+    }
+    const g = L.ctx || (L.ctx = c.getContext('2d'));
+    const img = L.img || (L.img = g.createImageData(res, res));
+    const data = img.data;
     const step = span / res;
-    for (let j = 0; j < res; j++) {
-      for (let i = 0; i < res; i++) {
+    const invStep2 = 2.0 / step;
+    const stride = res + 1;
+    const hGrid = this._hGrid;
+
+    // Single pass: sample getMarsHeightFast once per grid vertex
+    for (let j = 0; j <= res; j++) {
+      const wz = cz + (0.5 - j / res) * span;
+      const rowOffset = j * stride;
+      for (let i = 0; i <= res; i++) {
         const wx = cx + (i / res - 0.5) * span;
-        const wz = cz + (0.5 - j / res) * span;
-        const h = getMarsHeight(wx, wz);
-        const dh = getMarsHeight(wx - step, wz + step) - h; // light from the north-west
-        const shade = Math.min(1.25, Math.max(0.55, 0.9 + dh * 0.5 / step * 4));
-        const t = Math.min(1, Math.max(0, (h + 25) / 70));
+        hGrid[rowOffset + i] = getMarsHeightFast(wx, wz);
+      }
+    }
+
+    for (let j = 0; j < res; j++) {
+      const rowOffset = j * stride;
+      for (let i = 0; i < res; i++) {
+        const h = hGrid[rowOffset + i + 1];
+        const hNW = hGrid[rowOffset + i]; // neighbour to the west/north-west
+        const dh = hNW - h;
+        const shade = Math.min(1.25, Math.max(0.55, 0.9 + dh * invStep2));
+        const t = Math.min(1, Math.max(0, (h + 25) * 0.0142857));
         const k = (j * res + i) * 4;
-        img.data[k] = Math.min(255, (168 + 56 * t) * shade);
-        img.data[k + 1] = Math.min(255, (86 + 70 * t) * shade);
-        img.data[k + 2] = Math.min(255, (56 + 62 * t) * shade);
-        img.data[k + 3] = 255;
+        data[k] = Math.min(255, (168 + 56 * t) * shade);
+        data[k + 1] = Math.min(255, (86 + 70 * t) * shade);
+        data[k + 2] = Math.min(255, (56 + 62 * t) * shade);
+        data[k + 3] = 255;
       }
     }
     g.putImageData(img, 0, 0);
@@ -55,7 +73,7 @@ export class MarsMap {
   }
 
   draw(canvas, L, p, yaw, pois, beacons, isFull) {
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas._ctx || (canvas._ctx = canvas.getContext('2d'));
     const W = canvas.width, H = canvas.height;
     const viewSpan = isFull ? L.span : 420;
     const s = W / viewSpan;
@@ -150,9 +168,10 @@ export class MarsMap {
     this.frame++;
     const p = physics.position;
     const beacons = this.hud.userBeacons;
-    if (this.mini && this.frame % 4 === 0) {
+    if (this.mini && this.frame % 6 === 0) {
       const L = this.miniLayer;
-      if (Math.hypot(p.x - L.cx, p.z - L.cz) > 45) this.buildLayer(L, p.x, p.z);
+      const dx = p.x - L.cx, dz = p.z - L.cz;
+      if (dx * dx + dz * dz > 65 * 65) this.buildLayer(L, p.x, p.z);
       this.draw(this.mini, L, p, physics.yaw, pois, beacons, false);
     }
     if (this.open && this.full) {

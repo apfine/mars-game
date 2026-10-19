@@ -25,6 +25,13 @@ export class MarsAtmosphere {
 
   setQuality(preset) {
     this.dustDensity = preset === 'Low' ? 0.4 : preset === 'Medium' ? 0.7 : preset === 'Ultra' ? 1.3 : 1.0;
+    if (this.dustPoints) {
+      const count = Math.floor(this.dustCount * Math.min(1.0, this.dustDensity));
+      this.dustPoints.geometry.setDrawRange(0, count);
+    }
+    if (this.devilPool && this.devilPool.points) {
+      this.devilPool.points.visible = !this.isFlight && this.dustDensity > 0.45;
+    }
   }
 
   setViewScale(heightPx, fovDeg) {
@@ -35,7 +42,7 @@ export class MarsAtmosphere {
 
   createSky() {
     // Custom Mars Atmospheric Sky Dome
-    const skyGeo = new THREE.SphereGeometry(1200, 32, 24);
+    const skyGeo = new THREE.SphereGeometry(1200, 24, 16);
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -73,10 +80,6 @@ export class MarsAtmosphere {
           vec3 sunDir = normalize(uSunPos);
           float sc = max(dot(dir, sunDir), 0.0);
 
-          // 1. Natural Planetary Atmospheric Scattering (No blackhole pinhole distortion!)
-          // At surface: amber/salmon horizon and butterscotch zenith.
-          // As altitude increases, atmospheric optical thickness decays exponentially
-          // with altitude without squeezing or compressing the sky geometry.
           float atmoFade = exp(-max(0.0, uAltitude) / 13500.0);
           float horizonFade = smoothstep(-0.4, 0.05, dir.y);
 
@@ -90,19 +93,19 @@ export class MarsAtmosphere {
           // Blend atmosphere towards space as rocket climbs
           vec3 sky = mix(spaceBlack, atmoCol, clamp(atmoFade * 1.2 * horizonFade, 0.0, 1.0));
 
-          // 2. Cosmic Space: 3D curved Mars globe with realistic terrain & airglow renders below the vehicle
-
-          // 3. Martian Mie Twilight Blue Corona around the sun
+          // Martian Mie Twilight Blue Corona around the sun
           float blueHalo = pow(sc, 14.0) * 0.26 * atmoFade;
           sky = mix(sky, uSunHaloBlue, blueHalo);
 
-          // 4. Solar disk and glare
-          float solarGlare = pow(sc, 6.0) * 0.35 + pow(sc, 35.0) * 0.85 + pow(sc, 300.0) * 2.2;
+          // Solar disk and glare
+          float sc2 = sc * sc;
+          float sc6 = sc2 * sc2 * sc2;
+          float solarGlare = sc6 * 0.35 + pow(sc, 35.0) * 0.85 + pow(sc, 300.0) * 2.2;
           sky += uSunColor * solarGlare;
           float sunDisk = smoothstep(0.9990, 0.9997, sc);
           sky += uSunColor * sunDisk * 1.8;
 
-          // 5. Procedural Starfield & Milky Way visible as atmosphere thins
+          // Procedural Starfield & Milky Way visible as atmosphere thins
           float starFactor = clamp(1.0 - atmoFade * 0.82, 0.0, 1.0);
           if (starFactor > 0.02) {
             vec3 starDir = dir;
@@ -132,17 +135,18 @@ export class MarsAtmosphere {
 
     this.skyMesh = new THREE.Mesh(skyGeo, skyMat);
     this.skyMesh.renderOrder = -10;
+    this.skyMesh.frustumCulled = false;
     this.scene.add(this.skyMesh);
 
     // Directional Sunlight & Ambient
     this.sunLight = new THREE.DirectionalLight(0xffe6d0, 1.8);
     this.sunLight.position.copy(SUN_DIR).multiplyScalar(500);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.width = 2048;
-    this.sunLight.shadow.mapSize.height = 2048;
+    this.sunLight.shadow.mapSize.width = 1024;
+    this.sunLight.shadow.mapSize.height = 1024;
     this.sunLight.shadow.camera.near = 10;
     this.sunLight.shadow.camera.far = 900;
-    const d = 50;
+    const d = 32;
     this.sunLight.shadow.camera.left = -d;
     this.sunLight.shadow.camera.right = d;
     this.sunLight.shadow.camera.top = d;
@@ -166,13 +170,13 @@ export class MarsAtmosphere {
   // the Martian sky and sand instead of looking flat and black.
   buildEnvironment(renderer) {
     const envScene = new THREE.Scene();
-    const skyClone = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 24), this.skyMat.clone());
+    const skyClone = new THREE.Mesh(new THREE.SphereGeometry(50, 16, 12), this.skyMat.clone());
     skyClone.material.uniforms.uTime.value = 0;
     skyClone.renderOrder = -10;
     envScene.add(skyClone);
 
     const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(95, 32).rotateX(-Math.PI / 2),
+      new THREE.CircleGeometry(95, 16).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xc4724a })
     );
     ground.position.y = -1.0;
@@ -189,14 +193,13 @@ export class MarsAtmosphere {
 
   createDistantMountains() {
     // 360-degree distant Martian mountain silhouettes (Olympus Mons caldera peak and crater rims)
-    const segs = 180;
+    const segs = 120;
     const radius = 950.0;
     const geo = new THREE.BufferGeometry();
     const positions = [];
 
     const ridge = (t) => {
       const base = 30.0 + Math.sin(t * 3.0) * 18.0 + Math.pow(Math.max(0, Math.cos(t - 0.78)), 4.0) * 90.0;
-      // Jagged high-frequency ridgelines (deterministic)
       const jag = Math.sin(t * 23.0 + 1.3) * 4.5 + Math.sin(t * 47.0) * 2.4 + Math.sin(t * 91.0 + 2.0) * 1.2;
       return base + jag;
     };
@@ -236,7 +239,6 @@ export class MarsAtmosphere {
         uniform vec3 uPeak;
         varying float vY;
         void main() {
-          // Atmospheric perspective: bases dissolve into haze, ridges stay slightly darker
           float t = smoothstep(-5.0, 120.0, vY);
           gl_FragColor = vec4(mix(uHaze, uPeak, t * 0.7), 1.0);
           #include <colorspace_fragment>
@@ -245,6 +247,7 @@ export class MarsAtmosphere {
     });
 
     this.distantMountains = new THREE.Mesh(geo, mat);
+    this.distantMountains.frustumCulled = false;
     this.scene.add(this.distantMountains);
   }
 
@@ -273,20 +276,19 @@ export class MarsAtmosphere {
   }
 
   createWindDust() {
-    // Blowing sand particles drifting across the dunes
-    this.dustCount = 1200;
+    // GPU-driven blowing sand particles drifting across the dunes (zero CPU loop per frame)
+    this.dustCount = 700;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(this.dustCount * 3);
     const velocities = new Float32Array(this.dustCount * 3);
 
-    this.windDustRadius = 120.0;
+    this.windDustRadius = 110.0;
 
     for (let i = 0; i < this.dustCount; i++) {
       positions[i * 3 + 0] = (Math.random() - 0.5) * this.windDustRadius * 2;
       positions[i * 3 + 1] = Math.random() * 25 + 0.5;
       positions[i * 3 + 2] = (Math.random() - 0.5) * this.windDustRadius * 2;
 
-      // Wind direction ~ 35 degrees
       const speed = 12.0 + Math.random() * 10.0;
       velocities[i * 3 + 0] = Math.cos(0.62) * speed;
       velocities[i * 3 + 1] = (Math.random() - 0.5) * 1.5;
@@ -294,15 +296,42 @@ export class MarsAtmosphere {
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    this.dustVelocities = velocities;
+    geometry.setAttribute('aVelocity', new THREE.BufferAttribute(velocities, 3));
 
-    const material = new THREE.PointsMaterial({
-      color: 0xd98d6c,
-      size: 1.4,
+    this.windDustUniforms = {
+      uTime: { value: 0 },
+      uPlayerPos: { value: new THREE.Vector3() },
+      uRadius: { value: this.windDustRadius }
+    };
+
+    const material = new THREE.ShaderMaterial({
       transparent: true,
-      opacity: 0.45,
       depthWrite: false,
-      blending: THREE.NormalBlending
+      blending: THREE.NormalBlending,
+      uniforms: this.windDustUniforms,
+      vertexShader: `
+        attribute vec3 aVelocity;
+        uniform float uTime;
+        uniform vec3 uPlayerPos;
+        uniform float uRadius;
+        void main() {
+          vec3 p = position + aVelocity * uTime - uPlayerPos;
+          float span = uRadius * 2.0;
+          p.x = mod(p.x + uRadius, span) - uRadius + uPlayerPos.x;
+          p.z = mod(p.z + uRadius, span) - uRadius + uPlayerPos.z;
+          p.y = mod(p.y, 26.0) + uPlayerPos.y + 0.5;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = clamp(340.0 / max(1.0, -mv.z), 1.5, 5.5);
+        }
+      `,
+      fragmentShader: `
+        void main() {
+          vec2 d = gl_PointCoord - vec2(0.5);
+          if (dot(d, d) > 0.25) discard;
+          gl_FragColor = vec4(0.85, 0.55, 0.42, 0.42);
+        }
+      `
     });
 
     this.dustPoints = new THREE.Points(geometry, material);
@@ -312,7 +341,7 @@ export class MarsAtmosphere {
 
   createVehicleParticles() {
     // 1. Sand dust (soft billowing sprites, tinted to the sand under the wheels)
-    this.dustPool = new SoftParticlePool(this.scene, 900, { additive: false, softness: 1.0 });
+    this.dustPool = new SoftParticlePool(this.scene, 650, { additive: false, softness: 1.0 });
     this.tireAcc = [0, 0, 0, 0];
     this.sandTints = [
       [0.78, 0.50, 0.34],
@@ -321,10 +350,15 @@ export class MarsAtmosphere {
     ];
 
     // 2. Nitro sparks / embers (additive glow)
-    this.fxPool = new SoftParticlePool(this.scene, 420, { additive: true, softness: 1.0, maxPointSize: 120 });
+    this.fxPool = new SoftParticlePool(this.scene, 320, { additive: true, softness: 1.0, maxPointSize: 120 });
     this.nitroAcc = 0;
     this.emberAcc = 0;
     this.nitroLevel = 0;
+
+    // Reusable scratch vectors for zero per-frame allocations
+    this._tmpNozzle0 = new THREE.Vector3();
+    this._tmpNozzle1 = new THREE.Vector3();
+    this._tmpRear = new THREE.Vector3();
 
     this.createNitroPlumes();
     this.createTireTracks();
@@ -368,7 +402,7 @@ export class MarsAtmosphere {
 
     // 1. Lower Atmospheric Cloud Deck (Y = 3,500m to 7,500m)
     this.clouds = [];
-    const lowerCount = 55;
+    const lowerCount = 40;
     for (let i = 0; i < lowerCount; i++) {
       const sprite = new THREE.Sprite(cloudMat);
       const angle = Math.random() * Math.PI * 2;
@@ -384,7 +418,7 @@ export class MarsAtmosphere {
     }
 
     // 2. High-Altitude Mesospheric Cirrus (Y = 18,000m to 24,000m)
-    const upperCount = 38;
+    const upperCount = 28;
     for (let i = 0; i < upperCount; i++) {
       const sprite = new THREE.Sprite(cirrusMat);
       const angle = Math.random() * Math.PI * 2;
@@ -400,10 +434,10 @@ export class MarsAtmosphere {
     }
 
     // 3. High-Speed Aerodynamic Vapor Streamers (Motion Parallax)
-    const streamerCount = 42;
-    const streamerGeo = new THREE.CylinderGeometry(0.08, 0.14, 20.0, 6, 1, true);
+    const streamerCount = 32;
+    const streamerGeo = new THREE.CylinderGeometry(0.08, 0.14, 20.0, 5, 1, true);
     streamerGeo.translate(0, -10.0, 0);
-    const streamerMat = new THREE.MeshBasicMaterial({
+    this.streamerMat = new THREE.MeshBasicMaterial({
       color: 0xcceeec,
       transparent: true,
       opacity: 0.0,
@@ -414,12 +448,12 @@ export class MarsAtmosphere {
     this.streamers = [];
     this.streamerGroup = new THREE.Group();
     for (let i = 0; i < streamerCount; i++) {
-      const mesh = new THREE.Mesh(streamerGeo, streamerMat.clone());
+      const mesh = new THREE.Mesh(streamerGeo, this.streamerMat);
       const rad = 7.0 + Math.random() * 15.0;
       const theta = Math.random() * Math.PI * 2;
       mesh.userData = {
-        baseRadius: rad,
-        theta: theta,
+        cosTheta: Math.cos(theta) * rad,
+        sinTheta: Math.sin(theta) * rad,
         yOffset: (Math.random() - 0.5) * 80.0,
         speedFactor: 0.8 + Math.random() * 0.5
       };
@@ -436,7 +470,7 @@ export class MarsAtmosphere {
     this.isFlight = isFlight;
     if (this.dustPoints) this.dustPoints.visible = !isFlight;
     if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = !isFlight;
-    if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight;
+    if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight && this.dustDensity > 0.45;
     if (this.tracks) this.tracks.visible = !isFlight;
     if (this.phobos) this.phobos.visible = !isFlight;
     if (this.deimos) this.deimos.visible = !isFlight;
@@ -467,19 +501,16 @@ export class MarsAtmosphere {
       this.streamerGroup.position.copy(playerPos);
     }
 
+    this.streamerMat.opacity = speedRatio * 0.65;
+    const baseStep = Math.max(15.0, speed * 0.035);
     for (let i = 0; i < this.streamers.length; i++) {
       const s = this.streamers[i];
       const ud = s.userData;
-      ud.yOffset -= Math.max(15.0, speed * 0.035) * ud.speedFactor;
+      ud.yOffset -= baseStep * ud.speedFactor;
       if (ud.yOffset < -45.0) {
         ud.yOffset = 45.0 + Math.random() * 20.0;
       }
-      s.position.set(
-        Math.cos(ud.theta) * ud.baseRadius,
-        ud.yOffset,
-        Math.sin(ud.theta) * ud.baseRadius
-      );
-      s.material.opacity = speedRatio * 0.65;
+      s.position.set(ud.cosTheta, ud.yOffset, ud.sinTheta);
     }
   }
 
@@ -516,14 +547,17 @@ export class MarsAtmosphere {
         varying vec3 vN;
         varying vec3 vV;
         void main() {
-          float t = vUv.y;                     // 0 at nozzle -> 1 at flame tip
+          float t = vUv.y;
           float ang = vUv.x * 6.2831853;
           float turb = 0.5 + 0.5 * sin(ang * 3.0 + t * 20.0 - uTime * 42.0);
           turb *= 0.5 + 0.5 * sin(ang * 5.0 - t * 31.0 - uTime * 57.0 + 1.7);
-          float core = pow(1.0 - t, 2.0);
-          float fres = pow(abs(dot(normalize(vN), normalize(vV))), 0.7);
-          // Mach (shock) diamonds, stationary in the exhaust
-          float diamonds = pow(max(0.0, sin(t * 26.0 / uScale + 0.6)), 8.0) * (1.0 - t) * step(0.04, t);
+          float oneMinusT = 1.0 - t;
+          float core = oneMinusT * oneMinusT;
+          float fres = sqrt(abs(dot(normalize(vN), normalize(vV))));
+          float s = max(0.0, sin(t * 26.0 / uScale + 0.6));
+          float s2 = s * s;
+          float s4 = s2 * s2;
+          float diamonds = (s4 * s4) * oneMinusT * step(0.04, t);
           vec3 outer = vec3(1.0, 0.42, 0.10);
           vec3 mid = vec3(1.0, 0.78, 0.40);
           vec3 inner = vec3(0.55, 0.80, 1.0);
@@ -531,7 +565,7 @@ export class MarsAtmosphere {
           col = mix(col, inner, core * fres);
           col += vec3(0.9, 0.95, 1.0) * diamonds * 0.9;
           float flick = 0.75 + 0.25 * turb;
-          float a = pow(1.0 - t, 1.3) * fres * flick * uIntensity;
+          float a = oneMinusT * fres * flick * uIntensity;
           a += diamonds * 0.5 * uIntensity;
           gl_FragColor = vec4(col * (1.2 + core * 1.5), clamp(a, 0.0, 1.0));
         }
@@ -539,8 +573,7 @@ export class MarsAtmosphere {
     });
 
     const makeConeGeo = (radius) => {
-      // Wide at nozzle (y = 0) tapering to a tip (y = 1), then pointed along -Z (rover rear)
-      const g = new THREE.CylinderGeometry(0.0, radius, 1, 20, 6, true);
+      const g = new THREE.CylinderGeometry(0.0, radius, 1, 14, 4, true);
       g.translate(0, 0.5, 0);
       g.rotateX(-Math.PI / 2);
       return g;
@@ -558,15 +591,11 @@ export class MarsAtmosphere {
       }
       this.plumes.push({ outer, inner, x: side === 0 ? -0.55 : 0.55 });
     }
-
-    // Flickering exhaust light that paints the sand orange behind the rover
-    this.nitroLight = new THREE.PointLight(0xff9a4a, 0, 26, 1.6);
-    this.scene.add(this.nitroLight);
   }
 
   createTireTracks() {
     // Ring buffer of tire tread decals stamped onto the sand
-    this.trackMax = 520;
+    this.trackMax = 400;
     this.trackCursor = 0;
 
     const cv = document.createElement('canvas');
@@ -575,12 +604,10 @@ export class MarsAtmosphere {
     ctx.clearRect(0, 0, 32, 64);
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.fillRect(2, 0, 28, 64);
-    // Deep directional tread bars
     ctx.fillStyle = 'rgba(255,255,255,1.0)';
     for (let y = 0; y < 64; y += 8) {
       ctx.fillRect(2, y, 28, 4);
     }
-    // Soft shoulder edges
     ctx.globalCompositeOperation = 'destination-out';
     const grad = ctx.createLinearGradient(0, 0, 32, 0);
     grad.addColorStop(0.0, 'rgba(0,0,0,1)');
@@ -592,7 +619,6 @@ export class MarsAtmosphere {
 
     const tex = new THREE.CanvasTexture(cv);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
 
     const planeGeo = new THREE.PlaneGeometry(1, 1);
     planeGeo.rotateX(-Math.PI / 2);
@@ -626,9 +652,9 @@ export class MarsAtmosphere {
 
   createDustDevils() {
     // Wandering dust devils: rotating columns of dust that drift across the plain
-    this.devilCount = 3;
-    this.devilParticles = 80;
-    this.devilPool = new SoftParticlePool(this.scene, this.devilCount * this.devilParticles, { additive: false, softness: 1.0, maxPointSize: 260 });
+    this.devilCount = 2;
+    this.devilParticles = 60;
+    this.devilPool = new SoftParticlePool(this.scene, this.devilCount * this.devilParticles, { additive: false, softness: 1.0, maxPointSize: 220 });
     this.devils = [];
     for (let i = 0; i < this.devilCount; i++) {
       this.devils.push({
@@ -653,6 +679,7 @@ export class MarsAtmosphere {
   }
 
   updateDustDevils(dt, playerPos) {
+    if (this.dustDensity <= 0.45) return;
     const pool = this.devilPool;
     const t = this.time;
     for (let d = 0; d < this.devilCount; d++) {
@@ -708,7 +735,7 @@ export class MarsAtmosphere {
 
   // Landing / impact burst of sand
   burstDust(pos, strength = 1.0) {
-    const n = Math.floor(26 * Math.min(2.0, strength) * this.dustDensity);
+    const n = Math.floor(22 * Math.min(2.0, strength) * this.dustDensity);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = (2.5 + Math.random() * 5.0) * strength;
@@ -725,7 +752,7 @@ export class MarsAtmosphere {
     const last = this.lastTrackPos[w];
     const dx = gp.x - last.x;
     const dz = gp.z - last.z;
-    if (dx * dx + dz * dz < 0.55 * 0.55) return;
+    if (dx * dx + dz * dz < 0.65 * 0.65) return;
     last.copy(gp);
 
     const n = getMarsNormal(gp.x, gp.z);
@@ -751,7 +778,7 @@ export class MarsAtmosphere {
 
     // --- Sand dust behind the wheels (rate scales with speed, throttle and drift) ---
     if (grounded && speed > 2.0) {
-      const baseRate = (5.0 + speed * 1.3 + slip * 12.0) * this.dustDensity;
+      const baseRate = (4.0 + speed * 1.1 + slip * 10.0) * this.dustDensity;
       for (let w = 0; w < 4; w++) {
         const c = physics.wheelContacts[w];
         if (!c.onGround) continue;
@@ -792,36 +819,43 @@ export class MarsAtmosphere {
     const level = this.nitroLevel;
     const vis = level > 0.02;
 
-    const flicker = 0.85 + Math.random() * 0.3;
-    for (const p of this.plumes) {
-      p.outer.visible = vis;
-      p.inner.visible = vis;
-      if (!vis) continue;
-      const nozzle = new THREE.Vector3(p.x, -0.25, -2.75).applyQuaternion(physics.quaternion).add(playerPos);
+    if (vis) {
+      const flicker = 0.85 + Math.random() * 0.3;
       const len = (2.2 + 6.5 * level + speed * 0.05) * flicker;
-      for (const [m, lenMul, widMul] of [[p.outer, 1.0, 1.0], [p.inner, 0.68, 1.0]]) {
-        m.position.copy(nozzle);
-        m.quaternion.copy(physics.quaternion);
-        m.scale.set(widMul * (0.7 + 0.5 * level), widMul * (0.7 + 0.5 * level), len * lenMul);
-        m.material.uniforms.uTime.value = this.time;
-        m.material.uniforms.uIntensity.value = level * (0.9 + Math.random() * 0.2);
+      const wScale = 0.7 + 0.5 * level;
+      for (let i = 0; i < this.plumes.length; i++) {
+        const p = this.plumes[i];
+        p.outer.visible = true;
+        p.inner.visible = true;
+        const nozzle = i === 0 ? this._tmpNozzle0 : this._tmpNozzle1;
+        nozzle.set(p.x, -0.25, -2.75).applyQuaternion(physics.quaternion).add(playerPos);
+
+        p.outer.position.copy(nozzle);
+        p.outer.quaternion.copy(physics.quaternion);
+        p.outer.scale.set(wScale, wScale, len);
+        p.outer.material.uniforms.uTime.value = this.time;
+        p.outer.material.uniforms.uIntensity.value = level * (0.9 + Math.random() * 0.2);
+
+        p.inner.position.copy(nozzle);
+        p.inner.quaternion.copy(physics.quaternion);
+        p.inner.scale.set(wScale, wScale, len * 0.68);
+        p.inner.material.uniforms.uTime.value = this.time;
+        p.inner.material.uniforms.uIntensity.value = level * (0.9 + Math.random() * 0.2);
+      }
+    } else {
+      for (let i = 0; i < this.plumes.length; i++) {
+        this.plumes[i].outer.visible = false;
+        this.plumes[i].inner.visible = false;
       }
     }
 
-    // Exhaust glow light
-    const lp = new THREE.Vector3(0, 0.0, -4.5).applyQuaternion(physics.quaternion).add(playerPos);
-    this.nitroLight.position.copy(lp);
-    this.nitroLight.intensity = level * (7 + Math.random() * 5);
-
     if (vis && active) {
-      // Hot sparks (blue-white core fading to orange) and slow glowing embers
-      this.nitroAcc += 140 * this.dustDensity * dt;
-      this.emberAcc += 50 * this.dustDensity * dt;
-      const nozzles = [-0.55, 0.55].map((x) => new THREE.Vector3(x, -0.25, -2.75).applyQuaternion(physics.quaternion).add(playerPos));
+      this.nitroAcc += 110 * this.dustDensity * dt;
+      this.emberAcc += 40 * this.dustDensity * dt;
 
       while (this.nitroAcc >= 1.0) {
         this.nitroAcc -= 1.0;
-        const n = nozzles[(Math.random() * 2) | 0];
+        const n = Math.random() < 0.5 ? this._tmpNozzle0 : this._tmpNozzle1;
         const sp = 32 + Math.random() * 20 + speed * 0.4;
         this.fxPool.emit({
           x: n.x, y: n.y, z: n.z,
@@ -836,7 +870,7 @@ export class MarsAtmosphere {
       }
       while (this.emberAcc >= 1.0) {
         this.emberAcc -= 1.0;
-        const n = nozzles[(Math.random() * 2) | 0];
+        const n = Math.random() < 0.5 ? this._tmpNozzle0 : this._tmpNozzle1;
         const sp = 8 + Math.random() * 16;
         this.fxPool.emit({
           x: n.x - forward.x * 0.6, y: n.y, z: n.z - forward.z * 0.6,
@@ -850,13 +884,12 @@ export class MarsAtmosphere {
         });
       }
 
-      // Boost kicks up a heavy rooster tail of sand
       if (grounded && this.dustDensity > 0.5) {
-        const extra = 22 * this.dustDensity * dt;
+        const extra = 18 * this.dustDensity * dt;
         this.tailAcc = (this.tailAcc || 0) + extra;
         while (this.tailAcc >= 1.0) {
           this.tailAcc -= 1.0;
-          const rear = new THREE.Vector3((Math.random() - 0.5) * 1.6, -0.85, -2.2).applyQuaternion(physics.quaternion).add(playerPos);
+          const rear = this._tmpRear.set((Math.random() - 0.5) * 1.6, -0.85, -2.2).applyQuaternion(physics.quaternion).add(playerPos);
           this.emitDust(
             rear.x, rear.y, rear.z,
             -forward.x * speed * 0.3 + (Math.random() - 0.5) * 3, 2.5 + Math.random() * 3.0, -forward.z * speed * 0.3 + (Math.random() - 0.5) * 3,
@@ -919,30 +952,11 @@ export class MarsAtmosphere {
       return;
     }
 
-    // 2. Update Wind Dust Specks
-    const dustPosAttr = this.dustPoints.geometry.attributes.position;
-    const r = this.windDustRadius;
-
-    for (let i = 0; i < this.dustCount; i++) {
-      let x = dustPosAttr.getX(i);
-      let y = dustPosAttr.getY(i);
-      let z = dustPosAttr.getZ(i);
-
-      x += this.dustVelocities[i * 3 + 0] * dt;
-      y += this.dustVelocities[i * 3 + 1] * dt;
-      z += this.dustVelocities[i * 3 + 2] * dt;
-
-      // Wrap around player box
-      if (x - playerPos.x > r) x -= r * 2;
-      if (x - playerPos.x < -r) x += r * 2;
-      if (z - playerPos.z > r) z -= r * 2;
-      if (z - playerPos.z < -r) z += r * 2;
-      if (y < playerPos.y) y += 25;
-      if (y > playerPos.y + 35) y -= 25;
-
-      dustPosAttr.setXYZ(i, x, y, z);
+    // 2. Update GPU Wind Dust Uniforms (zero CPU loop / buffer upload)
+    if (this.windDustUniforms) {
+      this.windDustUniforms.uTime.value = this.time;
+      this.windDustUniforms.uPlayerPos.value.copy(playerPos);
     }
-    dustPosAttr.needsUpdate = true;
 
     // 3. Vehicle dust, tracks and nitro plumes; ambient dust devils
     this.updateVehicleEffects(dt, playerPos, physics);

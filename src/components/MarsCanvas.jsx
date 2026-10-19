@@ -295,52 +295,67 @@ export default function MarsCanvas() {
         </div>
       </div>
 
-      {/* Starship Aerospace Flight HUD */}
+      {/* SpaceX Starship Broadcast HUD */}
       <div id="flight-hud" className="flight-hud-layer">
-        <div className="flight-top-panel">
-          <div className="flight-title-group">
-            <div id="flight-phase-badge" className="flight-phase-badge">PRE-LAUNCH // STARBASE OLM</div>
-            <div className="flight-badge-row">
-              <div id="flight-booster-badge" className="flight-booster-badge" style={{ display: 'none' }}>BOOSTER: ON PAD</div>
-              <div className="flight-online-badge scientific-online-pill" title="Deep Space Network Link">
-                <span className="online-dot"></span>
-                <span id="flight-online-val" className="online-count-num">1</span>
-                <span className="online-lbl">ONLINE</span>
-                <span className="dsn-carrier-badge">DSN-43</span>
-                <span className="dsn-rtt-val">24ms</span>
-              </div>
+        {/* Minimal Top Broadcast Bar */}
+        <div className="spx-top-bar">
+          <div className="spx-top-left">
+            <div id="flight-phase-badge" className="flight-phase-badge">STARBASE // PAD AWAITING LAUNCH</div>
+            <div id="flight-booster-badge" className="flight-booster-badge" style={{ display: 'none' }}>BOOSTER: ATTACHED</div>
+            <div className="flight-online-badge" title="Starbase Telemetry Link">
+              <span className="online-dot"></span>
+              <span id="flight-online-val" className="online-count-num">1</span>
+              <span className="online-lbl">LIVE</span>
             </div>
           </div>
 
-          <div className="flight-top-actions">
-            <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto Mission">
-              🎬 AUTO: ON
-            </button>
-            <button id="flight-track-booster-btn" className="hud-pill-btn flight-booster-btn" style={{ display: 'none' }} aria-label="Track Booster">
+          {/* Camera Switcher Pills */}
+          <div className="flight-cam-bar" id="flight-cam-bar">
+            <button className="cam-tab-btn active" data-cam="CHASE">🚀 SHIP CAM</button>
+            <button className="cam-tab-btn" data-cam="BOOSTER_CAM">🎯 BOOSTER CAM</button>
+            <button className="cam-tab-btn" data-cam="GROUND_CAM">🎥 GROUND CAM</button>
+            <button className="cam-tab-btn" data-cam="TOWER_CAM">🗼 TOWER CAM</button>
+            <button className="cam-tab-btn" data-cam="COCKPIT">COCKPIT</button>
+            <button className="cam-tab-btn" data-cam="FREE_ORBIT">ORBIT</button>
+          </div>
+
+          <div className="spx-top-right">
+            <button id="flight-track-booster-btn" className="hud-pill-btn flight-booster-btn" aria-label="Track Booster Return">
               🎯 TRACK BOOSTER
             </button>
-            <button id="flight-cam-btn" className="hud-pill-btn flight-cam-btn" aria-label="Toggle Flight Camera">
-              📹 <span id="flight-cam-badge">CAM: CHASE</span>
+            <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto Mission">
+              AUTO: ON
             </button>
-            <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">✕ Exit to Rover</button>
+            <button id="flight-reset-btn" className="hud-pill-btn flight-reset-btn" aria-label="Reset to Launch Pad">
+              ↺ PAD
+            </button>
+            <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">
+              ✕ EXIT
+            </button>
           </div>
         </div>
 
-        {/* Quick Camera Bar for Phone & Desktop */}
-        <div className="flight-cam-bar" id="flight-cam-bar">
-          <button className="cam-tab-btn active" data-cam="CHASE">CHASE</button>
-          <button className="cam-tab-btn" data-cam="GROUND_CAM">🎥 GROUND CAM</button>
-          <button className="cam-tab-btn" data-cam="TOWER_CAM">🗼 TOWER CAM</button>
-          <button className="cam-tab-btn" data-cam="COCKPIT">COCKPIT</button>
-          <button className="cam-tab-btn" data-cam="FREE_ORBIT">ORBIT</button>
+        {/* 360° Gimbal Control Bar (Visible in Ground Cam & Tower Cam) */}
+        <div id="flight-gimbal-bar" className="spx-gimbal-bar" style={{ display: 'none' }}>
+          <span className="gimbal-lbl">🎥 360° GIMBAL VIEW (DRAG SCREEN OR PAN)</span>
+          <div className="gimbal-pad-btns">
+            <button id="gimbal-left" className="gimbal-btn" aria-label="Pan Left">◀</button>
+            <button id="gimbal-up" className="gimbal-btn" aria-label="Tilt Up">▲</button>
+            <button id="gimbal-down" className="gimbal-btn" aria-label="Tilt Down">▼</button>
+            <button id="gimbal-right" className="gimbal-btn" aria-label="Pan Right">▶</button>
+            <button id="gimbal-reset" className="gimbal-reset-btn" aria-label="Reset Gimbal">CENTER PAD</button>
+          </div>
         </div>
 
-        {/* Starship Orbital Space Score Card (Ref User Prompt) */}
+        {/* Subtle Mission Callout Prompt */}
+        <div id="flight-action-prompt" className="flight-action-prompt"></div>
+
+        {/* Compact Orbital Insertion Banner */}
         <div id="flight-score-card" className="flight-score-card" style={{ display: 'none' }}>
           <div className="score-card-inner">
             <div className="score-header">
-              <span className="score-badge">ORBITAL EXPEDITION ACHIEVED</span>
-              <h2 className="score-title">LOW MARS ORBIT INSERTION</h2>
+              <span className="score-badge">SECO // ORBITAL INSERTION</span>
+              <h2 className="score-title">LOW MARS ORBIT ACHIEVED</h2>
             </div>
             <div className="score-main-value">
               <span className="score-num" id="flight-score-val">15,420</span>
@@ -360,128 +375,233 @@ export default function MarsCanvas() {
                 <span className="metric-val highlight" id="score-booster-val">MECHAZILLA CAUGHT! 🥢</span>
               </div>
               <div className="metric-box">
-                <span className="metric-lbl">MISSION SEQUENCE</span>
-                <span className="metric-val" id="score-next-val">CLOUD RE-ENTRY</span>
+                <span className="metric-lbl">NEXT PHASE</span>
+                <span className="metric-val" id="score-next-val">ATMOSPHERIC ENTRY</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div id="flight-action-prompt" className="flight-action-prompt"></div>
-
-        {/* Aerospace Scientific Telemetry Ribbon & Orbital Metrics */}
-        <div className="flight-telemetry-panel scientific-flight-panel">
-          <div className="flight-gauge">
-            <span className="gauge-label">ALTITUDE (Z)</span>
-            <span id="flight-alt-val" className="gauge-val">0 m</span>
-          </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">INERTIAL VELOCITY</span>
-            <span id="flight-speed-val" className="gauge-val">0 km/h</span>
-          </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">AIRSPEED</span>
-            <span id="flight-mach-val" className="gauge-val">Mach 0.0</span>
-          </div>
-          <div className="flight-gauge">
-            <div className="gauge-label-row">
-              <span className="gauge-label">DYN. PRESSURE (Q)</span>
-              <span id="flight-maxq-badge" className="maxq-badge" style={{ display: 'none' }}>MAX-Q</span>
+        {/* Authentic SpaceX Broadcast Bottom Telemetry Overlay */}
+        <div className="spx-broadcast-bar">
+          {/* Left Wing: SUPER HEAVY BOOSTER (33 Raptors + Telemetry + LOX/CH4) */}
+          <div className="spx-wing spx-booster-wing" id="flight-booster-tank-box">
+            <div className="spx-engine-graphic" id="spx-booster-engines" title="Super Heavy 33 Raptor Cluster">
+              <svg viewBox="0 0 84 84" className="spx-raptor-svg">
+                <circle cx="42" cy="42" r="40" className="raptor-housing-ring" />
+                {/* Outer Ring: 20 Raptors */}
+                {Array.from({ length: 20 }).map((_, i) => {
+                  const a = (i * 18 - 90) * (Math.PI / 180);
+                  return (
+                    <circle
+                      key={`bo-${i}`}
+                      cx={(42 + Math.cos(a) * 33).toFixed(2)}
+                      cy={(42 + Math.sin(a) * 33).toFixed(2)}
+                      r="3.2"
+                      className="raptor-nozzle raptor-outer"
+                    />
+                  );
+                })}
+                {/* Middle Ring: 10 Raptors */}
+                {Array.from({ length: 10 }).map((_, i) => {
+                  const a = (i * 36 - 90) * (Math.PI / 180);
+                  return (
+                    <circle
+                      key={`bm-${i}`}
+                      cx={(42 + Math.cos(a) * 19.5).toFixed(2)}
+                      cy={(42 + Math.sin(a) * 19.5).toFixed(2)}
+                      r="3.8"
+                      className="raptor-nozzle raptor-mid"
+                    />
+                  );
+                })}
+                {/* Center Cluster: 3 Raptors */}
+                {Array.from({ length: 3 }).map((_, i) => {
+                  const a = (i * 120 - 90) * (Math.PI / 180);
+                  return (
+                    <circle
+                      key={`bc-${i}`}
+                      cx={(42 + Math.cos(a) * 7.2).toFixed(2)}
+                      cy={(42 + Math.sin(a) * 7.2).toFixed(2)}
+                      r="4.2"
+                      className="raptor-nozzle raptor-center"
+                    />
+                  );
+                })}
+              </svg>
             </div>
-            <span id="flight-dynq-val" className="gauge-val highlight-amber">0.0 kPa</span>
+
+            <div className="spx-telemetry-col">
+              <div className="spx-stage-header">
+                <span className="spx-stage-title">SUPER HEAVY</span>
+                <span id="spx-booster-tag" className="spx-stage-sub">ON PAD</span>
+              </div>
+              <div className="spx-metrics-row">
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">SPEED</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="spx-booster-speed" className="spx-metric-num">0</span>
+                    <span className="spx-metric-unit">KM/H</span>
+                  </div>
+                </div>
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">ALTITUDE</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="spx-booster-alt" className="spx-metric-num">0.0</span>
+                    <span className="spx-metric-unit">KM</span>
+                  </div>
+                </div>
+              </div>
+              <div className="spx-prop-stack">
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">LOX</span>
+                  <div className="spx-prop-track">
+                    <div id="flight-booster-fuel-bar" className="spx-prop-fill lox-fill" style={{ width: '100%' }}></div>
+                  </div>
+                </div>
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">CH₄</span>
+                  <div className="spx-prop-track">
+                    <div id="spx-booster-ch4-bar" className="spx-prop-fill ch4-fill" style={{ width: '100%' }}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">APOAPSIS (Ap)</span>
-            <span id="flight-apogee-val" className="gauge-val highlight-cyan">0.0 km</span>
+
+          {/* Center Bridge: Primary Launch/Stage Button, T+ Mission Clock & Timeline */}
+          <div className="spx-center-bridge">
+            <div className="spx-action-row">
+              <button id="flight-stage-btn" className="flight-stage-btn" aria-label="Primary Launch or Stage Action">
+                🚀 LAUNCH
+              </button>
+
+              {/* Manual Throttle Controls (Shown when AUTO: OFF) */}
+              <div id="flight-manual-controls" className="spx-manual-controls" style={{ display: 'none' }}>
+                <button id="flight-btn-throttle-down" className="spx-thr-btn" aria-label="Throttle Down">-THR</button>
+                <div className="spx-thr-readout">
+                  <span className="spx-thr-lbl">THR</span>
+                  <span id="flight-throttle-val" className="spx-thr-val">0%</span>
+                </div>
+                <button id="flight-btn-throttle-up" className="spx-thr-btn" aria-label="Throttle Up">+THR</button>
+              </div>
+            </div>
+
+            <div id="spx-mission-clock" className="spx-mission-clock">T- 00:00:00</div>
+
+            <div className="spx-timeline" id="spx-timeline">
+              <div className="spx-tl-step" data-step="LIFTOFF">
+                <span className="spx-tl-dot"></span>
+                <span className="spx-tl-txt">LIFTOFF</span>
+              </div>
+              <div className="spx-tl-step" data-step="MAXQ">
+                <span className="spx-tl-dot"></span>
+                <span className="spx-tl-txt">MAX-Q</span>
+              </div>
+              <div className="spx-tl-step" data-step="STAGE">
+                <span className="spx-tl-dot"></span>
+                <span className="spx-tl-txt">MECO</span>
+              </div>
+              <div className="spx-tl-step" data-step="CATCH">
+                <span className="spx-tl-dot"></span>
+                <span className="spx-tl-txt">CATCH</span>
+              </div>
+              <div className="spx-tl-step" data-step="ORBIT">
+                <span className="spx-tl-dot"></span>
+                <span className="spx-tl-txt">SECO</span>
+              </div>
+              <div className="spx-tl-step" data-step="ENTRY">
+                <span className="spx-tl-dot"></span>
+                <span className="spx-tl-txt">ENTRY</span>
+              </div>
+              <div className="spx-tl-step" data-step="LANDING">
+                <span className="spx-tl-dot"></span>
+                <span className="spx-tl-txt">LANDING</span>
+              </div>
+            </div>
           </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">PERIAPSIS (Pe)</span>
-            <span id="flight-periapsis-val" className="gauge-val">SUBORBITAL</span>
-          </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">DELTA-V (Δv)</span>
-            <span id="flight-deltav-val" className="gauge-val">3,820 m/s</span>
-          </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">CHAMBER Pc</span>
-            <span id="flight-chamber-pc-val" className="gauge-val">0 bar</span>
-          </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">ATTITUDE (P/Y/R)</span>
-            <span id="flight-attitude-val" className="gauge-val">P: +0° · Y: 000° · R: 0°</span>
-          </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">ACCELERATION</span>
-            <span id="flight-gforce-val" className="gauge-val">1.0 G</span>
-          </div>
-          <div className="flight-gauge">
-            <span className="gauge-label">DOWNRANGE</span>
-            <span id="flight-downrange-val" className="gauge-val">0.0 km</span>
+
+          {/* Right Wing: STARSHIP (Telemetry + LOX/CH4 + 6 Raptors) */}
+          <div className="spx-wing spx-ship-wing">
+            <div className="spx-telemetry-col">
+              <div className="spx-stage-header">
+                <span className="spx-stage-title">STARSHIP</span>
+                <span id="spx-ship-tag" className="spx-stage-sub">MACH 0.0 · 1.0G</span>
+              </div>
+              <div className="spx-metrics-row">
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">SPEED</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="flight-speed-val" className="spx-metric-num">0</span>
+                    <span className="spx-metric-unit">KM/H</span>
+                  </div>
+                </div>
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">ALTITUDE</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="flight-alt-val" className="spx-metric-num">0.0</span>
+                    <span className="spx-metric-unit">KM</span>
+                  </div>
+                </div>
+              </div>
+              <div className="spx-prop-stack">
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">LOX</span>
+                  <div className="spx-prop-track">
+                    <div id="flight-ship-fuel-bar" className="spx-prop-fill lox-fill" style={{ width: '100%' }}></div>
+                  </div>
+                </div>
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">CH₄</span>
+                  <div className="spx-prop-track">
+                    <div id="spx-ship-ch4-bar" className="spx-prop-fill ch4-fill" style={{ width: '100%' }}></div>
+                  </div>
+                </div>
+              </div>
+              {/* Re-entry Plasma Thermal Bar (Visible only during Hypersonic Entry) */}
+              <div id="flight-heat-container" className="spx-heat-row" style={{ display: 'none' }}>
+                <span className="spx-heat-lbl">TPS PLASMA</span>
+                <div className="spx-prop-track">
+                  <div id="flight-heat-bar" className="spx-prop-fill heat-fill" style={{ width: '0%' }}></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="spx-engine-graphic" id="spx-ship-engines" title="Starship 6 Raptor Cluster (3 RVac + 3 Sea-Level)">
+              <svg viewBox="0 0 84 84" className="spx-raptor-svg">
+                <circle cx="42" cy="42" r="40" className="raptor-housing-ring" />
+                {/* Outer 3 Vacuum Raptors (RVac) */}
+                {Array.from({ length: 3 }).map((_, i) => {
+                  const a = (i * 120 + 30) * (Math.PI / 180);
+                  return (
+                    <circle
+                      key={`sv-${i}`}
+                      cx={(42 + Math.cos(a) * 23).toFixed(2)}
+                      cy={(42 + Math.sin(a) * 23).toFixed(2)}
+                      r="10.2"
+                      className="raptor-nozzle ship-raptor-vac"
+                    />
+                  );
+                })}
+                {/* Center 3 Sea-Level Raptors */}
+                {Array.from({ length: 3 }).map((_, i) => {
+                  const a = (i * 120 - 90) * (Math.PI / 180);
+                  return (
+                    <circle
+                      key={`ss-${i}`}
+                      cx={(42 + Math.cos(a) * 9.5).toFixed(2)}
+                      cy={(42 + Math.sin(a) * 9.5).toFixed(2)}
+                      r="5.6"
+                      className="raptor-nozzle ship-raptor-sl"
+                    />
+                  );
+                })}
+              </svg>
+            </div>
           </div>
         </div>
 
-        {/* Propellant Tanks (LOX + CH4) */}
-        <div className="flight-propellant-panel">
-          <div className="propellant-item booster-tank" id="flight-booster-tank-box">
-            <div className="tank-header">
-              <span className="tank-label">STAGE 1 BOOSTER FUEL</span>
-              <span id="flight-booster-fuel-val" className="tank-val">100%</span>
-            </div>
-            <div className="tank-track">
-              <div id="flight-booster-fuel-bar" className="tank-fill booster-fill" style={{ width: '100%' }}></div>
-            </div>
-          </div>
-
-          <div className="propellant-item ship-tank">
-            <div className="tank-header">
-              <span className="tank-label">STAGE 2 SHIP FUEL</span>
-              <span id="flight-ship-fuel-val" className="tank-val">100%</span>
-            </div>
-            <div className="tank-track">
-              <div id="flight-ship-fuel-bar" className="tank-fill ship-fill" style={{ width: '100%' }}></div>
-            </div>
-          </div>
-        </div>
-
-        {/* Re-entry Plasma Thermal Gauge (Ref Image 2) */}
-        <div id="flight-heat-container" className="flight-heat-container" style={{ display: 'none' }}>
-          <div className="heat-label">🔥 HYPERSONIC RE-ENTRY PLASMA // SHIELD TEMP</div>
-          <div className="heat-track">
-            <div id="flight-heat-bar" className="heat-fill" style={{ width: '0%' }}></div>
-          </div>
-        </div>
-
-        {/* Flight Control Hints */}
-        <div className="flight-controls-hint">
-          <span className="hint-tag">[W/S] PITCH</span>
-          <span className="hint-tag">[A/D] YAW</span>
-          <span className="hint-tag">[SHIFT/CTRL] THROTTLE</span>
-          <span className="hint-tag">[Z/X] MAX/CUT</span>
-          <span className="hint-tag">[C] CAMERA</span>
-          <span className="hint-tag">[SPACE] STAGE</span>
-        </div>
-
-        {/* Throttle Bar, Quick Throttle & Staging Button */}
-        <div className="flight-bottom-controls">
-          <div className="flight-throttle-box">
-            <div className="throttle-header-row">
-              <span className="throttle-label">RAPTOR THRUST</span>
-              <span id="flight-throttle-val" className="throttle-pct-label">0%</span>
-            </div>
-            <div className="flight-throttle-track">
-              <div id="flight-throttle-bar" className="flight-throttle-fill" style={{ width: '0%' }}></div>
-            </div>
-          </div>
-
-          <div className="flight-quick-throttle">
-            <button id="flight-btn-throttle-up" className="hud-pill-btn throttle-sub-btn" aria-label="Throttle Up">▲ +THR</button>
-            <button id="flight-btn-throttle-down" className="hud-pill-btn throttle-sub-btn" aria-label="Throttle Down">▼ -THR</button>
-          </div>
-
-          <button id="flight-stage-btn" className="flight-stage-btn" aria-label="Rocket Stage Trigger">🚀 IGNITE</button>
-        </div>
-
-        {/* Mobile On-Screen Flight Steering Cluster */}
+        {/* Mobile On-Screen Flight Steering Cluster (Shown in Manual Mode or Touch) */}
         <div id="flight-mobile-steering" className="flight-mobile-steering" style={{ display: 'none' }}>
           <div className="flight-touch-dpad">
             <button id="flight-btn-pitch-down" className="touch-btn flight-dir-btn" aria-label="Pitch Down">▲</button>

@@ -46,13 +46,26 @@ export class MarsGameEngine {
     }
   }
 
+  detectOptimalQuality() {
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+    const cores = navigator.hardwareConcurrency || 4;
+    const mem = navigator.deviceMemory || 4;
+    if (isMobile) {
+      return (cores <= 4 || mem <= 4) ? 'Low' : 'Medium';
+    }
+    if (cores <= 4 || mem <= 4) return 'Medium';
+    return 'High';
+  }
+
   initRenderer() {
+    const isLowTier = this.detectOptimalQuality() !== 'High';
     this.renderer = new THREE.WebGLRenderer({
       powerPreference: 'high-performance',
-      antialias: !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      antialias: !isLowTier,
+      stencil: false
     });
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, isLowTier ? 1.0 : 1.5);
     this.renderer.setPixelRatio(dpr);
     this.pixelBase = dpr;
     this.dynPR = dpr;
@@ -148,15 +161,31 @@ export class MarsGameEngine {
         this.missionPhysics.toggleAutoMission();
       },
       onToggleBoosterTracking: () => {
-        this.missionPhysics.toggleBoosterTracking();
+        const currentCam = this.cameraController.getFlightMode();
+        const targetCam = currentCam === 'BOOSTER_CAM' ? 'CHASE' : 'BOOSTER_CAM';
+        this.cameraController.setFlightMode(targetCam);
+        this.missionPhysics.boosterTracking = (targetCam === 'BOOSTER_CAM');
+        this.flightHud.notifyCameraMode(targetCam);
       },
       onSelectCamera: (camMode) => {
         this.cameraController.setFlightMode(camMode);
+        this.missionPhysics.boosterTracking = (camMode === 'BOOSTER_CAM');
         this.flightHud.notifyCameraMode(camMode);
       },
       onToggleCamera: () => {
         const nextMode = this.cameraController.nextFlightMode();
+        this.missionPhysics.boosterTracking = (nextMode === 'BOOSTER_CAM');
         this.flightHud.notifyCameraMode(nextMode);
+      },
+      onGimbalMove: (dYaw, dPitch) => {
+        this.cameraController.adjustGimbal(dYaw, dPitch);
+      },
+      onResetGimbal: () => {
+        this.cameraController.resetGimbal();
+      },
+      onResetMission: () => {
+        this.missionPhysics.resetToPad();
+        this.cameraController.resetGimbal();
       },
       onThrottleUp: () => {
         this.missionPhysics.throttle = Math.min(1.0, this.missionPhysics.throttle + 0.15);
@@ -183,9 +212,10 @@ export class MarsGameEngine {
       });
     }
 
-    if (this.input.isMobile) {
-      this.applyQuality('Medium');
-    }
+    const optimalPreset = this.detectOptimalQuality();
+    this.applyQuality(optimalPreset);
+    const qualitySelect = document.getElementById('quality-select');
+    if (qualitySelect) qualitySelect.value = optimalPreset;
   }
 
   handleFlightStageAction() {
@@ -201,8 +231,16 @@ export class MarsGameEngine {
       this.missionPhysics.triggerStageSeparation();
       this.audio.playStageSeparationSound();
       this.cameraController.addShake(0.5);
-    } else if (this.missionPhysics.phase === FLIGHT_PHASES.ORBIT) {
+    } else if (
+      this.missionPhysics.phase === FLIGHT_PHASES.ORBIT ||
+      this.missionPhysics.phase === FLIGHT_PHASES.STARSHIP_ASCENT
+    ) {
       this.missionPhysics.triggerDeorbit();
+    } else if (
+      this.missionPhysics.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY ||
+      this.missionPhysics.phase === FLIGHT_PHASES.BELLYFLOP
+    ) {
+      this.missionPhysics.triggerLandingFlip();
     } else if (this.missionPhysics.phase === FLIGHT_PHASES.LANDED) {
       this.physics.resetAt(this.missionPhysics.position.x + 35, this.missionPhysics.position.z + 35);
       this.setMode('rover');
@@ -221,6 +259,9 @@ export class MarsGameEngine {
       this.camera.updateProjectionMatrix();
       this.cameraController.initialized = false;
 
+      this.starship.group.visible = true;
+      this.roverModel.group.visible = false;
+
       if (roverHud) roverHud.style.display = 'none';
       if (mobileControls) mobileControls.style.display = 'none';
       this.flightHud.show(true, this.input.isMobile);
@@ -233,6 +274,8 @@ export class MarsGameEngine {
       this.camera.far = 1400;
       this.camera.updateProjectionMatrix();
       this.cameraController.initialized = false;
+
+      this.roverModel.group.visible = true;
 
       this.flightHud.show(false);
       if (roverHud) roverHud.style.display = 'block';
@@ -254,27 +297,33 @@ export class MarsGameEngine {
     this.quality = preset;
     this.perfTick = 0;
     this.atmosphere.setQuality(preset);
+    if (this.terrain) this.terrain.setQuality(preset);
+    if (this.scatter) this.scatter.setQuality(preset);
+
     const isLow = preset === 'Low';
     const isMed = preset === 'Medium';
     const isHigh = preset === 'High';
     const isUltra = preset === 'Ultra';
 
     if (isLow) {
-      this.renderer.setPixelRatio(1.0);
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 0.85));
       this.renderer.shadowMap.enabled = false;
       this.atmosphere.sunLight.castShadow = false;
     } else if (isMed) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.input.isMobile ? 1.0 : 1.25));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.input.isMobile ? 1.0 : 1.15));
       this.renderer.shadowMap.enabled = true;
+      this.atmosphere.sunLight.castShadow = true;
       this.atmosphere.sunLight.shadow.mapSize.set(1024, 1024);
     } else if (isHigh) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
       this.renderer.shadowMap.enabled = true;
-      this.atmosphere.sunLight.shadow.mapSize.set(2048, 2048);
+      this.atmosphere.sunLight.castShadow = true;
+      this.atmosphere.sunLight.shadow.mapSize.set(1024, 1024);
     } else if (isUltra) {
-      this.renderer.setPixelRatio(window.devicePixelRatio || 1);
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
       this.renderer.shadowMap.enabled = true;
-      this.atmosphere.sunLight.shadow.mapSize.set(4096, 4096);
+      this.atmosphere.sunLight.castShadow = true;
+      this.atmosphere.sunLight.shadow.mapSize.set(2048, 2048);
     }
     this.pixelBase = this.renderer.getPixelRatio();
     this.dynPR = this.pixelBase;
@@ -309,17 +358,23 @@ export class MarsGameEngine {
     const rawDt = this.clock.getDelta();
     const dt = Math.min(rawDt, 0.05);
 
-    // Adaptive resolution: trade pixel density for frame time so slow devices stay smooth
-    this.avgDt += (Math.min(rawDt, 0.1) - this.avgDt) * 0.06;
-    if (++this.perfTick >= 45) {
+    // Adaptive resolution: trade pixel density for frame time so low-end devices stay locked at 60 FPS
+    this.avgDt += (Math.min(rawDt, 0.1) - this.avgDt) * 0.08;
+    if (++this.perfTick >= 35) {
       this.perfTick = 0;
       let next = this.dynPR;
-      if (this.avgDt > 0.024 && next > 0.6) next = Math.max(0.6, next - 0.12);
-      else if (this.avgDt < 0.0175 && next < this.pixelBase) next = Math.min(this.pixelBase, next + 0.06);
+      if (this.avgDt > 0.021 && next > 0.5) next = Math.max(0.5, next - 0.12);
+      else if (this.avgDt < 0.0165 && next < this.pixelBase) next = Math.min(this.pixelBase, next + 0.05);
       if (Math.abs(next - this.dynPR) > 0.001) {
         this.dynPR = next;
         this.renderer.setPixelRatio(next);
-        if (this.quality !== 'Low') this.atmosphere.sunLight.castShadow = next > 0.72;
+        if (this.quality !== 'Low') {
+          const wantShadow = next > 0.68;
+          if (this.renderer.shadowMap.enabled !== wantShadow) {
+            this.renderer.shadowMap.enabled = wantShadow;
+            this.atmosphere.sunLight.castShadow = wantShadow;
+          }
+        }
       }
     }
 
@@ -340,11 +395,29 @@ export class MarsGameEngine {
       // Camera toggle shortcut (C key) during flight
       if (this.input.consumeSinglePress('cameraToggle')) {
         const nextMode = this.cameraController.nextFlightMode();
+        this.missionPhysics.boosterTracking = (nextMode === 'BOOSTER_CAM');
         this.flightHud.notifyCameraMode(nextMode);
       }
 
       // Update Starship Flight Physics
       this.missionPhysics.update(dt, this.input.state);
+
+      // Allow keyboard/D-pad gimbal rotation when viewing stationary Ground Cam or Tower Cam (when Auto Mode is active or on pad)
+      const activeFlightCam = this.cameraController.getFlightMode();
+      if (
+        (activeFlightCam === 'GROUND_CAM' || activeFlightCam === 'TOWER_CAM') &&
+        (this.missionPhysics.autoMission || this.missionPhysics.phase === FLIGHT_PHASES.ON_PAD)
+      ) {
+        if (this.input.state.steer || this.input.state.pitch) {
+          this.cameraController.adjustGimbal(
+            -(this.input.state.steer || 0) * dt * 1.4,
+            -(this.input.state.pitch || 0) * dt * 1.1
+          );
+        }
+      }
+
+      // Update Flight Camera first so atmosphere/skydome anchors to the active camera (fixes black sky in Ground/Tower cam!)
+      this.cameraController.updateFlight(dt, this.missionPhysics);
 
       // Update Flight HUD
       this.flightHud.update(this.missionPhysics);
@@ -352,29 +425,25 @@ export class MarsGameEngine {
       // Update Flight Audio (Raptor roar, staging pop, plasma roar)
       this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
 
-      // Atmosphere space blackening & sky fade
-      this.atmosphere.setAltitude(this.missionPhysics.altitude, this.missionPhysics.speed);
+      // Anchor atmosphere skydome & altitude to the active camera so Ground/Tower/Booster cams keep Starbase's sky!
+      const camAltitude = Math.max(0, this.camera.position.y - this.missionPhysics.padElevation);
+      this.atmosphere.setAltitude(camAltitude, this.missionPhysics.speed);
 
-      // Center atmosphere and skydome on Starship
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
-      this.atmosphere.update(dt, this.missionPhysics.position, {
-        altitude: this.missionPhysics.altitude,
+      this.atmosphere.update(dt, this.camera.position, {
+        altitude: camAltitude,
         speed: this.missionPhysics.speed,
         quaternion: this.missionPhysics.quaternion,
         velocity: this.missionPhysics.velocity,
         isNitroActive: false,
-        onGroundCount: this.missionPhysics.altitude < 2 ? 4 : 0,
+        onGroundCount: camAltitude < 200 ? 4 : 0,
         speedKmh: this.missionPhysics.speed * 3.6
       });
 
-      // Update terrain only if stationary on pad or during final slow touchdown
-      // NEVER update rock scatter in flight (eliminates chunk thrashing, normal recomputation, and skipping)
-      if (this.missionPhysics.altitude < 500 && this.missionPhysics.speed < 100) {
-        this.terrain.update(this.missionPhysics.position);
+      // Keep terrain updated around the active camera whenever viewing near the Martian surface (< 2,500m)
+      if (camAltitude < 2500) {
+        this.terrain.update(this.camera.position);
       }
-
-      // Update Flight Camera tracking
-      this.cameraController.updateFlight(dt, this.missionPhysics);
 
       // Render Scene
       this.renderer.render(this.scene, this.camera);
@@ -399,6 +468,11 @@ export class MarsGameEngine {
 
     // 3. Update Vehicle Physics
     this.physics.update(dt, this.input.state);
+
+    // Distance-cull Starbase launch complex in rover mode when beyond fog range (680m)
+    const sbDx = this.physics.position.x - 1400;
+    const sbDz = this.physics.position.z - 1150;
+    this.starship.group.visible = (sbDx * sbDx + sbDz * sbDz) <= 680 * 680;
 
     // Collision impact feedback (boulders, monuments)
     if (this.physics.impact > 2.0) {

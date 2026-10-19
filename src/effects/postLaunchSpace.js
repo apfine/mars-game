@@ -12,11 +12,14 @@ import * as THREE from 'three';
 // - Impact Basins & Crater Rings (Hellas, Argyre, and crater fields)
 // - Orographic water-ice clouds over volcanic summits
 // ---------------------------------------------------------------------------
+let _cachedMarsTexture = null;
+
 function createProceduralMarsTexture() {
   if (typeof document === 'undefined') return null;
+  if (_cachedMarsTexture) return _cachedMarsTexture;
 
-  const width = 2048;
-  const height = 1024;
+  const width = 512;
+  const height = 256;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -26,10 +29,11 @@ function createProceduralMarsTexture() {
   const imgData = ctx.createImageData(width, height);
   const data = imgData.data;
 
-  // Simple deterministic pseudorandom hash
+  // Ultra-fast integer bitwise hash (replaces slow Math.sin per pixel)
   const hash2d = (x, y) => {
-    const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-    return s - Math.floor(s);
+    let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   };
 
   const smoothNoise = (x, y) => {
@@ -48,7 +52,7 @@ function createProceduralMarsTexture() {
     return a * (1 - ux) * (1 - uy) + b * ux * (1 - uy) + c * (1 - ux) * uy + d * ux * uy;
   };
 
-  const fbm = (x, y, octaves = 5) => {
+  const fbm = (x, y, octaves = 3) => {
     let val = 0;
     let amp = 0.5;
     let freq = 1.0;
@@ -63,8 +67,6 @@ function createProceduralMarsTexture() {
   // Color Palette Constants
   // Ferric red-ochre highlands
   const COL_HIGHLAND_R = 196, COL_HIGHLAND_G = 96, COL_HIGHLAND_B = 58;
-  // Deep desert plateau
-  const COL_PLATEAU_R = 175, COL_PLATEAU_G = 78, COL_PLATEAU_B = 44;
   // Dark volcanic basalt (Syrtis Major, Acidalia)
   const COL_BASALT_R = 48, COL_BASALT_G = 38, COL_BASALT_B = 34;
   // Canyon floor shadow
@@ -74,41 +76,47 @@ function createProceduralMarsTexture() {
   // Hellas basin dust
   const COL_HELLAS_R = 208, COL_HELLAS_G = 124, COL_HELLAS_B = 84;
 
+  // Precompute longitude trig table
+  const cosU = new Float32Array(width);
+  const sinU = new Float32Array(width);
+  for (let x = 0; x < width; x++) {
+    const a = (x / width) * Math.PI * 2;
+    cosU[x] = Math.cos(a);
+    sinU[x] = Math.sin(a);
+  }
+
   for (let y = 0; y < height; y++) {
     const v = y / height; // 0 (North Pole) to 1 (South Pole)
     const lat = (0.5 - v) * Math.PI; // +PI/2 to -PI/2
+    const cosLat = Math.cos(lat);
+    const ny = Math.sin(lat);
 
     for (let x = 0; x < width; x++) {
       const u = x / width; // 0 to 1 (Longitude 0° to 360°)
       const idx = (y * width + x) * 4;
 
       // Spherical coordinates for seamless wrapping
-      const nx = Math.cos(lat) * Math.cos(u * Math.PI * 2);
-      const ny = Math.sin(lat);
-      const nz = Math.cos(lat) * Math.sin(u * Math.PI * 2);
+      const nx = cosLat * cosU[x];
+      const nz = cosLat * sinU[x];
 
       // Base planetary fractal terrain
-      const n1 = fbm(nx * 3.5 + 10.0, ny * 3.5 + 10.0, 5);
-      const n2 = fbm(nz * 7.0 + 20.0, ny * 7.0 + 20.0, 4) * 0.4;
+      const n1 = fbm(nx * 3.5 + 10.0, ny * 3.5 + 10.0, 3);
+      const n2 = fbm(nz * 7.0 + 20.0, ny * 7.0 + 20.0, 2) * 0.4;
       let elevation = n1 + n2; // ~0.0 to 1.3
 
       // 1. Dark Volcanic Basaltic Mare (Albedo Features)
-      // Syrtis Major (u ~ 0.78, v ~ 0.50)
       const dSyrtis = Math.hypot(u - 0.79, (v - 0.50) * 1.8);
       const isSyrtis = Math.max(0, 1.0 - dSyrtis / 0.08);
 
-      // Mare Acidalium (u ~ 0.48, v ~ 0.32)
       const dAcidalia = Math.hypot(u - 0.48, (v - 0.32) * 1.5);
       const isAcidalia = Math.max(0, 1.0 - dAcidalia / 0.12);
 
-      // Sinus Meridiani / Sabaeus band (u ~ 0.55, v ~ 0.52)
       const dMeridiani = Math.hypot(u - 0.56, (v - 0.52) * 3.2);
       const isMeridiani = Math.max(0, 1.0 - dMeridiani / 0.14);
 
       const darkMare = Math.min(1.0, isSyrtis * 1.6 + isAcidalia * 1.2 + isMeridiani * 1.1 + (elevation < 0.42 ? (0.42 - elevation) * 2.5 : 0.0));
 
       // 2. Valles Marineris (Grand Canyon of Mars)
-      // Spans u from ~0.22 to ~0.42 near the equator v ~ 0.52
       let isCanyon = 0.0;
       if (u > 0.20 && u < 0.44 && Math.abs(v - 0.52) < 0.045) {
         const canyonProgress = (u - 0.20) / 0.24;
@@ -116,57 +124,51 @@ function createProceduralMarsTexture() {
         const distToCenter = Math.abs((v - 0.52) - canyonMeander);
         if (distToCenter < 0.016) {
           isCanyon = Math.pow(1.0 - distToCenter / 0.016, 1.8);
-          // Canyon depth variation
           isCanyon *= 0.75 + 0.25 * Math.sin(canyonProgress * Math.PI * 8.0);
         }
       }
 
       // 3. Tharsis Shield Volcanoes
-      // Olympus Mons (u ~ 0.17, v ~ 0.38) - 22 km tall!
       const dOlympus = Math.hypot(u - 0.17, (v - 0.38) * 1.3);
       let isOlympus = 0.0;
       let isCaldera = 0.0;
       if (dOlympus < 0.038) {
-        // Shield slope
         isOlympus = Math.pow(1.0 - dOlympus / 0.038, 2.2);
-        // Caldera ring crater at the peak
         if (dOlympus < 0.008) {
           isCaldera = Math.cos((dOlympus / 0.008) * Math.PI * 0.5);
         }
       }
 
-      // The 3 Tharsis Montes (Ascraeus, Pavonis, Arsia)
       const dAscraeus = Math.hypot(u - 0.24, (v - 0.39) * 1.4);
       const dPavonis = Math.hypot(u - 0.22, (v - 0.47) * 1.4);
       const dArsia = Math.hypot(u - 0.20, (v - 0.55) * 1.4);
       const isTharsisMons = Math.max(0, 1.0 - Math.min(dAscraeus, dPavonis, dArsia) / 0.024);
 
-      // 4. Hellas Planitia Impact Basin (u ~ 0.72, v ~ 0.72)
+      // 4. Hellas Planitia Impact Basin
       const dHellas = Math.hypot(u - 0.72, (v - 0.72) * 1.2);
       const isHellas = Math.max(0, 1.0 - dHellas / 0.11);
 
-      // 5. Northern Polar Ice Cap (Planum Boreum)
+      // 5. Northern Polar Ice Cap
       let isNorthIce = 0.0;
       if (v < 0.14) {
-        const iceEdge = 0.14 - fbm(nx * 12.0, nz * 12.0, 3) * 0.03;
+        const iceEdge = 0.14 - smoothNoise(nx * 12.0, nz * 12.0) * 0.03;
         if (v < iceEdge) {
           isNorthIce = Math.min(1.0, (iceEdge - v) / 0.05);
-          // Chasma Boreale spiral fissures in the ice cap
           const spiral = Math.sin(Math.atan2(nz, nx) * 3.0 + v * 30.0);
           if (spiral > 0.6) isNorthIce *= 0.78;
         }
       }
 
-      // Southern Polar Frost (Planum Australe)
+      // Southern Polar Frost
       let isSouthIce = 0.0;
       if (v > 0.88) {
-        const iceEdge = 0.88 + fbm(nx * 10.0, nz * 10.0, 3) * 0.03;
+        const iceEdge = 0.88 + smoothNoise(nx * 10.0, nz * 10.0) * 0.03;
         if (v > iceEdge) {
           isSouthIce = Math.min(1.0, (v - iceEdge) / 0.06);
         }
       }
 
-      // 6. Impact Craters (circular rim walls with shadow depressions)
+      // 6. Impact Craters
       let craterEffect = 0.0;
       const craterGridU = (u * 38.0) % 1.0;
       const craterGridV = (v * 19.0) % 1.0;
@@ -179,9 +181,9 @@ function createProceduralMarsTexture() {
         if (dCrater < cRadius) {
           const rimDist = Math.abs(dCrater - cRadius * 0.82);
           if (rimDist < 0.08) {
-            craterEffect = (1.0 - rimDist / 0.08) * 0.45; // bright raised rim
+            craterEffect = (1.0 - rimDist / 0.08) * 0.45;
           } else if (dCrater < cRadius * 0.82) {
-            craterEffect = -0.28; // shadowed interior bowl
+            craterEffect = -0.28;
           }
         }
       }
@@ -191,13 +193,11 @@ function createProceduralMarsTexture() {
       let g = COL_HIGHLAND_G;
       let b = COL_HIGHLAND_B;
 
-      // Subtle terrain variation
       const terraVar = (elevation - 0.7) * 40.0;
       r = Math.min(255, Math.max(0, r + terraVar));
       g = Math.min(255, Math.max(0, g + terraVar * 0.75));
       b = Math.min(255, Math.max(0, b + terraVar * 0.5));
 
-      // Apply Dark Volcanic Basalt
       if (darkMare > 0.05) {
         const m = Math.min(1.0, darkMare);
         r = r * (1 - m) + COL_BASALT_R * m;
@@ -205,7 +205,6 @@ function createProceduralMarsTexture() {
         b = b * (1 - m) + COL_BASALT_B * m;
       }
 
-      // Apply Hellas Basin
       if (isHellas > 0.05) {
         const h = Math.min(1.0, isHellas);
         r = r * (1 - h) + COL_HELLAS_R * h;
@@ -213,14 +212,12 @@ function createProceduralMarsTexture() {
         b = b * (1 - h) + COL_HELLAS_B * h;
       }
 
-      // Apply Valles Marineris canyon shadow
       if (isCanyon > 0.05) {
         r = r * (1 - isCanyon) + COL_CANYON_R * isCanyon;
         g = g * (1 - isCanyon) + COL_CANYON_G * isCanyon;
         b = b * (1 - isCanyon) + COL_CANYON_B * isCanyon;
       }
 
-      // Apply Olympus Mons & Tharsis volcanoes
       if (isOlympus > 0.05) {
         const oR = 210, oG = 110, oB = 70;
         r = r * (1 - isOlympus) + oR * isOlympus;
@@ -240,14 +237,12 @@ function createProceduralMarsTexture() {
         b = b * (1 - tm) + 75 * tm;
       }
 
-      // Apply Crater rims and floor shadows
       if (Math.abs(craterEffect) > 0.01) {
         r = Math.min(255, Math.max(0, r + craterEffect * 80.0));
         g = Math.min(255, Math.max(0, g + craterEffect * 50.0));
         b = Math.min(255, Math.max(0, b + craterEffect * 35.0));
       }
 
-      // Apply Polar Ice Caps
       const iceTotal = Math.min(1.0, isNorthIce + isSouthIce);
       if (iceTotal > 0.02) {
         r = r * (1 - iceTotal) + COL_ICE_R * iceTotal;
@@ -255,9 +250,8 @@ function createProceduralMarsTexture() {
         b = b * (1 - iceTotal) + COL_ICE_B * iceTotal;
       }
 
-      // 7. Orographic clouds leeward of Olympus Mons & volcanoes
       if (u > 0.18 && u < 0.28 && Math.abs(v - 0.42) < 0.08) {
-        const cloudNoise = fbm(u * 28.0, v * 28.0, 3);
+        const cloudNoise = fbm(u * 28.0, v * 28.0, 2);
         if (cloudNoise > 0.58) {
           const cAlpha = (cloudNoise - 0.58) * 1.8;
           r = Math.min(255, r + cAlpha * 65.0);
@@ -282,6 +276,7 @@ function createProceduralMarsTexture() {
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.colorSpace = THREE.SRGBColorSpace;
+  _cachedMarsTexture = texture;
   return texture;
 }
 
@@ -299,7 +294,12 @@ export class PostLaunchSpace {
     this.planetRadius = 52000.0; // Scaled planetary radius in world units
     this.sunDirection = new THREE.Vector3(0.5, 0.65, 0.45).normalize();
     this.orbitRotation = 0.0;
+    this.initialized = false;
+  }
 
+  ensureInitialized() {
+    if (this.initialized) return;
+    this.initialized = true;
     this.initPlanetGlobe();
     this.initAtmosphericAirglowLimb();
     this.initCosmicSpaceEnvironment();
@@ -310,7 +310,7 @@ export class PostLaunchSpace {
     const planetTexture = createProceduralMarsTexture();
 
     // Custom Planet Shader: directional day/night terminator + crater bump relief + atmospheric Fresnel limb
-    const planetGeo = new THREE.SphereGeometry(this.planetRadius, 64, 48);
+    const planetGeo = new THREE.SphereGeometry(this.planetRadius, 40, 28);
     const planetMat = new THREE.ShaderMaterial({
       uniforms: {
         uMap: { value: planetTexture },
@@ -401,7 +401,7 @@ export class PostLaunchSpace {
 
   initAtmosphericAirglowLimb() {
     // Concentric outer atmospheric airglow halo (radius +1.8%)
-    const airglowGeo = new THREE.SphereGeometry(this.planetRadius * 1.018, 64, 48);
+    const airglowGeo = new THREE.SphereGeometry(this.planetRadius * 1.018, 40, 28);
     const airglowMat = new THREE.ShaderMaterial({
       uniforms: {
         uSunDir: { value: this.sunDirection.clone() },
@@ -471,7 +471,7 @@ export class PostLaunchSpace {
 
     // 1. Procedural 3D Moon Phobos (Irregular cratered potato moon)
     // Phobos is physically ~22 km in diameter and orbits ~6,000 km above Mars
-    const phobosGeo = new THREE.DodecahedronGeometry(120.0, 3);
+    const phobosGeo = new THREE.DodecahedronGeometry(120.0, 2);
     const posAttr = phobosGeo.attributes.position;
     for (let i = 0; i < posAttr.count; i++) {
       let x = posAttr.getX(i);
@@ -508,7 +508,7 @@ export class PostLaunchSpace {
     this.spaceGroup.add(this.phobosMesh);
 
     // 2. Procedural 3D Moon Deimos (Smaller, smoother outer moon)
-    const deimosGeo = new THREE.DodecahedronGeometry(55.0, 2);
+    const deimosGeo = new THREE.DodecahedronGeometry(55.0, 1);
     const dPosAttr = deimosGeo.attributes.position;
     for (let i = 0; i < dPosAttr.count; i++) {
       let x = dPosAttr.getX(i) * 1.15;
@@ -531,7 +531,7 @@ export class PostLaunchSpace {
     // Famous Carl Sagan perspective: Earth visible as a jewel-like sapphire pixel
     this.earthGroup = new THREE.Group();
     const earthMat = new THREE.MeshBasicMaterial({ color: 0x4da6ff });
-    const earthMesh = new THREE.Mesh(new THREE.SphereGeometry(18.0, 16, 16), earthMat);
+    const earthMesh = new THREE.Mesh(new THREE.SphereGeometry(18.0, 12, 12), earthMat);
     this.earthGroup.add(earthMesh);
 
     // Earth's atmospheric blue glow corona
@@ -541,7 +541,7 @@ export class PostLaunchSpace {
       opacity: 0.45,
       blending: THREE.AdditiveBlending
     });
-    const earthGlow = new THREE.Mesh(new THREE.SphereGeometry(32.0, 16, 16), earthGlowMat);
+    const earthGlow = new THREE.Mesh(new THREE.SphereGeometry(32.0, 12, 12), earthGlowMat);
     this.earthGroup.add(earthGlow);
 
     // Tiny companion dot: Luna (Earth's Moon)
@@ -571,7 +571,7 @@ export class PostLaunchSpace {
     this.satellite.add(bus);
 
     // Parabolic High-Gain Antenna pointing toward Earth
-    const dishGeo = new THREE.CylinderGeometry(2.4, 0.4, 0.9, 16, 1, true);
+    const dishGeo = new THREE.CylinderGeometry(2.4, 0.4, 0.9, 12, 1, true);
     dishGeo.rotateX(Math.PI / 2);
     const dishMat = new THREE.MeshStandardMaterial({
       color: 0xeeeeee,
@@ -618,6 +618,7 @@ export class PostLaunchSpace {
     this.group.visible = fade > 0.005;
 
     if (!this.group.visible) return;
+    this.ensureInitialized();
 
     if (this.planetMat) {
       this.planetMat.uniforms.uFade.value = fade;

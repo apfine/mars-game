@@ -1,8 +1,12 @@
+import * as THREE from 'three';
+
 // High-performance 2D Simplex Noise & Mars Dune Procedural Generator
 
 // Permutation table initialized with deterministic seed
 const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
 const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+const COS_DUNE = Math.cos(0.63);
+const SIN_DUNE = Math.sin(0.63);
 
 const p = new Uint8Array(256);
 for (let i = 0; i < 256; i++) p[i] = i;
@@ -110,9 +114,11 @@ function sstep(a, b, x) {
   return t * t * (3 - 2 * t);
 }
 
+// Fast integer bitwise hash (replaces slow Math.sin in hot loop)
 function cellHash(a, b, k) {
-  const p = Math.sin(a * 127.1 + b * 311.7 + k * 74.7) * 43758.5453123;
-  return p - Math.floor(p);
+  let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(k | 0, 1442695041)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
 // Stunt jump ramps: one possible ramp per 260m cell, random heading. Long rising wedge, sharp lip,
@@ -122,18 +128,23 @@ export function rampHeight(x, z) {
   const cx = Math.floor(x / RAMP_CELL);
   const cz = Math.floor(z / RAMP_CELL);
   if (cellHash(cx, cz, 1) < 0.5) return 0;
-  const a = cellHash(cx, cz, 2) * Math.PI * 2;
   const px = (cx + 0.3 + 0.4 * cellHash(cx, cz, 3)) * RAMP_CELL;
   const pz = (cz + 0.3 + 0.4 * cellHash(cx, cz, 4)) * RAMP_CELL;
   const dx = x - px, dz = z - pz;
-  const u = dx * Math.sin(a) + dz * Math.cos(a);   // along heading (lip at u = 0)
-  const v = dx * Math.cos(a) - dz * Math.sin(a);   // across
+  // Quick bounding-box reject before trig
+  if (dx > 55 || dx < -55 || dz > 55 || dz < -55) return 0;
+  const a = cellHash(cx, cz, 2) * Math.PI * 2;
+  const sinA = Math.sin(a), cosA = Math.cos(a);
+  const u = dx * sinA + dz * cosA;   // along heading (lip at u = 0)
   if (u < -17 || u > 50) return 0;
-  const wv = 1 - sstep(4.5, 7.5, Math.abs(v));
+  const v = dx * cosA - dz * sinA;   // across
+  const absV = Math.abs(v);
+  if (absV > 14) return 0;
+  const wv = 1 - sstep(4.5, 7.5, absV);
   let h = 0;
   if (u < 0) h = 4.8 * Math.pow((u + 17) / 17, 1.15);
-  else h = 4.8 * (1 - sstep(0, 3, u));
-  const land = 2.8 * sstep(22, 32, u) * (1 - sstep(32, 48, u)) * (1 - sstep(9, 14, Math.abs(v)));
+  else if (u < 3) h = 4.8 * (1 - sstep(0, 3, u));
+  const land = (u > 22 && u < 48) ? 2.8 * sstep(22, 32, u) * (1 - sstep(32, 48, u)) * (1 - sstep(9, 14, absV)) : 0;
   return h * wv + land;
 }
 
@@ -150,22 +161,48 @@ function rawHeight(x, z) {
   const slabTilt = simplex2D(x * 0.07, z * 0.07) * 0.22 + simplex2D(x * 0.19, z * 0.19) * 0.07;
 
   // Sand drifts in the lee of obstacles (shallow wind dunes in an erg mask)
-  const angle = 0.63;
-  const wx = x * Math.cos(angle) - z * Math.sin(angle);
-  const wz = x * Math.sin(angle) + z * Math.cos(angle);
-  const duneWarp = simplex2D(wx * 0.003, wz * 0.003) * 10.0;
-  const duneProfile = Math.pow((Math.sin((wz + duneWarp) * 0.015) + 1.0) * 0.5, 1.35);
+  const wx = x * COS_DUNE - z * SIN_DUNE;
+  const wz = x * SIN_DUNE + z * COS_DUNE;
   const ergMask = sstep(0.55, 0.95, (simplex2D(x * 0.0012, z * 0.0012) + 1.0) * 0.5);
-  const dunes = duneProfile * 6.0 * ergMask;
+  let dunes = 0;
+  if (ergMask > 0.001) {
+    const duneWarp = simplex2D(wx * 0.003, wz * 0.003) * 10.0;
+    const duneProfile = Math.pow((Math.sin((wz + duneWarp) * 0.015) + 1.0) * 0.5, 1.35);
+    dunes = duneProfile * 6.0 * ergMask;
+  }
 
   // Steep dune/ridge walls (up to ~40 degrees) to climb and fall from, in sparse regions
-  const r = 1 - Math.abs(simplex2D(x * 0.0065 + 11, z * 0.0065 - 7));
   const steepMask = sstep(0.5, 0.82, (simplex2D(x * 0.0019 - 5, z * 0.0019 + 3) + 1.0) * 0.5);
-  const steep = Math.pow(Math.max(r, 0), 5) * 15.0 * steepMask;
+  let steep = 0;
+  if (steepMask > 0.001) {
+    const r = Math.max(0, 1 - Math.abs(simplex2D(x * 0.0065 + 11, z * 0.0065 - 7)));
+    const r2 = r * r;
+    steep = (r2 * r2 * r) * 15.0 * steepMask;
+  }
 
   const ripples = Math.sin(wz * 0.2 + simplex2D(x * 0.015, z * 0.015) * 2.0) * 0.05;
 
   return macro + terraces + slabTilt + dunes + steep + rampHeight(x, z) + ripples;
+}
+
+// Fast terrain elevation query for minimap/radar (skips sub-meter micro-details)
+export function getMarsHeightFast(x, z) {
+  const macro = fbm(x * 0.0004, z * 0.0004, 2, 2.0, 0.45) * 30.0;
+  const bed = fbm(x * 0.009 + 40, z * 0.009 - 17, 2, 2.0, 0.5) * 6.0;
+  const ergMask = sstep(0.55, 0.95, (simplex2D(x * 0.0012, z * 0.0012) + 1.0) * 0.5);
+  let dunes = 0;
+  if (ergMask > 0.01) {
+    const wz = x * SIN_DUNE + z * COS_DUNE;
+    dunes = ((Math.sin(wz * 0.015) + 1.0) * 0.5) * 6.0 * ergMask;
+  }
+  const steepMask = sstep(0.5, 0.82, (simplex2D(x * 0.0019 - 5, z * 0.0019 + 3) + 1.0) * 0.5);
+  let steep = 0;
+  if (steepMask > 0.01) {
+    const r = Math.max(0, 1 - Math.abs(simplex2D(x * 0.0065 + 11, z * 0.0065 - 7)));
+    const r2 = r * r;
+    steep = (r2 * r2 * r) * 15.0 * steepMask;
+  }
+  return macro + bed + dunes + steep;
 }
 
 // Landmark sites are levelled so pads and monuments sit flat (coordinates match scatter.js catalog)
@@ -176,7 +213,8 @@ const SITES = [[380, 520, 15, 28], [-650, 420, 15, 28], [-420, -780, 15, 28], [8
 
 export function getMarsHeight(x, z) {
   let h = rawHeight(x, z);
-  for (const s of SITES) {
+  for (let i = 0; i < SITES.length; i++) {
+    const s = SITES[i];
     const dx = x - s.x, dz = z - s.z;
     if (dx > s.r1 || dx < -s.r1 || dz > s.r1 || dz < -s.r1) continue;
     const w = 1 - sstep(s.r0, s.r1, Math.hypot(dx, dz));
@@ -185,8 +223,10 @@ export function getMarsHeight(x, z) {
   return h;
 }
 
-// Compute analytical or central difference normal for physical terrain query
-export function getMarsNormal(x, z, epsilon = 0.5) {
+const _sharedNormal = new THREE.Vector3(0, 1, 0);
+
+// Compute central difference normal for physical terrain query (returns reusable THREE.Vector3)
+export function getMarsNormal(x, z, epsilon = 0.5, target = _sharedNormal) {
   const hL = getMarsHeight(x - epsilon, z);
   const hR = getMarsHeight(x + epsilon, z);
   const hD = getMarsHeight(x, z - epsilon);
@@ -196,10 +236,7 @@ export function getMarsNormal(x, z, epsilon = 0.5) {
   const nz = (hD - hU) / (2.0 * epsilon);
   const ny = 1.0;
 
-  const len = Math.hypot(nx, ny, nz);
-  return {
-    x: nx / len,
-    y: ny / len,
-    z: nz / len
-  };
+  const invLen = 1.0 / Math.hypot(nx, ny, nz);
+  return target.set(nx * invLen, ny * invLen, nz * invLen);
 }
+

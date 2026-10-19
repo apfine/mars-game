@@ -79,11 +79,11 @@ export class SoftParticlePool {
         varying float vSeed;
         void main() {
           vec2 p = gl_PointCoord * 2.0 - 1.0;
-          float d = length(p);
-          if (d > 1.0 || vAlpha < 0.003) discard;
-          float ang = atan(p.y, p.x);
-          // Lumpy irregular billow edge, unique per particle
-          float lump = 0.82 + 0.18 * sin(ang * 3.0 + vSeed * 5.0) * sin(ang * 5.0 - vSeed * 3.0 + 1.3);
+          float d2 = dot(p, p);
+          if (d2 > 1.0 || vAlpha < 0.004) discard;
+          float d = sqrt(d2);
+          // Fast billow edge without slow atan() per fragment
+          float lump = 0.84 + 0.16 * sin(p.x * 3.2 + vSeed) * cos(p.y * 3.2 - vSeed * 0.7);
           float a = 1.0 - smoothstep(lump * (1.0 - 0.45 * uSoftness), lump, d);
           a *= 1.0 - d * 0.35;
           gl_FragColor = vec4(vColor, a * vAlpha);
@@ -94,6 +94,8 @@ export class SoftParticlePool {
     this.points = new THREE.Points(geo, this.material);
     this.points.frustumCulled = false;
     this.points.renderOrder = additive ? 11 : 10;
+    this.activeCount = 0;
+    this.dirty = false;
     scene.add(this.points);
   }
 
@@ -106,7 +108,10 @@ export class SoftParticlePool {
     const i = this.cursor;
     this.cursor = (this.cursor + 1) % this.count;
     const i3 = i * 3;
-    this.alive[i] = 1;
+    if (!this.alive[i]) {
+      this.alive[i] = 1;
+      this.activeCount++;
+    }
     this.pos[i3] = o.x; this.pos[i3 + 1] = o.y; this.pos[i3 + 2] = o.z;
     this.vel[i3] = o.vx; this.vel[i3 + 1] = o.vy; this.vel[i3 + 2] = o.vz;
     this.life[i] = 0;
@@ -120,36 +125,47 @@ export class SoftParticlePool {
     this.col1[i3] = o.c1r !== undefined ? o.c1r : o.c0r;
     this.col1[i3 + 1] = o.c1g !== undefined ? o.c1g : o.c0g;
     this.col1[i3 + 2] = o.c1b !== undefined ? o.c1b : o.c0b;
+    this.dirty = true;
     return i;
   }
 
   update(dt, wind) {
-    const windX = wind ? wind.x : 0;
-    const windZ = wind ? wind.z : 0;
+    if (this.activeCount === 0 && !this.dirty) return;
+
+    const windX = wind ? wind.x * dt * 0.6 : 0;
+    const windZ = wind ? wind.z * dt * 0.6 : 0;
+    const dt60 = Math.min(3.0, dt * 60.0);
+
     for (let i = 0; i < this.count; i++) {
       if (!this.alive[i]) continue;
       const i3 = i * 3;
-      this.life[i] += dt;
-      const t = this.life[i] / this.maxLife[i];
+      const newLife = this.life[i] + dt;
+      this.life[i] = newLife;
+      const t = newLife / this.maxLife[i];
       if (t >= 1.0) {
         this.alive[i] = 0;
+        this.activeCount = Math.max(0, this.activeCount - 1);
         this.aAlpha[i] = 0;
         this.pos[i3 + 1] = -9999;
         continue;
       }
-      const damp = Math.pow(this.drag[i], dt * 60.0);
-      this.vel[i3] = this.vel[i3] * damp + windX * dt * 0.6;
-      this.vel[i3 + 1] = this.vel[i3 + 1] * damp + this.gravity[i] * dt;
-      this.vel[i3 + 2] = this.vel[i3 + 2] * damp + windZ * dt * 0.6;
-      this.pos[i3] += this.vel[i3] * dt;
-      this.pos[i3 + 1] += this.vel[i3 + 1] * dt;
-      this.pos[i3 + 2] += this.vel[i3 + 2] * dt;
+      const damp = Math.max(0.0, 1.0 - (1.0 - this.drag[i]) * dt60);
+      const vx = this.vel[i3] * damp + windX;
+      const vy = this.vel[i3 + 1] * damp + this.gravity[i] * dt;
+      const vz = this.vel[i3 + 2] * damp + windZ;
+      this.vel[i3] = vx;
+      this.vel[i3 + 1] = vy;
+      this.vel[i3 + 2] = vz;
+      this.pos[i3] += vx * dt;
+      this.pos[i3 + 1] += vy * dt;
+      this.pos[i3 + 2] += vz * dt;
 
-      const ease = 1.0 - (1.0 - t) * (1.0 - t);
+      const invT = 1.0 - t;
+      const ease = 1.0 - invT * invT;
       this.aSize[i] = this.size0[i] + (this.size1[i] - this.size0[i]) * ease;
       // Quick fade-in, long fade-out
-      const fadeIn = Math.min(1.0, t * 8.0);
-      this.aAlpha[i] = this.alpha0[i] * fadeIn * (1.0 - t) * (1.0 - t * 0.4);
+      const fadeIn = t < 0.125 ? t * 8.0 : 1.0;
+      this.aAlpha[i] = this.alpha0[i] * fadeIn * invT * (1.0 - t * 0.4);
       this.aColor[i3] = this.col0[i3] + (this.col1[i3] - this.col0[i3]) * t;
       this.aColor[i3 + 1] = this.col0[i3 + 1] + (this.col1[i3 + 1] - this.col0[i3 + 1]) * t;
       this.aColor[i3 + 2] = this.col0[i3 + 2] + (this.col1[i3 + 2] - this.col0[i3 + 2]) * t;
@@ -158,5 +174,6 @@ export class SoftParticlePool {
     this.sizeAttr.needsUpdate = true;
     this.alphaAttr.needsUpdate = true;
     this.colorAttr.needsUpdate = true;
+    this.dirty = false;
   }
 }

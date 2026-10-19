@@ -1,10 +1,11 @@
 import { FLIGHT_PHASES } from './missionPhysics.js';
 import { getPresenceClient } from '../utils/presenceClient.js';
 
-// Aerospace Mission Flight HUD & Mobile Touch Flight Controls
+// SpaceX Broadcast Flight HUD & Gimbal / Touch Controls
 export class MissionFlightHUD {
   constructor(options = {}) {
     this.options = options;
+    this.currentCamMode = 'CHASE';
 
     this.dom = {
       container: document.getElementById('flight-hud'),
@@ -12,46 +13,48 @@ export class MissionFlightHUD {
       boosterBadge: document.getElementById('flight-booster-badge'),
       autoBtn: document.getElementById('flight-auto-btn'),
       trackBoosterBtn: document.getElementById('flight-track-booster-btn'),
+      resetBtn: document.getElementById('flight-reset-btn'),
       camBar: document.getElementById('flight-cam-bar'),
 
-      altitudeVal: document.getElementById('flight-alt-val'),
-      speedVal: document.getElementById('flight-speed-val'),
-      machVal: document.getElementById('flight-mach-val'),
-      gforceVal: document.getElementById('flight-gforce-val'),
-      downrangeVal: document.getElementById('flight-downrange-val'),
+      // 360° Gimbal Bar
+      gimbalBar: document.getElementById('flight-gimbal-bar'),
+      gimbalLeft: document.getElementById('gimbal-left'),
+      gimbalRight: document.getElementById('gimbal-right'),
+      gimbalUp: document.getElementById('gimbal-up'),
+      gimbalDown: document.getElementById('gimbal-down'),
+      gimbalReset: document.getElementById('gimbal-reset'),
 
-      // Aerospace Scientific Telemetry Ribbon
-      apogeeVal: document.getElementById('flight-apogee-val'),
-      periapsisVal: document.getElementById('flight-periapsis-val'),
-      dynQVal: document.getElementById('flight-dynq-val'),
-      maxQBadge: document.getElementById('flight-maxq-badge'),
-      deltaVVal: document.getElementById('flight-deltav-val'),
-      chamberPcVal: document.getElementById('flight-chamber-pc-val'),
-      attitudeVal: document.getElementById('flight-attitude-val'),
-
-      // Propellant Gauges
+      // Super Heavy Booster Wing
       boosterBox: document.getElementById('flight-booster-tank-box'),
+      boosterEngines: document.getElementById('spx-booster-engines'),
+      boosterTag: document.getElementById('spx-booster-tag'),
+      boosterSpeedVal: document.getElementById('spx-booster-speed'),
+      boosterAltVal: document.getElementById('spx-booster-alt'),
       boosterFuelBar: document.getElementById('flight-booster-fuel-bar'),
-      boosterFuelVal: document.getElementById('flight-booster-fuel-val'),
-      shipFuelBar: document.getElementById('flight-ship-fuel-bar'),
-      shipFuelVal: document.getElementById('flight-ship-fuel-val'),
+      boosterCh4Bar: document.getElementById('spx-booster-ch4-bar'),
 
-      // Throttle & Heat
-      throttleBar: document.getElementById('flight-throttle-bar'),
+      // Center Bridge: Clock, Timeline & Primary Action
+      missionClock: document.getElementById('spx-mission-clock'),
+      timeline: document.getElementById('spx-timeline'),
+      stageBtn: document.getElementById('flight-stage-btn'),
+      manualControls: document.getElementById('flight-manual-controls'),
       throttleVal: document.getElementById('flight-throttle-val'),
+      btnThrottleUp: document.getElementById('flight-btn-throttle-up'),
+      btnThrottleDown: document.getElementById('flight-btn-throttle-down'),
+
+      // Starship Wing
+      shipEngines: document.getElementById('spx-ship-engines'),
+      shipTag: document.getElementById('spx-ship-tag'),
+      speedVal: document.getElementById('flight-speed-val'),
+      altitudeVal: document.getElementById('flight-alt-val'),
+      shipFuelBar: document.getElementById('flight-ship-fuel-bar'),
+      shipCh4Bar: document.getElementById('spx-ship-ch4-bar'),
       heatContainer: document.getElementById('flight-heat-container'),
       heatBar: document.getElementById('flight-heat-bar'),
 
-      // Buttons & Camera
-      stageBtn: document.getElementById('flight-stage-btn'),
-      camBtn: document.getElementById('flight-cam-btn'),
-      camBadge: document.getElementById('flight-cam-badge'),
+      // Prompts & Exit
       actionPrompt: document.getElementById('flight-action-prompt'),
       exitBtn: document.getElementById('flight-exit-btn'),
-
-      // Throttle buttons
-      btnThrottleUp: document.getElementById('flight-btn-throttle-up'),
-      btnThrottleDown: document.getElementById('flight-btn-throttle-down'),
 
       // Mobile cluster
       mobileSteering: document.getElementById('flight-mobile-steering'),
@@ -72,7 +75,7 @@ export class MissionFlightHUD {
     };
 
     this.onlineCount = 43;
-    this.lastOnlineUpdate = 0;
+    this.isMobile = false;
 
     this.initEvents();
   }
@@ -99,6 +102,13 @@ export class MissionFlightHUD {
       });
     }
 
+    if (this.dom.resetBtn) {
+      this.dom.resetBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onResetMission) this.options.onResetMission();
+      });
+    }
+
     if (this.dom.camBar) {
       const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
       tabs.forEach(tab => {
@@ -112,10 +122,39 @@ export class MissionFlightHUD {
       });
     }
 
-    if (this.dom.camBtn) {
-      this.dom.camBtn.addEventListener('click', (e) => {
+    // 360° Gimbal continuous hold & tap controls
+    const bindGimbalBtn = (btn, dYaw, dPitch) => {
+      if (!btn) return;
+      let holdInterval = null;
+      const step = () => {
+        if (this.options.onGimbalMove) this.options.onGimbalMove(dYaw, dPitch);
+      };
+      btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        if (this.options.onToggleCamera) this.options.onToggleCamera();
+        step();
+        if (holdInterval) clearInterval(holdInterval);
+        holdInterval = setInterval(step, 32);
+      });
+      const stop = () => {
+        if (holdInterval) {
+          clearInterval(holdInterval);
+          holdInterval = null;
+        }
+      };
+      btn.addEventListener('pointerup', stop);
+      btn.addEventListener('pointercancel', stop);
+      btn.addEventListener('pointerleave', stop);
+    };
+
+    bindGimbalBtn(this.dom.gimbalLeft, 0.08, 0);
+    bindGimbalBtn(this.dom.gimbalRight, -0.08, 0);
+    bindGimbalBtn(this.dom.gimbalUp, 0, 0.06);
+    bindGimbalBtn(this.dom.gimbalDown, 0, -0.06);
+
+    if (this.dom.gimbalReset) {
+      this.dom.gimbalReset.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onResetGimbal) this.options.onResetGimbal();
       });
     }
 
@@ -148,7 +187,7 @@ export class MissionFlightHUD {
         btn.classList.add('active');
         if (onActive) onActive();
       });
-      const end = (e) => {
+      const end = () => {
         btn.classList.remove('active');
         if (onRelease) onRelease();
       };
@@ -176,22 +215,10 @@ export class MissionFlightHUD {
       () => { if (this.options.onTouchYaw) this.options.onTouchYaw(1); },
       () => { if (this.options.onTouchYaw) this.options.onTouchYaw(0); }
     );
-
-    window.addEventListener('keydown', (e) => {
-      if (this.dom.container && this.dom.container.classList.contains('active')) {
-        if (e.code === 'Space') {
-          if (this.options.onStage) this.options.onStage();
-        }
-      }
-    });
   }
 
   notifyCameraMode(modeName) {
-    if (this.dom.camBadge) {
-      this.dom.camBadge.textContent = `CAM: ${modeName}`;
-      this.dom.camBadge.classList.add('pulse');
-      setTimeout(() => this.dom.camBadge.classList.remove('pulse'), 600);
-    }
+    this.currentCamMode = modeName;
     if (this.dom.camBar) {
       const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
       tabs.forEach(tab => {
@@ -202,9 +229,27 @@ export class MissionFlightHUD {
         }
       });
     }
+
+    // Show 360° Gimbal control bar whenever Ground Cam or Tower Cam is active
+    if (this.dom.gimbalBar) {
+      const isGimbalCam = modeName === 'GROUND_CAM' || modeName === 'TOWER_CAM';
+      this.dom.gimbalBar.style.display = isGimbalCam ? 'flex' : 'none';
+    }
+
+    // Sync Track Booster button state
+    if (this.dom.trackBoosterBtn) {
+      const isTrackingBooster = modeName === 'BOOSTER_CAM';
+      this.dom.trackBoosterBtn.textContent = isTrackingBooster ? '🚀 TRACK SHIP' : '🎯 TRACK BOOSTER';
+      if (isTrackingBooster) {
+        this.dom.trackBoosterBtn.classList.add('active');
+      } else {
+        this.dom.trackBoosterBtn.classList.remove('active');
+      }
+    }
   }
 
   show(visible = true, isMobile = false) {
+    this.isMobile = isMobile;
     if (!this.dom.container) return;
     if (visible) {
       this.dom.container.classList.add('active');
@@ -222,245 +267,272 @@ export class MissionFlightHUD {
     }
   }
 
+  formatMissionClock(physics) {
+    if (physics.phase === FLIGHT_PHASES.ON_PAD) {
+      return 'T- 00:00:03';
+    }
+    if (physics.phase === FLIGHT_PHASES.COUNTDOWN) {
+      const sec = Math.ceil(Math.max(0, physics.countdownTimer));
+      return `T- 00:00:0${sec}`;
+    }
+    const totalSec = Math.floor(Math.max(0, physics.missionTime));
+    const hrs = Math.floor(totalSec / 3600).toString().padStart(2, '0');
+    const mins = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
+    const secs = (totalSec % 60).toString().padStart(2, '0');
+    return `T+ ${hrs}:${mins}:${secs}`;
+  }
+
   update(physics) {
     if (!this.dom.container || !this.dom.container.classList.contains('active')) return;
+    this._frame = (this._frame || 0) + 1;
+    if (this._frame % 2 !== 0 && this._lastPhase === physics.phase && this._lastAuto === physics.autoMission) return;
+    this._lastPhase = physics.phase;
+    this._lastAuto = physics.autoMission;
 
-    // 0. Live Real-Time Online Explorer Count
+    // 0. Live Online Count
     const presence = getPresenceClient();
-    if (presence) {
+    if (presence && this.onlineCount !== presence.onlineCount) {
       this.onlineCount = presence.onlineCount;
       if (this.dom.flightOnlineVal) this.dom.flightOnlineVal.textContent = presence.onlineCount;
       if (this.dom.roverOnlineVal) this.dom.roverOnlineVal.textContent = presence.onlineCount;
     }
 
-    // 1. Altitude
-    const alt = Math.max(0, physics.altitude);
-    if (this.dom.altitudeVal) {
-      if (alt >= 1000) {
-        this.dom.altitudeVal.textContent = `${(alt / 1000).toFixed(1)} km`;
-      } else {
-        this.dom.altitudeVal.textContent = `${Math.round(alt)} m`;
-      }
+    // 1. Mission Clock (T- / T+)
+    if (this.dom.missionClock) {
+      this.dom.missionClock.textContent = this.formatMissionClock(physics);
     }
 
-    // 1.1 Starship Orbital Space Score Card (User Request)
-    if (this.dom.scoreCard) {
-      if (physics.phase === FLIGHT_PHASES.ORBIT) {
-        this.dom.scoreCard.style.display = 'block';
-        if (this.dom.scoreVal) {
-          const score = physics.starshipScore || 15420;
-          this.dom.scoreVal.textContent = score.toLocaleString();
-        }
-        if (this.dom.scoreApogee) {
-          this.dom.scoreApogee.textContent = `${(alt / 1000).toFixed(1)} km`;
-        }
-        if (this.dom.scoreVelocity) {
-          this.dom.scoreVelocity.textContent = `${Math.round(physics.speed)} m/s`;
-        }
-        if (this.dom.scoreBooster) {
-          const isCaught = physics.boosterState === 'CAUGHT';
-          this.dom.scoreBooster.textContent = isCaught ? 'MECHAZILLA CAUGHT! 🥢' : (physics.boosterState || 'RECOVERED');
-        }
-        if (this.dom.scoreNext) {
-          this.dom.scoreNext.textContent = 'CLOUD RE-ENTRY // SKYDIVE';
-        }
-      } else {
-        this.dom.scoreCard.style.display = 'none';
-      }
-    }
+    // 2. Super Heavy Booster Telemetry & 33-Raptor Engine Ring
+    const bAltKm = (Math.max(0, physics.boosterAltitude || 0) / 1000).toFixed(1);
+    const bSpeedKmh = Math.round((physics.boosterSpeed || 0) * 3.6);
+    if (this.dom.boosterSpeedVal) this.dom.boosterSpeedVal.textContent = bSpeedKmh.toLocaleString();
+    if (this.dom.boosterAltVal) this.dom.boosterAltVal.textContent = bAltKm;
 
-    // 2. Speed & Mach
-    if (this.dom.speedVal) {
-      const speedKmh = Math.round(physics.speed * 3.6);
-      this.dom.speedVal.textContent = `${speedKmh} km/h`;
-    }
-    if (this.dom.machVal) {
-      this.dom.machVal.textContent = `Mach ${physics.mach}`;
-    }
-    if (this.dom.gforceVal) {
-      this.dom.gforceVal.textContent = `${physics.gForce || 1.0} G`;
-    }
-    if (this.dom.downrangeVal) {
-      this.dom.downrangeVal.textContent = `${physics.downrange || 0.0} km`;
-    }
-
-    // 2.1 Aerospace Scientific Telemetry Ribbon
-    if (this.dom.apogeeVal) {
-      this.dom.apogeeVal.textContent = `${physics.apogeeKm || (alt / 1000).toFixed(1)} km`;
-    }
-    if (this.dom.periapsisVal) {
-      this.dom.periapsisVal.textContent = physics.periapsisKm === 'SUBORBITAL' ? 'SUBORBITAL' : `${physics.periapsisKm} km`;
-    }
-    if (this.dom.dynQVal) {
-      this.dom.dynQVal.textContent = `${physics.qKPa || '0.0'} kPa`;
-    }
-    if (this.dom.maxQBadge) {
-      this.dom.maxQBadge.style.display = physics.isMaxQ ? 'inline-block' : 'none';
-    }
-    if (this.dom.deltaVVal) {
-      this.dom.deltaVVal.textContent = `${(physics.deltaV || 0).toLocaleString()} m/s`;
-    }
-    if (this.dom.chamberPcVal) {
-      this.dom.chamberPcVal.textContent = `${physics.chamberPressure || 0} bar`;
-    }
-    if (this.dom.attitudeVal) {
-      const pSign = (physics.pitchDeg || 0) >= 0 ? '+' : '';
-      const p = `${pSign}${physics.pitchDeg || 0}°`;
-      const y = `${(physics.yawDeg || 0).toString().padStart(3, '0')}°`;
-      const r = `${physics.rollDeg || 0}°`;
-      this.dom.attitudeVal.textContent = `P: ${p} · Y: ${y} · R: ${r}`;
-    }
-
-    // 3. Propellant Tanks (LOX + CH4)
-    if (this.dom.boosterBox && this.dom.boosterFuelBar && this.dom.boosterFuelVal) {
+    if (this.dom.boosterFuelBar && this.dom.boosterCh4Bar) {
       const bFuel = Math.max(0, Math.min(100, physics.boosterFuel || 0));
       this.dom.boosterFuelBar.style.width = `${bFuel}%`;
-      this.dom.boosterFuelVal.textContent = `${Math.round(bFuel)}%`;
-      if (physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT ||
-          physics.phase === FLIGHT_PHASES.ORBIT ||
-          physics.phase === FLIGHT_PHASES.DEORBIT ||
-          physics.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY ||
-          physics.phase === FLIGHT_PHASES.BELLYFLOP ||
-          physics.phase === FLIGHT_PHASES.LANDING_FLIP ||
-          physics.phase === FLIGHT_PHASES.TOUCHDOWN ||
-          physics.phase === FLIGHT_PHASES.LANDED) {
-        this.dom.boosterBox.style.opacity = '0.4';
-      } else {
-        this.dom.boosterBox.style.opacity = '1.0';
+      this.dom.boosterCh4Bar.style.width = `${Math.max(0, bFuel - 1.5)}%`;
+    }
+
+    if (this.dom.boosterEngines) {
+      const bMode = physics.boosterRaptorMode || 'OFF';
+      if (this._lastBMode !== bMode) {
+        this._lastBMode = bMode;
+        this.dom.boosterEngines.className = `spx-engine-graphic mode-${bMode.toLowerCase()}`;
       }
     }
 
-    if (this.dom.shipFuelBar && this.dom.shipFuelVal) {
+    if (this.dom.boosterTag) {
+      const bTagMap = {
+        ATTACHED: physics.phase === FLIGHT_PHASES.ON_PAD ? 'ON PAD' : (physics.phase === FLIGHT_PHASES.COUNTDOWN ? 'IGNITION' : 'ASCENT'),
+        BOOSTBACK: 'BOOSTBACK BURN',
+        DESCENT: 'GRID FIN GLIDE',
+        APPROACH: 'LANDING BURN',
+        CAUGHT: 'TOWER CAUGHT 🥢'
+      };
+      this.dom.boosterTag.textContent = bTagMap[physics.boosterState] || physics.boosterState;
+    }
+
+    // 3. Starship Telemetry & 6-Raptor Engine Cluster
+    const sAlt = Math.max(0, physics.altitude || 0);
+    const sAltKm = (sAlt / 1000).toFixed(1);
+    const sSpeedKmh = Math.round((physics.speed || 0) * 3.6);
+    if (this.dom.speedVal) this.dom.speedVal.textContent = sSpeedKmh.toLocaleString();
+    if (this.dom.altitudeVal) this.dom.altitudeVal.textContent = sAltKm;
+
+    if (this.dom.shipFuelBar && this.dom.shipCh4Bar) {
       const sFuel = Math.max(0, Math.min(100, physics.starshipFuel || 0));
       this.dom.shipFuelBar.style.width = `${sFuel}%`;
-      this.dom.shipFuelVal.textContent = `${Math.round(sFuel)}%`;
+      this.dom.shipCh4Bar.style.width = `${Math.max(0, sFuel - 1.0)}%`;
     }
 
-    // 4. Throttle
-    const pct = Math.round(physics.throttle * 100);
-    if (this.dom.throttleBar) {
-      this.dom.throttleBar.style.width = `${pct}%`;
-    }
-    if (this.dom.throttleVal) {
-      this.dom.throttleVal.textContent = `${pct}%`;
+    if (this.dom.shipEngines) {
+      const sMode = physics.shipRaptorMode || 'OFF';
+      if (this._lastSMode !== sMode) {
+        this._lastSMode = sMode;
+        this.dom.shipEngines.className = `spx-engine-graphic mode-${sMode.toLowerCase()}`;
+      }
     }
 
-    // 5. Re-entry Heat & Plasma
+    if (this.dom.shipTag) {
+      if (physics.isMaxQ) {
+        this.dom.shipTag.textContent = 'MAX-Q · SUPERSONIC';
+      } else if (physics.heat > 0.1) {
+        const tempC = Math.round(200 + physics.heat * 1450);
+        this.dom.shipTag.textContent = `PLASMA ${tempC}°C`;
+      } else {
+        this.dom.shipTag.textContent = `MACH ${physics.mach || '0.0'} · ${physics.gForce || '1.0'}G`;
+      }
+    }
+
+    // 4. Re-entry Heat Bar
     if (this.dom.heatContainer && this.dom.heatBar) {
       if (physics.heat > 0.05) {
-        this.dom.heatContainer.style.display = 'block';
+        this.dom.heatContainer.style.display = 'flex';
         this.dom.heatBar.style.width = `${Math.round(physics.heat * 100)}%`;
-        const tempC = Math.round(200 + physics.heat * 1450);
-        this.dom.heatBar.setAttribute('data-temp', `${tempC}°C`);
       } else {
         this.dom.heatContainer.style.display = 'none';
       }
     }
 
-    // 6. Auto Mission Button State
+    // 5. Auto vs Manual Mode Toggle & Controls
     if (this.dom.autoBtn) {
       if (physics.autoMission) {
-        this.dom.autoBtn.textContent = '🎬 AUTO: ON';
+        this.dom.autoBtn.textContent = 'AUTO: ON';
         this.dom.autoBtn.classList.add('active');
       } else {
-        this.dom.autoBtn.textContent = '🎮 AUTO: OFF';
+        this.dom.autoBtn.textContent = 'MANUAL MODE';
         this.dom.autoBtn.classList.remove('active');
       }
     }
 
-    // 7. Booster State Badge & Track Button (Flight 5 Mechazilla Catch)
+    if (this.dom.manualControls) {
+      const showManual = !physics.autoMission && physics.phase !== FLIGHT_PHASES.ON_PAD && physics.phase !== FLIGHT_PHASES.LANDED;
+      this.dom.manualControls.style.display = showManual ? 'flex' : 'none';
+      if (showManual && this.dom.throttleVal) {
+        this.dom.throttleVal.textContent = `${Math.round(physics.throttle * 100)}%`;
+      }
+    }
+
+    if (this.dom.mobileSteering) {
+      const showTouchPad = this.isMobile || !physics.autoMission;
+      this.dom.mobileSteering.style.display = showTouchPad ? 'flex' : 'none';
+    }
+
+    // 6. Booster Badge & Track Booster Button Highlight
     if (this.dom.boosterBadge) {
       if (physics.boosterState && physics.boosterState !== 'ATTACHED') {
         this.dom.boosterBadge.style.display = 'inline-block';
         const boosterTitles = {
           BOOSTBACK: 'BOOSTER: BOOSTBACK BURN 🔥',
-          DESCENT: 'BOOSTER: GRID FIN GLIDE 🪂',
+          DESCENT: 'BOOSTER: SUPERSONIC GLIDE',
           APPROACH: 'BOOSTER: CHOPSTICK APPROACH 🥢',
-          CAUGHT: 'BOOSTER: MECHAZILLA CAUGHT! 🥢🚀'
+          CAUGHT: 'BOOSTER: MECHAZILLA CAUGHT! 🥢'
         };
         this.dom.boosterBadge.textContent = boosterTitles[physics.boosterState] || `BOOSTER: ${physics.boosterState}`;
-        if (physics.boosterState === 'CAUGHT') {
-          this.dom.boosterBadge.classList.add('caught');
-        } else {
-          this.dom.boosterBadge.classList.remove('caught');
-        }
+        this.dom.boosterBadge.classList.toggle('caught', physics.boosterState === 'CAUGHT');
       } else {
         this.dom.boosterBadge.style.display = 'none';
       }
     }
 
     if (this.dom.trackBoosterBtn) {
-      if (physics.boosterState && physics.boosterState !== 'ATTACHED') {
-        this.dom.trackBoosterBtn.style.display = 'inline-block';
-        this.dom.trackBoosterBtn.textContent = physics.boosterTracking ? '🚀 TRACK SHIP' : '🎯 TRACK BOOSTER';
-        if (physics.boosterTracking) {
-          this.dom.trackBoosterBtn.classList.add('active');
-        } else {
-          this.dom.trackBoosterBtn.classList.remove('active');
+      const isSeparated = physics.boosterState && physics.boosterState !== 'ATTACHED' && physics.boosterState !== 'CAUGHT';
+      this.dom.trackBoosterBtn.classList.toggle('pulse-highlight', Boolean(isSeparated && this.currentCamMode !== 'BOOSTER_CAM'));
+    }
+
+    // 7. SpaceX Timeline Milestones
+    if (this.dom.timeline) {
+      const phaseOrder = {
+        [FLIGHT_PHASES.ON_PAD]: 0,
+        [FLIGHT_PHASES.COUNTDOWN]: 0,
+        [FLIGHT_PHASES.BOOSTER_ASCENT]: physics.altitude > 10000 ? 2 : 1,
+        [FLIGHT_PHASES.HOT_STAGING]: 3,
+        [FLIGHT_PHASES.STARSHIP_ASCENT]: physics.boosterState === 'CAUGHT' ? 4 : 3,
+        [FLIGHT_PHASES.ORBIT]: 5,
+        [FLIGHT_PHASES.DEORBIT]: 5,
+        [FLIGHT_PHASES.HYPERSONIC_ENTRY]: 6,
+        [FLIGHT_PHASES.BELLYFLOP]: 6,
+        [FLIGHT_PHASES.LANDING_FLIP]: 7,
+        [FLIGHT_PHASES.TOUCHDOWN]: 7,
+        [FLIGHT_PHASES.LANDED]: 8
+      };
+      const currentIdx = phaseOrder[physics.phase] ?? 0;
+      const steps = ['LIFTOFF', 'MAXQ', 'STAGE', 'CATCH', 'ORBIT', 'ENTRY', 'LANDING'];
+      const nodes = this.dom.timeline.querySelectorAll('.spx-tl-step');
+      nodes.forEach((node, idx) => {
+        const stepNum = idx + 1;
+        node.classList.toggle('done', currentIdx > stepNum);
+        node.classList.toggle('active', currentIdx === stepNum);
+      });
+    }
+
+    // 8. Orbital Score Card
+    if (this.dom.scoreCard) {
+      if (physics.phase === FLIGHT_PHASES.ORBIT) {
+        this.dom.scoreCard.style.display = 'block';
+        if (this.dom.scoreVal) this.dom.scoreVal.textContent = (physics.starshipScore || 15420).toLocaleString();
+        if (this.dom.scoreApogee) this.dom.scoreApogee.textContent = `${sAltKm} km`;
+        if (this.dom.scoreVelocity) this.dom.scoreVelocity.textContent = `${Math.round(physics.speed)} m/s`;
+        if (this.dom.scoreBooster) {
+          this.dom.scoreBooster.textContent = physics.boosterState === 'CAUGHT' ? 'MECHAZILLA CAUGHT! 🥢' : physics.boosterState;
         }
       } else {
-        this.dom.trackBoosterBtn.style.display = 'none';
+        this.dom.scoreCard.style.display = 'none';
       }
     }
 
-    // 8. Phase Badges & Dynamic Action Prompts
+    // 9. Phase Badge, Primary Launch/Stage Button & Prompt
     if (this.dom.phaseBadge) {
       const titles = {
-        [FLIGHT_PHASES.ON_PAD]: 'PRE-LAUNCH // STARBASE OLM',
-        [FLIGHT_PHASES.COUNTDOWN]: 'T-MINUS COUNTDOWN // IGNITION',
-        [FLIGHT_PHASES.BOOSTER_ASCENT]: 'STAGE 1: 33 RAPTOR ASCENT',
-        [FLIGHT_PHASES.HOT_STAGING]: 'HOT-STAGING INTERSTAGE FIRING',
-        [FLIGHT_PHASES.STARSHIP_ASCENT]: 'STAGE 2: STARSHIP VACUUM ASCENT',
-        [FLIGHT_PHASES.ORBIT]: 'LOW MARS ORBIT INSERTION',
-        [FLIGHT_PHASES.DEORBIT]: 'RETROGRADE DEORBIT BURN',
-        [FLIGHT_PHASES.HYPERSONIC_ENTRY]: 'HYPERSONIC RE-ENTRY PLASMA',
-        [FLIGHT_PHASES.BELLYFLOP]: 'ATMOSPHERIC BELLY-FLOP SKYDIVE',
-        [FLIGHT_PHASES.LANDING_FLIP]: 'RAPTOR LANDING FLIP MANEUVER',
-        [FLIGHT_PHASES.TOUCHDOWN]: 'FINAL TOUCHDOWN CUSHION',
-        [FLIGHT_PHASES.LANDED]: 'MISSION SUCCESSFUL // TOUCHDOWN'
+        [FLIGHT_PHASES.ON_PAD]: 'STARBASE // PAD AWAITING LAUNCH',
+        [FLIGHT_PHASES.COUNTDOWN]: 'T-MINUS // 33 RAPTOR IGNITION SEQUENCE',
+        [FLIGHT_PHASES.BOOSTER_ASCENT]: 'STAGE 1 // SUPER HEAVY ASCENT',
+        [FLIGHT_PHASES.HOT_STAGING]: 'HOT-STAGING // INTERSTAGE SEPARATION',
+        [FLIGHT_PHASES.STARSHIP_ASCENT]: 'STAGE 2 // STARSHIP ORBITAL INSERTION',
+        [FLIGHT_PHASES.ORBIT]: 'SECO // LOW MARS ORBIT COAST',
+        [FLIGHT_PHASES.DEORBIT]: 'DEORBIT BURN // RETROGRADE FIRING',
+        [FLIGHT_PHASES.HYPERSONIC_ENTRY]: 'ATMOSPHERIC ENTRY // PLASMA INTERFACE',
+        [FLIGHT_PHASES.BELLYFLOP]: 'SUBSONIC SKYDIVE // FLAP TRIM',
+        [FLIGHT_PHASES.LANDING_FLIP]: 'LANDING BURN // FLIP MANEUVER',
+        [FLIGHT_PHASES.TOUCHDOWN]: 'FINAL DESCENT // LEGS DEPLOYED',
+        [FLIGHT_PHASES.LANDED]: 'TOUCHDOWN CONFIRMED // MARS SURFACE'
       };
       this.dom.phaseBadge.textContent = titles[physics.phase] || physics.phase;
     }
 
-    if (this.dom.actionPrompt) {
-      if (physics.boosterFlameout && physics.phase === FLIGHT_PHASES.BOOSTER_ASCENT) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-alert">⚠️ BOOSTER FLAMEOUT // SEPARATE STAGE [SPACE]</span>`;
-        if (this.dom.stageBtn) this.dom.stageBtn.textContent = '⚡ HOT STAGE';
-      } else if (physics.phase === FLIGHT_PHASES.ON_PAD) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-text">PRESS [SPACE] OR TAP 'IGNITE' TO LAUNCH (AUTO-PILOT ACTIVE)</span>`;
-        if (this.dom.stageBtn) this.dom.stageBtn.textContent = '🚀 IGNITE';
-      } else if (physics.phase === FLIGHT_PHASES.BOOSTER_ASCENT && physics.altitude > 18000) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-alert">APPROACHING HOT-STAGING AT 22 KM // SEPARATION IMMINENT</span>`;
-        if (this.dom.stageBtn) this.dom.stageBtn.textContent = '⚡ HOT STAGE';
-      } else if (physics.phase === FLIGHT_PHASES.HOT_STAGING) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-alert">HOT-STAGING IN PROGRESS // 6 RAPTORS IGNITED</span>`;
-      } else if (physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT) {
-        if (physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT') {
-          this.dom.actionPrompt.innerHTML = `<span class="glow-alert">🥢 MECHAZILLA TOWER CATCH IN PROGRESS // SWITCH TO TOWER OR GROUND CAM</span>`;
-        } else {
-          this.dom.actionPrompt.innerHTML = `<span class="glow-text">ASCENDING TO MARS ORBIT // BOOSTER RETURNING TO STARBASE</span>`;
-        }
-      } else if (physics.phase === FLIGHT_PHASES.ORBIT) {
-        this.dom.actionPrompt.innerHTML = `<span>ORBIT INSERTION ACHIEVED // AUTO DEORBIT SEQUENCE ARMED</span>`;
-        if (this.dom.stageBtn) this.dom.stageBtn.textContent = '🔥 DEORBIT';
-      } else if (physics.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-magenta">HYPERSONIC IONIZATION PLASMA // 4 FLAPS TRIMMING BELLY-FLOP</span>`;
-        if (this.dom.stageBtn) this.dom.stageBtn.style.display = 'none';
-      } else if (physics.phase === FLIGHT_PHASES.BELLYFLOP) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-magenta">SUBSONIC SKYDIVE AT 80 M/S // PREPARING LANDING FLIP</span>`;
-      } else if (physics.phase === FLIGHT_PHASES.LANDING_FLIP) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-alert">🔥 3 RAPTORS FIRING // RAPID VERTICAL LANDING FLIP</span>`;
-      } else if (physics.phase === FLIGHT_PHASES.TOUCHDOWN) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-green">LANDING LEGS DEPLOYED // SOFT TOUCHDOWN CUSHION</span>`;
+    if (this.dom.stageBtn) {
+      if (physics.phase === FLIGHT_PHASES.ON_PAD) {
+        this.dom.stageBtn.style.display = 'inline-flex';
+        this.dom.stageBtn.textContent = '🚀 LAUNCH';
+        this.dom.stageBtn.className = 'flight-stage-btn launch-ready';
       } else if (physics.phase === FLIGHT_PHASES.LANDED) {
-        this.dom.actionPrompt.innerHTML = `<span class="glow-green">TOUCHDOWN SUCCESSFUL // GULLWING DOORS OPEN // CARGO CRANE LOWERED</span>`;
-        if (this.dom.stageBtn) {
-          this.dom.stageBtn.style.display = 'inline-block';
-          this.dom.stageBtn.textContent = '🚗 DRIVE ROVER';
+        this.dom.stageBtn.style.display = 'inline-flex';
+        this.dom.stageBtn.textContent = '🚗 DEPLOY ROVER';
+        this.dom.stageBtn.className = 'flight-stage-btn landed-ready';
+      } else if (!physics.autoMission) {
+        // In Manual Mode: give user explicit stage/maneuver buttons at each phase
+        if (physics.phase === FLIGHT_PHASES.BOOSTER_ASCENT || physics.phase === FLIGHT_PHASES.HOT_STAGING) {
+          this.dom.stageBtn.style.display = 'inline-flex';
+          this.dom.stageBtn.textContent = '⚡ HOT STAGE';
+          this.dom.stageBtn.className = 'flight-stage-btn manual-stage';
+        } else if (physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT || physics.phase === FLIGHT_PHASES.ORBIT) {
+          this.dom.stageBtn.style.display = 'inline-flex';
+          this.dom.stageBtn.textContent = '🔥 DEORBIT BURN';
+          this.dom.stageBtn.className = 'flight-stage-btn manual-stage';
+        } else if (physics.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY || physics.phase === FLIGHT_PHASES.BELLYFLOP) {
+          this.dom.stageBtn.style.display = 'inline-flex';
+          this.dom.stageBtn.textContent = '🔄 LANDING FLIP';
+          this.dom.stageBtn.className = 'flight-stage-btn manual-stage';
+        } else {
+          this.dom.stageBtn.style.display = 'none';
         }
       } else {
-        this.dom.actionPrompt.textContent = '';
+        // In Auto Mode after Launch: hide the stage button so the broadcast bar stays clean while autopilot executes all stages
+        this.dom.stageBtn.style.display = 'none';
+      }
+    }
+
+    if (this.dom.actionPrompt) {
+      let promptHtml = '';
+      if (physics.phase === FLIGHT_PHASES.ON_PAD) {
+        promptHtml = `<span class="glow-text">CLICK 'LAUNCH' OR PRESS [SPACE] TO INITIATE ${physics.autoMission ? 'AUTONOMOUS' : 'MANUAL'} FLIGHT</span>`;
+      } else if (physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT && (physics.boosterState === 'BOOSTBACK' || physics.boosterState === 'DESCENT' || physics.boosterState === 'APPROACH')) {
+        if (this.currentCamMode !== 'BOOSTER_CAM') {
+          promptHtml = `<span class="glow-alert">🥢 SUPER HEAVY RETURNING TO STARBASE — CLICK '🎯 TRACK BOOSTER' TO WATCH CATCH</span>`;
+        } else {
+          promptHtml = `<span class="glow-green">🎯 TRACKING SUPER HEAVY RETURN TO MECHAZILLA CHOPSTICKS</span>`;
+        }
+      } else if (physics.boosterState === 'CAUGHT' && physics.phase === FLIGHT_PHASES.STARSHIP_ASCENT) {
+        promptHtml = `<span class="glow-green">🥢 MECHAZILLA CATCH CONFIRMED! SUPER HEAVY SECURED IN TOWER ARMS</span>`;
+      } else if (physics.phase === FLIGHT_PHASES.LANDED) {
+        promptHtml = `<span class="glow-green">STARSHIP LANDED ON MARS // CLICK 'DEPLOY ROVER' OR '↺ PAD' TO RE-LAUNCH</span>`;
+      }
+      if (this._lastPromptHtml !== promptHtml) {
+        this._lastPromptHtml = promptHtml;
+        this.dom.actionPrompt.innerHTML = promptHtml;
       }
     }
   }
 }
+

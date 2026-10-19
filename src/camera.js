@@ -10,7 +10,7 @@ export class MarsCameraController {
     this.modes = ['CHASE', 'CLOSE', 'COCKPIT', 'DRONE'];
     this.modeIndex = 0;
 
-    this.flightModes = ['CHASE', 'GROUND_CAM', 'TOWER_CAM', 'COCKPIT', 'PANORAMA', 'FREE_ORBIT', 'ENGINE_CAM'];
+    this.flightModes = ['CHASE', 'BOOSTER_CAM', 'GROUND_CAM', 'TOWER_CAM', 'COCKPIT', 'FREE_ORBIT'];
     this.flightModeIndex = 0;
 
     this.targetPos = new THREE.Vector3();
@@ -25,6 +25,15 @@ export class MarsCameraController {
     this.orbitTheta = 0.55;
     this.orbitPhi = 0.28;
     this.orbitRadius = 90.0;
+
+    // 360-degree Gimbal angles for stationary Ground Cam & Tower Cam
+    // Ground cam sits at (padX - 110, padZ - 95) looking northeast (+X, +Z) at pad
+    this.groundGimbalYaw = Math.atan2(110, 95); // ~0.858 rad pointing directly at launch pad
+    this.groundGimbalPitch = 0.24;              // looking slightly up at the full rocket stack & tower
+    // Tower cam sits at (padX + 20, padElevation + 112, padZ + 6) looking at chopsticks & pad center
+    this.towerGimbalYaw = Math.atan2(-20, -6);  // ~-1.86 rad pointing at chopsticks & OLM
+    this.towerGimbalPitch = -0.45;              // looking down across chopsticks
+
     this.isDragging = false;
     this.lastPointerX = 0;
     this.lastPointerY = 0;
@@ -41,7 +50,6 @@ export class MarsCameraController {
 
   initPointerDrag() {
     this.domElement.addEventListener('pointerdown', (e) => {
-      // Only drag if not clicking buttons
       if (e.target && (e.target.tagName === 'BUTTON' || e.target.closest('button'))) return;
       this.isDragging = true;
       this.lastPointerX = e.clientX;
@@ -55,8 +63,17 @@ export class MarsCameraController {
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
 
-      this.orbitTheta -= dx * 0.006;
-      this.orbitPhi = THREE.MathUtils.clamp(this.orbitPhi + dy * 0.005, -1.35, 1.35);
+      const mode = this.flightModes[this.flightModeIndex];
+      if (mode === 'GROUND_CAM') {
+        this.groundGimbalYaw -= dx * 0.005;
+        this.groundGimbalPitch = THREE.MathUtils.clamp(this.groundGimbalPitch - dy * 0.005, -1.48, 1.48);
+      } else if (mode === 'TOWER_CAM') {
+        this.towerGimbalYaw -= dx * 0.005;
+        this.towerGimbalPitch = THREE.MathUtils.clamp(this.towerGimbalPitch - dy * 0.005, -1.48, 1.48);
+      } else {
+        this.orbitTheta -= dx * 0.006;
+        this.orbitPhi = THREE.MathUtils.clamp(this.orbitPhi + dy * 0.005, -1.35, 1.35);
+      }
     });
 
     window.addEventListener('pointerup', () => {
@@ -66,6 +83,29 @@ export class MarsCameraController {
     this.domElement.addEventListener('wheel', (e) => {
       this.orbitRadius = THREE.MathUtils.clamp(this.orbitRadius + e.deltaY * 0.08, 25.0, 300.0);
     }, { passive: true });
+  }
+
+  adjustGimbal(dYaw, dPitch) {
+    const mode = this.flightModes[this.flightModeIndex];
+    if (mode === 'GROUND_CAM') {
+      this.groundGimbalYaw += dYaw;
+      this.groundGimbalPitch = THREE.MathUtils.clamp(this.groundGimbalPitch + dPitch, -1.48, 1.48);
+    } else if (mode === 'TOWER_CAM') {
+      this.towerGimbalYaw += dYaw;
+      this.towerGimbalPitch = THREE.MathUtils.clamp(this.towerGimbalPitch + dPitch, -1.48, 1.48);
+    } else {
+      this.orbitTheta += dYaw;
+      this.orbitPhi = THREE.MathUtils.clamp(this.orbitPhi - dPitch, -1.35, 1.35);
+    }
+  }
+
+  resetGimbal() {
+    this.groundGimbalYaw = Math.atan2(110, 95);
+    this.groundGimbalPitch = 0.24;
+    this.towerGimbalYaw = Math.atan2(-20, -6);
+    this.towerGimbalPitch = -0.45;
+    this.orbitTheta = 0.55;
+    this.orbitPhi = 0.28;
   }
 
   nextFlightMode() {
@@ -228,18 +268,13 @@ export class MarsCameraController {
     this.camera.lookAt(this.currentLook);
   }
 
-  updateFlight(dt, physics) {
+  updateFlight(dt, physics, inputState = null) {
     if (dt <= 0) return;
 
     const shipPos = physics.position;
     const phase = physics.phase;
     const alt = physics.altitude;
     const mode = this.flightModes[this.flightModeIndex] || 'CHASE';
-
-    // FOV expands dynamically with hypersonic velocity
-    const targetFov = this.baseFov + Math.min(24, (parseFloat(physics.mach) || 0) * 1.8);
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1.0, dt * 4.0));
-    this.camera.updateProjectionMatrix();
 
     const forward = new THREE.Vector3(
       Math.sin(physics.pitch) * Math.sin(physics.yaw),
@@ -249,17 +284,105 @@ export class MarsCameraController {
 
     const stackCenterY = physics.vehicle?.isMated ? 45.0 : 25.0;
 
+    if (mode === 'GROUND_CAM') {
+      // Fixed stationary camera at Starbase observation mound (does NOT auto-track Starship into space or skew FOV!)
+      // Supports 360-degree manual gimbal rotation via pointer drag or on-screen gimbal buttons
+      const padX = physics.padCoords.x;
+      const padZ = physics.padCoords.y;
+      const stationX = padX - 110.0;
+      const stationZ = padZ - 95.0;
+      const groundY = getMarsHeight(stationX, stationZ) + 4.5;
+      this.currentPos.set(stationX, groundY, stationZ);
+
+      const cosP = Math.cos(this.groundGimbalPitch);
+      const lookDirX = cosP * Math.sin(this.groundGimbalYaw);
+      const lookDirY = Math.sin(this.groundGimbalPitch);
+      const lookDirZ = cosP * Math.cos(this.groundGimbalYaw);
+
+      this.currentLook.set(
+        this.currentPos.x + lookDirX * 150.0,
+        this.currentPos.y + lookDirY * 150.0,
+        this.currentPos.z + lookDirZ * 150.0
+      );
+
+      this.camera.fov = 58.0;
+      this.camera.updateProjectionMatrix();
+      this.camera.position.copy(this.currentPos);
+      this.camera.lookAt(this.currentLook);
+      return;
+    }
+
+    if (mode === 'TOWER_CAM') {
+      // Fixed stationary camera mounted high on Mechazilla Tower (112m up)
+      // Constant FOV, no skewing, full 360-degree gimbal look in all directions
+      const towerX = physics.padCoords.x + 20.0;
+      const towerZ = physics.padCoords.y + 6.0;
+      const towerY = physics.padElevation + 112.0;
+      this.currentPos.set(towerX, towerY, towerZ);
+
+      const cosP = Math.cos(this.towerGimbalPitch);
+      const lookDirX = cosP * Math.sin(this.towerGimbalYaw);
+      const lookDirY = Math.sin(this.towerGimbalPitch);
+      const lookDirZ = cosP * Math.cos(this.towerGimbalYaw);
+
+      this.currentLook.set(
+        this.currentPos.x + lookDirX * 150.0,
+        this.currentPos.y + lookDirY * 150.0,
+        this.currentPos.z + lookDirZ * 150.0
+      );
+
+      this.camera.fov = 66.0;
+      this.camera.updateProjectionMatrix();
+      this.camera.position.copy(this.currentPos);
+      this.camera.lookAt(this.currentLook);
+      return;
+    }
+
+    if (mode === 'BOOSTER_CAM') {
+      // Dedicated Super Heavy Booster tracking camera:
+      // Follows the Booster during ascent, boostback burn, supersonic grid-fin descent, and Mechazilla chopsticks catch!
+      const isSeparated = physics.boosterState && physics.boosterState !== 'ATTACHED';
+      const bPos = isSeparated ? physics.boosterPosition : shipPos;
+
+      if (physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT') {
+        // Dramatic catch framing: shows Booster descending between the Mechazilla Chopsticks and clamping onto the tower!
+        const ox = Math.cos(this.orbitPhi) * Math.sin(this.orbitTheta) * 62.0;
+        const oy = Math.sin(this.orbitPhi) * 35.0;
+        const oz = Math.cos(this.orbitPhi) * Math.cos(this.orbitTheta) * 62.0;
+        this.currentPos.set(bPos.x - 42.0 + ox * 0.4, bPos.y + 32.0 + oy * 0.4, bPos.z + 48.0 + oz * 0.4);
+        this.currentLook.set(bPos.x + 4.0, bPos.y + 38.0, bPos.z);
+      } else {
+        // Orbitable chase view locked onto the Super Heavy Booster body & 33 Raptors / Grid Fins
+        const rad = 78.0;
+        const ox = Math.cos(this.orbitPhi) * Math.sin(this.orbitTheta) * rad;
+        const oy = Math.sin(this.orbitPhi) * rad;
+        const oz = Math.cos(this.orbitPhi) * Math.cos(this.orbitTheta) * rad;
+        this.currentPos.set(bPos.x + ox, bPos.y + 34.0 + oy, bPos.z + oz);
+        this.currentLook.set(bPos.x, bPos.y + 35.0, bPos.z);
+      }
+
+      this.camera.fov = 62.0;
+      this.camera.updateProjectionMatrix();
+      const gH = getMarsHeight(this.currentPos.x, this.currentPos.z);
+      if (this.currentPos.y < gH + 3.0) this.currentPos.y = gH + 3.0;
+      this.camera.position.copy(this.currentPos);
+      this.camera.lookAt(this.currentLook);
+      return;
+    }
+
+    // FOV for Starship vehicle-mounted/chase modes
+    const targetFov = this.baseFov + Math.min(18, (parseFloat(physics.mach) || 0) * 1.4);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1.0, dt * 4.0));
+    this.camera.updateProjectionMatrix();
+
     if (mode === 'CHASE') {
       if (phase === 'ON_PAD' || phase === 'COUNTDOWN') {
-        // Dramatic pad view: ground-level looking up along the 120m stack
         this.currentPos.set(shipPos.x + 75, shipPos.y + 14, shipPos.z + 75);
         this.currentLook.set(shipPos.x, shipPos.y + 50, shipPos.z);
       } else if (phase === 'DEORBIT' || phase === 'HYPERSONIC_ENTRY' || phase === 'BELLYFLOP') {
-        // Re-entry & belly-flop: 45 degree angle showing heat shield & plasma ionization
         this.currentPos.set(shipPos.x + 45, shipPos.y + 12, shipPos.z + 55);
         this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
       } else if (phase === 'ORBIT') {
-        // Space view: open panoramic orbital camera showing Starship against curved Mars and starry cosmos
         const orbitAngle = physics.yaw + 0.85;
         const orbitDist = 130.0;
         this.currentPos.set(
@@ -269,8 +392,6 @@ export class MarsCameraController {
         );
         this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
       } else {
-        // Velocity/Attitude-aligned cinematic chase camera:
-        // Positioned 85m back and 22m to the side at a 3/4 angle, showing rocket, receding planet, clouds, and sky!
         const camDist = 85.0 + Math.min(50.0, alt * 0.0008);
         const behindAngle = physics.yaw + Math.PI;
         const sideAngle = physics.yaw + Math.PI * 0.5;
@@ -281,92 +402,33 @@ export class MarsCameraController {
         this.currentPos.set(shipPos.x + offsetX, shipPos.y + offsetY, shipPos.z + offsetZ);
         this.currentLook.set(shipPos.x, shipPos.y + stackCenterY + 12.0, shipPos.z);
       }
-    } else if (mode === 'GROUND_CAM') {
-      // Ground tracking telephoto camera stationed near Starbase station & control dome (padCoords + offset)
-      const padX = physics.padCoords.x;
-      const padZ = physics.padCoords.y;
-      const stationX = padX - 78.0;
-      const stationZ = padZ - 42.0;
-      const groundY = getMarsHeight(stationX, stationZ) + 3.2;
-      this.currentPos.set(stationX, groundY, stationZ);
-
-      // Dynamic tracking: Track booster during catch or if tracking is toggled; otherwise track Starship
-      const isBoosterCatching = physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT' ||
-        (physics.boosterTracking && physics.boosterState !== 'ATTACHED');
-
-      if (isBoosterCatching && physics.boosterPosition) {
-        this.currentLook.copy(physics.boosterPosition);
-      } else {
-        this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
-      }
-
-      // Dynamic telephoto zoom: FOV narrows down from 56° to 16° as vehicle ascends toward space
-      const dist = this.currentPos.distanceTo(this.currentLook);
-      const telephotoFov = THREE.MathUtils.clamp(56.0 - (dist / 750.0) * 40.0, 16.0, 56.0);
-      this.camera.fov = telephotoFov;
-      this.camera.updateProjectionMatrix();
-
-    } else if (mode === 'TOWER_CAM') {
-      // Camera mounted 115m high on Mechazilla Tower overlooking chopsticks & launch mount (Ref Image 1)
-      const towerX = physics.padCoords.x + 18.0;
-      const towerZ = physics.padCoords.y;
-      const towerY = physics.padElevation + 115.0;
-      this.currentPos.set(towerX, towerY, towerZ);
-
-      if (physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT') {
-        this.currentLook.copy(physics.boosterPosition);
-      } else if (physics.phase === 'ON_PAD' || physics.phase === 'COUNTDOWN') {
-        this.currentLook.set(physics.padCoords.x, physics.padElevation + 45.0, physics.padCoords.y);
-      } else {
-        this.currentLook.set(physics.padCoords.x, physics.padElevation + 75.0, physics.padCoords.y);
-      }
-      this.camera.fov = 68.0;
-      this.camera.updateProjectionMatrix();
-
     } else if (mode === 'COCKPIT') {
-      // First-person cockpit view: mounted at the Starship forward nosecone visor looking out
       const noseHeight = physics.vehicle?.isMated ? 115.0 : 42.0;
       const nosePos = new THREE.Vector3(shipPos.x, shipPos.y + noseHeight, shipPos.z);
       this.currentPos.copy(nosePos);
       this.currentLook.copy(nosePos).addScaledVector(forward, 150.0);
-    } else if (mode === 'PANORAMA') {
-      // Wide panoramic side view: vehicle profile against space and Mars
-      const sideAngle = physics.yaw + Math.PI * 0.5;
-      const camDist = 110.0;
-      this.currentPos.set(
-        shipPos.x + Math.sin(sideAngle) * camDist,
-        shipPos.y + stackCenterY + 10,
-        shipPos.z + Math.cos(sideAngle) * camDist
-      );
-      this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
     } else if (mode === 'FREE_ORBIT') {
-      // Full 360-degree interactive orbital camera: mouse/touch drag orbits around vehicle!
       const ox = Math.cos(this.orbitPhi) * Math.sin(this.orbitTheta) * this.orbitRadius;
       const oy = Math.sin(this.orbitPhi) * this.orbitRadius;
       const oz = Math.cos(this.orbitPhi) * Math.cos(this.orbitTheta) * this.orbitRadius;
 
       this.currentPos.set(shipPos.x + ox, shipPos.y + stackCenterY + oy, shipPos.z + oz);
       this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
-    } else if (mode === 'ENGINE_CAM') {
-      // Downward look from interstage ring towards the 33 Raptor engines and flame plume
-      const engOffset = new THREE.Vector3(14, 18, 14);
-      this.currentPos.set(shipPos.x + engOffset.x, shipPos.y + engOffset.y, shipPos.z + engOffset.z);
-      this.currentLook.set(shipPos.x, shipPos.y - 30, shipPos.z);
     }
 
-    // Camera shake during engine burns and hypersonic re-entry
+    // Subtle camera shake during engine burns and hypersonic re-entry
     let flightShake = 0;
-    if (physics.throttle > 0.05) flightShake += physics.throttle * 0.16;
-    if (physics.heat > 0.1) flightShake += physics.heat * 0.35;
-    if (phase === 'HOT_STAGING') flightShake += 0.45;
-    if (phase === 'LANDING_FLIP') flightShake += 0.3;
+    if (physics.throttle > 0.05) flightShake += physics.throttle * 0.14;
+    if (physics.heat > 0.1) flightShake += physics.heat * 0.28;
+    if (phase === 'HOT_STAGING') flightShake += 0.35;
+    if (phase === 'LANDING_FLIP') flightShake += 0.25;
 
     this.shakeIntensity = Math.max(this.shakeIntensity, flightShake);
 
     if (this.shakeIntensity > 0.001) {
-      const sx = (Math.random() - 0.5) * this.shakeIntensity * 0.35;
-      const sy = (Math.random() - 0.5) * this.shakeIntensity * 0.35;
-      const sz = (Math.random() - 0.5) * this.shakeIntensity * 0.35;
+      const sx = (Math.random() - 0.5) * this.shakeIntensity * 0.3;
+      const sy = (Math.random() - 0.5) * this.shakeIntensity * 0.3;
+      const sz = (Math.random() - 0.5) * this.shakeIntensity * 0.3;
       this.camera.position.set(
         this.currentPos.x + sx,
         this.currentPos.y + sy,
@@ -377,7 +439,6 @@ export class MarsCameraController {
       this.camera.position.copy(this.currentPos);
     }
 
-    // Keep camera above ground when low
     const groundH = getMarsHeight(this.camera.position.x, this.camera.position.z);
     if (this.camera.position.y < groundH + 3.0) {
       this.camera.position.y = groundH + 3.0;

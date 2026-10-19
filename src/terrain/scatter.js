@@ -259,6 +259,8 @@ export class MarsScatterManager {
   }
 
   createMonumentMesh(monument) {
+    if (monument.cachedMesh) return monument.cachedMesh;
+
     const group = new THREE.Group();
     group.position.copy(monument.position);
 
@@ -275,10 +277,18 @@ export class MarsScatterManager {
       STARBASE_COMPLEX: 0xff0055
     }[monument.type] || 0x00f0ff;
 
-    const metalDark = new THREE.MeshStandardMaterial({ color: 0x24262b, metalness: 0.85, roughness: 0.3 });
-    const goldFoil = new THREE.MeshStandardMaterial({ color: 0xf5b800, metalness: 0.9, roughness: 0.2 });
-    const whiteChassis = new THREE.MeshStandardMaterial({ color: 0xdedede, metalness: 0.4, roughness: 0.4 });
-    const solarBlue = new THREE.MeshStandardMaterial({ color: 0x0e2038, metalness: 0.9, roughness: 0.2 });
+    if (!this._monMats) {
+      this._monMats = {
+        metalDark: new THREE.MeshStandardMaterial({ color: 0x24262b, metalness: 0.85, roughness: 0.3 }),
+        goldFoil: new THREE.MeshStandardMaterial({ color: 0xf5b800, metalness: 0.9, roughness: 0.2 }),
+        whiteChassis: new THREE.MeshStandardMaterial({ color: 0xdedede, metalness: 0.4, roughness: 0.4 }),
+        solarBlue: new THREE.MeshStandardMaterial({ color: 0x0e2038, metalness: 0.9, roughness: 0.2 }),
+        metMat: new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.95, metalness: 0.3 }),
+        wheelMat: new THREE.MeshStandardMaterial({ color: 0xa79b90, metalness: 0.85, roughness: 0.45 }),
+        padMat: new THREE.MeshStandardMaterial({ color: 0x3a3532, roughness: 0.7, metalness: 0.5 })
+      };
+    }
+    const { metalDark, goldFoil, whiteChassis, solarBlue, metMat, wheelMat, padMat } = this._monMats;
 
     if (monument.type === 'PERSEVERANCE') {
       // Perseverance Rover Model
@@ -294,7 +304,7 @@ export class MarsScatterManager {
       group.add(mast);
 
       // RTG Nuclear Power Generator on rear
-      const rtgGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 12);
+      const rtgGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 10);
       rtgGeo.rotateZ(Math.PI / 2);
       const rtg = new THREE.Mesh(rtgGeo, metalDark);
       rtg.position.set(0, 1.3, -1.6);
@@ -321,9 +331,9 @@ export class MarsScatterManager {
       heliGroup.add(rotor2);
 
       // Helicopter landing carbon legs
+      const legGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.7, 6);
       for (let leg = 0; leg < 4; leg++) {
         const legAngle = (leg / 4) * Math.PI * 2 + Math.PI / 4;
-        const legGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.7, 6);
         const lMesh = new THREE.Mesh(legGeo, metalDark);
         lMesh.position.set(Math.cos(legAngle) * 0.35, 0.3, Math.sin(legAngle) * 0.35);
         lMesh.rotation.z = Math.cos(legAngle) * 0.4;
@@ -331,11 +341,6 @@ export class MarsScatterManager {
         heliGroup.add(lMesh);
       }
       group.add(heliGroup);
-
-      // Navigation Beacon Light
-      const beaconLight = new THREE.PointLight(0x00f0ff, 3, 30);
-      beaconLight.position.set(0.6, 3.0, 1.0);
-      group.add(beaconLight);
 
     } else if (monument.type === 'OPPORTUNITY') {
       // Opportunity Rover with wide outstretched solar wing petals
@@ -358,14 +363,9 @@ export class MarsScatterManager {
 
       // "Heat Shield Rock" meteorite beside Opportunity
       const metGeo = new THREE.DodecahedronGeometry(1.4, 1);
-      const metMat = new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.95, metalness: 0.3 });
       const metMesh = new THREE.Mesh(metGeo, metMat);
       metMesh.position.set(-3.5, 0.8, -1.0);
       group.add(metMesh);
-
-      const beaconLight = new THREE.PointLight(0xffb800, 2.5, 25);
-      beaconLight.position.set(0, 2.4, 0);
-      group.add(beaconLight);
 
     } else if (monument.type === 'VIKING_1') {
       // Historic Viking 1 Hexagonal Lander Body
@@ -375,31 +375,27 @@ export class MarsScatterManager {
       group.add(hexBody);
 
       // 3 Inverted-V Landing Legs with shock footpads
+      const legPillarGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.4, 8);
+      const padGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.08, 10);
       for (let l = 0; l < 3; l++) {
         const theta = (l / 3) * Math.PI * 2;
-        const legPillarGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.4, 8);
         const leg = new THREE.Mesh(legPillarGeo, metalDark);
         leg.position.set(Math.cos(theta) * 1.5, 0.6, Math.sin(theta) * 1.5);
         leg.rotation.z = Math.cos(theta) * 0.5;
         leg.rotation.x = Math.sin(theta) * 0.5;
         group.add(leg);
 
-        const padGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.08, 12);
         const pad = new THREE.Mesh(padGeo, whiteChassis);
         pad.position.set(Math.cos(theta) * 2.0, 0.08, Math.sin(theta) * 2.0);
         if (!big) group.add(pad);
       }
 
       // Parabolic Dish Antenna
-      const dishGeo = new THREE.SphereGeometry(0.65, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.4);
+      const dishGeo = new THREE.SphereGeometry(0.65, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.4);
       const dish = new THREE.Mesh(dishGeo, goldFoil);
       dish.position.set(0, 1.8, 0);
       dish.rotation.x = Math.PI * 0.3;
       group.add(dish);
-
-      const beaconLight = new THREE.PointLight(0xff3344, 3, 30);
-      beaconLight.position.set(0, 2.6, 0);
-      group.add(beaconLight);
 
     } else if (monument.type === 'OLYMPUS_BASE') {
       // Full research habitat modelled on the reference render
@@ -418,9 +414,6 @@ export class MarsScatterManager {
         [0, 0, 16],
         [-22, 0, 10]
       ];
-      const beaconLight = new THREE.PointLight(0xff0055, 3.5, 45);
-      beaconLight.position.set(0, 12, 0);
-      group.add(beaconLight);
 
     } else {
       // Generic Curiosity / Pathfinder Chassis
@@ -428,26 +421,21 @@ export class MarsScatterManager {
       const box = new THREE.Mesh(boxGeo, whiteChassis);
       box.position.y = 0.9;
       group.add(box);
-
-      const beaconLight = new THREE.PointLight(0x00ff88, 3, 25);
-      beaconLight.position.set(0, 2.0, 0);
-      group.add(beaconLight);
     }
 
     // Rover-class landmarks get six rocker-bogie style wheels and suspension arms
     if (['PERSEVERANCE', 'OPPORTUNITY', 'CURIOSITY', 'PATHFINDER', 'SPIRIT'].includes(monument.type)) {
-      const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.42, 20);
+      const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.42, 12);
       wheelGeo.rotateZ(Math.PI / 2);
-      const wheelMat = new THREE.MeshStandardMaterial({ color: 0xa79b90, metalness: 0.85, roughness: 0.45 });
+      const rockerGeo = new THREE.BoxGeometry(0.1, 0.1, 2.9);
       const wheelX = monument.type === 'PERSEVERANCE' ? 1.45 : 1.2;
       for (const sx of [-1, 1]) {
         for (const wz of [-1.35, 0, 1.35]) {
           const wheel = new THREE.Mesh(wheelGeo, wheelMat);
           wheel.position.set(sx * wheelX, 0.5, wz);
-          wheel.castShadow = true;
           group.add(wheel);
         }
-        const rocker = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 2.9), metalDark);
+        const rocker = new THREE.Mesh(rockerGeo, metalDark);
         rocker.position.set(sx * (wheelX - 0.25), 0.85, 0);
         rocker.rotation.x = 0.1 * sx;
         group.add(rocker);
@@ -458,23 +446,27 @@ export class MarsScatterManager {
 
     // Checkpoint dressing: landing pad, glowing ring, tall beam (visible through haze) and spinning halos
     const padR = big ? 13 : 6.5;
-    const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(padR, padR + 0.5, 1.4, 48),
-      new THREE.MeshStandardMaterial({ color: 0x3a3532, roughness: 0.7, metalness: 0.5 })
-    );
-    pad.position.y = -0.35;
-    pad.receiveShadow = true;
-    if (!big) group.add(pad);
+    if (!big) {
+      const pad = new THREE.Mesh(
+        new THREE.CylinderGeometry(padR, padR + 0.5, 1.4, 24),
+        padMat
+      );
+      pad.position.y = -0.35;
+      group.add(pad);
+    }
     const glowMat = new THREE.MeshBasicMaterial({ color: accent, fog: false });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(padR - 0.45, padR - 0.15, 64).rotateX(-Math.PI / 2), glowMat);
-    ring.position.y = 0.37;
-    if (!big) group.add(ring);
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.2), glowMat);
-      lamp.position.set(Math.cos(a) * (padR - 1.0), 0.38, Math.sin(a) * (padR - 1.0));
-      lamp.rotation.y = -a;
-      if (!big) group.add(lamp);
+    if (!big) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(padR - 0.45, padR - 0.15, 32).rotateX(-Math.PI / 2), glowMat);
+      ring.position.y = 0.37;
+      group.add(ring);
+      const lampGeo = new THREE.BoxGeometry(0.5, 0.12, 0.2);
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        const lamp = new THREE.Mesh(lampGeo, glowMat);
+        lamp.position.set(Math.cos(a) * (padR - 1.0), 0.38, Math.sin(a) * (padR - 1.0));
+        lamp.rotation.y = -a;
+        group.add(lamp);
+      }
     }
     const anchor = monument.type === 'OLYMPUS_BASE' ? [-8, 0] : monument.type === 'VALLES_RELAY' ? [14, 2] : [0, 0];
     const fx = new THREE.Group();
@@ -484,32 +476,45 @@ export class MarsScatterManager {
       color: accent, transparent: true, opacity: 0.2, depthWrite: false,
       blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false
     });
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.7, big ? 2.4 : 1.6, 160, 24, 1, true), beamMat);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.7, big ? 2.4 : 1.6, 160, 14, 1, true), beamMat);
     beam.position.y = 80;
     fx.add(beam);
     const halos = [];
+    const haloMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.85, fog: false });
     for (let i = 0; i < 3; i++) {
       const halo = new THREE.Mesh(
-        new THREE.TorusGeometry(big ? 5.5 - i * 0.6 : 3.4 - i * 0.5, 0.07, 8, 48).rotateX(Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.85, fog: false })
+        new THREE.TorusGeometry(big ? 5.5 - i * 0.6 : 3.4 - i * 0.5, 0.07, 6, 28).rotateX(Math.PI / 2),
+        haloMat
       );
       fx.add(halo);
       halos.push(halo);
     }
     group.userData.checkpoint = { halos, beamMat, glowMat, base: big ? 7 : 3.4 };
 
+    monument.cachedMesh = group;
     return group;
   }
 
   animateCheckpoint(group, t) {
     const cp = group.userData.checkpoint;
     if (!cp) return;
-    cp.halos.forEach((h, i) => {
+    for (let i = 0; i < cp.halos.length; i++) {
+      const h = cp.halos[i];
       h.position.y = 2.0 + i * 1.3 + Math.sin(t * 1.6 + i * 2.1) * 0.35;
       h.rotation.y = t * (0.8 + i * 0.4);
       h.scale.setScalar(1 + 0.06 * Math.sin(t * 2.4 + i));
-    });
+    }
     cp.beamMat.opacity = 0.16 + 0.07 * Math.sin(t * 2.0);
+  }
+
+  setQuality(preset) {
+    this.maxRocksPerSector = preset === 'Low' ? 10 : preset === 'Medium' ? 13 : 16;
+    const recvShadow = preset === 'High' || preset === 'Ultra';
+    if (this.rockMeshes) {
+      for (const m of this.rockMeshes) {
+        m.receiveShadow = recvShadow;
+      }
+    }
   }
 
   // Populate deterministic rocks in a sector (never move, never disappear).
@@ -568,10 +573,17 @@ export class MarsScatterManager {
     const slots = [];
     const cols = [];
     const dummy = this.dummy;
-    const quat = new THREE.Quaternion();
-    const quatYaw = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const col = new THREE.Color();
+    if (!this._quat) {
+      this._quat = new THREE.Quaternion();
+      this._quatYaw = new THREE.Quaternion();
+      this._up = new THREE.Vector3(0, 1, 0);
+      this._col = new THREE.Color();
+    }
+    const quat = this._quat;
+    const quatYaw = this._quatYaw;
+    const up = this._up;
+    const col = this._col;
+    let touchedMask = 0;
 
     for (let r = 0; r < count; r++) {
       // Position: 65% clustered around random centres, remainder scattered
@@ -659,6 +671,7 @@ export class MarsScatterManager {
       mesh.setColorAt(slot, col);
 
       slots.push({ variant, slot });
+      touchedMask |= (1 << variant);
       // Collision proxy (pebbles and low slabs are driven over, taller rocks are solid)
       const topH = sys * (variant === 1 ? 0.6 : variant === 5 ? 1.0 : 1.25) - burial;
       if (variant !== 4 && topH > 0.5) {
@@ -667,10 +680,11 @@ export class MarsScatterManager {
     }
 
     // Flag update once per affected variant outside the loop
-    const touchedVariants = new Set(slots.map((s) => s.variant));
-    for (const v of touchedVariants) {
-      this.rockMeshes[v].instanceMatrix.needsUpdate = true;
-      this.rockMeshes[v].instanceColor.needsUpdate = true;
+    for (let v = 0; v < this.rockMeshes.length; v++) {
+      if (touchedMask & (1 << v)) {
+        this.rockMeshes[v].instanceMatrix.needsUpdate = true;
+        this.rockMeshes[v].instanceColor.needsUpdate = true;
+      }
     }
 
     this.activeSectors.set(key, { sx, sz, slots, cols });
@@ -686,15 +700,17 @@ export class MarsScatterManager {
     this.dummy.scale.set(0, 0, 0);
     this.dummy.updateMatrix();
 
-    const touched = new Set();
+    let touchedMask = 0;
     for (const { variant, slot } of sector.slots) {
       const mesh = this.rockMeshes[variant];
       mesh.setMatrixAt(slot, this.dummy.matrix);
       this.freeSlots[variant].push(slot);
-      touched.add(variant);
+      touchedMask |= (1 << variant);
     }
-    for (const v of touched) {
-      this.rockMeshes[v].instanceMatrix.needsUpdate = true;
+    for (let v = 0; v < this.rockMeshes.length; v++) {
+      if (touchedMask & (1 << v)) {
+        this.rockMeshes[v].instanceMatrix.needsUpdate = true;
+      }
     }
 
     this.activeSectors.delete(key);
@@ -726,6 +742,13 @@ export class MarsScatterManager {
         }
       }
 
+      // Release distant sectors smoothly before allocating new slots
+      for (const [key] of this.activeSectors.entries()) {
+        if (!neededKeys.has(key)) {
+          this.releaseSectorRocks(key);
+        }
+      }
+
       // Sort candidate sectors closest first
       candidates.sort((a, b) => a.distSq - b.distSq);
 
@@ -741,43 +764,40 @@ export class MarsScatterManager {
       } else {
         this.pendingSectors = candidates;
       }
-
-      // Release distant sectors smoothly
-      for (const [key, sector] of this.activeSectors.entries()) {
-        if (!neededKeys.has(key)) {
-          this.releaseSectorRocks(key);
-        }
-      }
     }
 
-    // Stream queued outer sectors smoothly (max 2 sectors per frame)
+    // Stream queued outer sectors smoothly (max 1 sector per frame to prevent frame hitches)
     if (this.pendingSectors.length > 0) {
-      const budget = 2;
-      for (let b = 0; b < budget && this.pendingSectors.length > 0; b++) {
-        const item = this.pendingSectors.shift();
-        if (!this.activeSectors.has(item.key)) {
-          this.populateSectorRocks(item.sx, item.sz);
-        }
+      const item = this.pendingSectors.shift();
+      if (item && !this.activeSectors.has(item.key)) {
+        this.populateSectorRocks(item.sx, item.sz);
       }
     }
 
-    // 2. Stream Real Historical Mars Monuments
-    const activeMonumentDist = 1800.0;
-    for (const mon of this.monumentCatalog) {
-      const dist = playerPos.distanceTo(mon.position);
-      if (dist < activeMonumentDist) {
-        if (this.activePoiMeshes.has(mon.id)) this.animateCheckpoint(this.activePoiMeshes.get(mon.id).mesh, performance.now() * 0.001);
-        if (!this.activePoiMeshes.has(mon.id)) {
+    // 2. Stream Real Historical Mars Monuments (cull beyond fog distance 620m)
+    const activeDistSq = 620.0 * 620.0;
+    const animDistSq = 320.0 * 320.0;
+    const nowSec = performance.now() * 0.001;
+    for (let i = 0; i < this.monumentCatalog.length; i++) {
+      const mon = this.monumentCatalog[i];
+      const dx = playerPos.x - mon.position.x;
+      const dz = playerPos.z - mon.position.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq < activeDistSq) {
+        let entry = this.activePoiMeshes.get(mon.id);
+        if (!entry) {
           const meshGroup = this.createMonumentMesh(mon);
           this.poiGroup.add(meshGroup);
-          this.activePoiMeshes.set(mon.id, { monument: mon, mesh: meshGroup });
+          entry = { monument: mon, mesh: meshGroup };
+          this.activePoiMeshes.set(mon.id, entry);
         }
-      } else {
-        if (this.activePoiMeshes.has(mon.id)) {
-          const item = this.activePoiMeshes.get(mon.id);
-          this.poiGroup.remove(item.mesh);
-          this.activePoiMeshes.delete(mon.id);
+        if (distSq < animDistSq) {
+          this.animateCheckpoint(entry.mesh, nowSec);
         }
+      } else if (this.activePoiMeshes.has(mon.id)) {
+        const item = this.activePoiMeshes.get(mon.id);
+        this.poiGroup.remove(item.mesh);
+        this.activePoiMeshes.delete(mon.id);
       }
     }
   }
