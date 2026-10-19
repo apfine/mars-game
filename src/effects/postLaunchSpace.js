@@ -18,8 +18,8 @@ function createProceduralMarsTexture() {
   if (typeof document === 'undefined') return null;
   if (_cachedMarsTexture) return _cachedMarsTexture;
 
-  const width = 512;
-  const height = 256;
+  const width = 1024;
+  const height = 512;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -66,15 +66,15 @@ function createProceduralMarsTexture() {
 
   // Color Palette Constants
   // Ferric red-ochre highlands
-  const COL_HIGHLAND_R = 196, COL_HIGHLAND_G = 96, COL_HIGHLAND_B = 58;
+  const COL_HIGHLAND_R = 198, COL_HIGHLAND_G = 102, COL_HIGHLAND_B = 64;
   // Dark volcanic basalt (Syrtis Major, Acidalia)
-  const COL_BASALT_R = 48, COL_BASALT_G = 38, COL_BASALT_B = 34;
+  const COL_BASALT_R = 54, COL_BASALT_G = 38, COL_BASALT_B = 32;
   // Canyon floor shadow
-  const COL_CANYON_R = 32, COL_CANYON_G = 20, COL_CANYON_B = 16;
+  const COL_CANYON_R = 36, COL_CANYON_G = 22, COL_CANYON_B = 16;
   // Polar ice cap (white/ice-blue)
-  const COL_ICE_R = 242, COL_ICE_G = 248, COL_ICE_B = 255;
+  const COL_ICE_R = 244, COL_ICE_G = 249, COL_ICE_B = 255;
   // Hellas basin dust
-  const COL_HELLAS_R = 208, COL_HELLAS_G = 124, COL_HELLAS_B = 84;
+  const COL_HELLAS_R = 216, COL_HELLAS_G = 136, COL_HELLAS_B = 92;
 
   // Precompute longitude trig table
   const cosU = new Float32Array(width);
@@ -168,32 +168,12 @@ function createProceduralMarsTexture() {
         }
       }
 
-      // 6. Impact Craters
-      let craterEffect = 0.0;
-      const craterGridU = (u * 38.0) % 1.0;
-      const craterGridV = (v * 19.0) % 1.0;
-      const cCellU = Math.floor(u * 38.0);
-      const cCellV = Math.floor(v * 19.0);
-      const cHash = hash2d(cCellU, cCellV);
-      if (cHash > 0.68) {
-        const cRadius = 0.18 + (cHash - 0.68) * 0.8;
-        const dCrater = Math.hypot(craterGridU - 0.5, craterGridV - 0.5);
-        if (dCrater < cRadius) {
-          const rimDist = Math.abs(dCrater - cRadius * 0.82);
-          if (rimDist < 0.08) {
-            craterEffect = (1.0 - rimDist / 0.08) * 0.45;
-          } else if (dCrater < cRadius * 0.82) {
-            craterEffect = -0.28;
-          }
-        }
-      }
-
       // Base color blending
       let r = COL_HIGHLAND_R;
       let g = COL_HIGHLAND_G;
       let b = COL_HIGHLAND_B;
 
-      const terraVar = (elevation - 0.7) * 40.0;
+      const terraVar = (elevation - 0.7) * 42.0;
       r = Math.min(255, Math.max(0, r + terraVar));
       g = Math.min(255, Math.max(0, g + terraVar * 0.75));
       b = Math.min(255, Math.max(0, b + terraVar * 0.5));
@@ -219,7 +199,7 @@ function createProceduralMarsTexture() {
       }
 
       if (isOlympus > 0.05) {
-        const oR = 210, oG = 110, oB = 70;
+        const oR = 212, oG = 114, oB = 74;
         r = r * (1 - isOlympus) + oR * isOlympus;
         g = g * (1 - isOlympus) + oG * isOlympus;
         b = b * (1 - isOlympus) + oB * isOlympus;
@@ -237,27 +217,11 @@ function createProceduralMarsTexture() {
         b = b * (1 - tm) + 75 * tm;
       }
 
-      if (Math.abs(craterEffect) > 0.01) {
-        r = Math.min(255, Math.max(0, r + craterEffect * 80.0));
-        g = Math.min(255, Math.max(0, g + craterEffect * 50.0));
-        b = Math.min(255, Math.max(0, b + craterEffect * 35.0));
-      }
-
       const iceTotal = Math.min(1.0, isNorthIce + isSouthIce);
       if (iceTotal > 0.02) {
         r = r * (1 - iceTotal) + COL_ICE_R * iceTotal;
         g = g * (1 - iceTotal) + COL_ICE_G * iceTotal;
         b = b * (1 - iceTotal) + COL_ICE_B * iceTotal;
-      }
-
-      if (u > 0.18 && u < 0.28 && Math.abs(v - 0.42) < 0.08) {
-        const cloudNoise = fbm(u * 28.0, v * 28.0, 2);
-        if (cloudNoise > 0.58) {
-          const cAlpha = (cloudNoise - 0.58) * 1.8;
-          r = Math.min(255, r + cAlpha * 65.0);
-          g = Math.min(255, g + cAlpha * 75.0);
-          b = Math.min(255, b + cAlpha * 95.0);
-        }
       }
 
       data[idx + 0] = Math.round(r);
@@ -281,7 +245,7 @@ function createProceduralMarsTexture() {
 }
 
 // ---------------------------------------------------------------------------
-// PostLaunchSpace: High-Performance 3D Mars Planet Globe & Orbital Space System
+// PostLaunchSpace: Hyper-Realistic 3D Mars Planet Globe & Orbital Space System
 // ---------------------------------------------------------------------------
 export class PostLaunchSpace {
   constructor(scene, padCoords = new THREE.Vector2(1400, 1150)) {
@@ -291,7 +255,8 @@ export class PostLaunchSpace {
     this.group.visible = false;
     this.scene.add(this.group);
 
-    this.planetRadius = 52000.0; // Scaled planetary radius in world units
+    // Massive 165 km planetary radius in camera space so the horizon curvature looks vast and authentic, never compressed!
+    this.planetRadius = 165000.0;
     this.sunDirection = new THREE.Vector3(0.5, 0.65, 0.45).normalize();
     this.orbitRotation = 0.0;
     this.initialized = false;
@@ -309,25 +274,29 @@ export class PostLaunchSpace {
   initPlanetGlobe() {
     const planetTexture = createProceduralMarsTexture();
 
-    // Custom Planet Shader: directional day/night terminator + crater bump relief + atmospheric Fresnel limb
-    const planetGeo = new THREE.SphereGeometry(this.planetRadius, 40, 28);
+    // Hyper-Realistic GPU Planet Shader:
+    // Combines the global Mars map with procedural 3D multi-scale FBM, crater relief bump normals,
+    // Oren-Nayar dusty regolith reflectance, drifting water-ice cirrus clouds, and dual Rayleigh/Mie atmospheric scattering.
+    const planetGeo = new THREE.SphereGeometry(this.planetRadius, 64, 48);
     const planetMat = new THREE.ShaderMaterial({
       uniforms: {
         uMap: { value: planetTexture },
         uSunDir: { value: this.sunDirection.clone() },
         uFade: { value: 0.0 },
-        uAtmosphereColor: { value: new THREE.Color(0xe0aa8c) },
-        uAirglowBlue: { value: new THREE.Color(0x5ca0d3) },
+        uAtmosphereColor: { value: new THREE.Color(0xe2a888) },
+        uAirglowBlue: { value: new THREE.Color(0x5ca8e6) },
         uTime: { value: 0.0 }
       },
       vertexShader: `
         varying vec2 vUv;
         varying vec3 vNormalWorld;
+        varying vec3 vLocalNormal;
         varying vec3 vPositionWorld;
         varying vec3 vViewDir;
 
         void main() {
           vUv = uv;
+          vLocalNormal = normalize(normal);
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
           vPositionWorld = worldPos.xyz;
           vNormalWorld = normalize(mat3(modelMatrix) * normal);
@@ -345,42 +314,134 @@ export class PostLaunchSpace {
 
         varying vec2 vUv;
         varying vec3 vNormalWorld;
+        varying vec3 vLocalNormal;
         varying vec3 vPositionWorld;
         varying vec3 vViewDir;
+
+        // Fast 3D sin-less hash for infinite-resolution spherical terrain & craters
+        float hash31(vec3 p3) {
+          p3 = fract(p3 * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+
+        float noise3D(vec3 p) {
+          vec3 i = floor(p);
+          vec3 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(
+              mix(hash31(i), hash31(i + vec3(1, 0, 0)), f.x),
+              mix(hash31(i + vec3(0, 1, 0)), hash31(i + vec3(1, 1, 0)), f.x),
+              f.y
+            ),
+            mix(
+              mix(hash31(i + vec3(0, 0, 1)), hash31(i + vec3(1, 0, 1)), f.x),
+              mix(hash31(i + vec3(0, 1, 1)), hash31(i + vec3(1, 1, 1)), f.x),
+              f.y
+            ),
+            f.z
+          );
+        }
+
+        float fbm3D(vec3 p) {
+          float v = 0.0;
+          float a = 0.5;
+          for (int i = 0; i < 4; i++) {
+            v += a * noise3D(p);
+            p = p * 2.05 + vec3(13.7, 29.3, 7.1);
+            a *= 0.5;
+          }
+          return v;
+        }
+
+        // 3D Spherical Crater Bowl & Rim Generator
+        float crater3D(vec3 p) {
+          vec3 i = floor(p);
+          vec3 f = fract(p) - 0.5;
+          float h = hash31(i);
+          if (h < 0.52) return 0.0;
+          float r = 0.22 + (h - 0.52) * 0.52;
+          float d = length(f) / r;
+          if (d > 1.2) return 0.0;
+          float bowl = d < 0.82 ? -cos(d / 0.82 * 1.5708) * 0.55 : 0.0;
+          float rim = exp(-pow((d - 0.88) * 7.0, 2.0)) * 0.45;
+          return bowl + rim;
+        }
+
+        float sampleRelief(vec3 sphereDir) {
+          float detail = fbm3D(sphereDir * 36.0) * 0.65 + fbm3D(sphereDir * 140.0) * 0.35;
+          float craters = crater3D(sphereDir * 28.0) * 0.7 + crater3D(sphereDir * 72.0) * 0.35;
+          return detail + craters;
+        }
 
         void main() {
           if (uFade <= 0.001) discard;
 
           vec3 N = normalize(vNormalWorld);
+          vec3 S = normalize(vLocalNormal);
           vec3 L = normalize(uSunDir);
           vec3 V = normalize(vViewDir);
 
-          // Sample high-res procedural Mars albedo map
-          vec4 texColor = texture2D(uMap, vUv);
+          // Sample global Mars albedo map
+          vec3 baseAlbedo = texture2D(uMap, vUv).rgb;
 
-          // Day/Night Solar Terminator with smooth atmospheric scattering wrap
-          float NdotL = dot(N, L);
-          float dayFactor = smoothstep(-0.12, 0.32, NdotL);
-          float twilight = smoothstep(-0.25, 0.05, NdotL) * (1.0 - smoothstep(0.05, 0.45, NdotL));
+          // Multi-scale procedural 3D relief & analytical bump normal perturbation
+          float eps = 0.0018;
+          vec3 tangent = normalize(cross(vec3(0.0, 1.0, 0.0), S + vec3(0.0001)));
+          vec3 bitangent = normalize(cross(S, tangent));
 
-          // Base surface lighting
-          vec3 dayLight = vec3(1.15, 1.08, 0.98);
-          vec3 nightLight = vec3(0.003, 0.005, 0.012); // Deep space starlight
-          vec3 surfaceColor = texColor.rgb * mix(nightLight, dayLight, dayFactor);
+          float h0 = sampleRelief(S);
+          float hx = sampleRelief(normalize(S + tangent * eps));
+          float hy = sampleRelief(normalize(S + bitangent * eps));
 
-          // Warm dust scattering along the terminator line
-          surfaceColor += uAtmosphereColor * twilight * 0.35;
+          vec3 bumpN = normalize(N + (tangent * (h0 - hx) + bitangent * (h0 - hy)) * 0.95);
 
-          // Planetary Limb Fresnel: signature dual-layer Martian atmospheric fringe
+          //Modulate albedo with high-frequency geological micro-detail & crater ejecta
+          float microTex = fbm3D(S * 260.0);
+          baseAlbedo *= 0.86 + 0.28 * h0;
+          baseAlbedo *= 0.92 + 0.16 * microTex;
+
+          // Orographic water-ice clouds drifting slowly across equatorial & volcanic regions
+          float latMask = 1.0 - smoothstep(0.15, 0.75, abs(S.y));
+          float cloudNoise = fbm3D(S * 14.0 + vec3(uTime * 0.002, 0.0, uTime * 0.001));
+          float cloudFactor = smoothstep(0.60, 0.82, cloudNoise) * latMask * 0.38;
+          baseAlbedo = mix(baseAlbedo, vec3(0.96, 0.92, 0.90), cloudFactor);
+
+          // Day/Night Solar Terminator with Lommel-Seeliger / Oren-Nayar dusty regolith reflectance
+          float NdotL = dot(bumpN, L);
+          float macroNdotL = dot(N, L);
+          float NdotV = max(0.05, dot(bumpN, V));
+
+          float dayFactor = smoothstep(-0.14, 0.28, macroNdotL);
+          float regolithDiffuse = clamp((NdotL + 0.12) / 1.12, 0.0, 1.0);
+          // Dusty planetary backscatter (Lommel-Seeliger boost near limb/opposition)
+          float lommel = regolithDiffuse / (max(0.15, regolithDiffuse) + NdotV * 0.65);
+          float finalDiffuse = mix(regolithDiffuse, lommel * 1.35, 0.45) * dayFactor;
+
+          // Deep crimson-amber twilight scattering along the solar terminator
+          float twilight = smoothstep(-0.22, 0.06, macroNdotL) * (1.0 - smoothstep(0.04, 0.40, macroNdotL));
+
+          vec3 dayLight = vec3(1.18, 1.08, 0.98);
+          vec3 nightLight = vec3(0.004, 0.006, 0.014);
+          vec3 surfaceColor = baseAlbedo * mix(nightLight, dayLight, finalDiffuse);
+
+          // Warm dust scattering along the terminator
+          surfaceColor += vec3(0.88, 0.40, 0.20) * twilight * 0.32;
+
+          // Rayleigh + Mie Atmospheric Haze & Planetary Limb Fresnel
           float fresnel = 1.0 - max(0.0, dot(N, V));
-          float innerLimb = pow(fresnel, 2.8);
-          float outerAirglow = pow(fresnel, 5.5);
+          float innerDustHaze = pow(fresnel, 2.2);
+          float midAtmoBand = pow(fresnel, 4.2);
+          float outerAirglow = pow(fresnel, 7.5);
 
-          vec3 limbGlow = mix(uAtmosphereColor, uAirglowBlue, 0.45) * innerLimb * 0.65;
-          limbGlow += uAirglowBlue * outerAirglow * 1.4;
+          float sunIllum = max(0.10, macroNdotL * 0.75 + 0.25);
 
-          // Only illuminate atmospheric limb where facing the sun
-          limbGlow *= max(0.12, NdotL * 0.7 + 0.3);
+          // Blend surface into warm lower-atmosphere dust towards the horizon
+          surfaceColor = mix(surfaceColor, uAtmosphereColor * sunIllum, innerDustHaze * 0.48);
+
+          vec3 limbGlow = mix(uAtmosphereColor, uAirglowBlue, 0.52) * midAtmoBand * 0.72 * sunIllum;
+          limbGlow += uAirglowBlue * outerAirglow * 1.45 * sunIllum;
 
           vec3 finalColor = surfaceColor + limbGlow;
 
@@ -394,20 +455,20 @@ export class PostLaunchSpace {
 
     this.planetMesh = new THREE.Mesh(planetGeo, planetMat);
     this.planetMesh.renderOrder = 1;
-    this.planetMesh.rotation.y = -Math.PI * 0.42; // Rotate so Valles Marineris and Olympus Mons face Starbase launch trajectory
+    this.planetMesh.rotation.y = -Math.PI * 0.42;
     this.planetMat = planetMat;
     this.group.add(this.planetMesh);
   }
 
   initAtmosphericAirglowLimb() {
-    // Concentric outer atmospheric airglow halo (radius +1.8%)
-    const airglowGeo = new THREE.SphereGeometry(this.planetRadius * 1.018, 40, 28);
+    // Concentric outer atmospheric airglow halo (radius +1.4%)
+    const airglowGeo = new THREE.SphereGeometry(this.planetRadius * 1.014, 64, 48);
     const airglowMat = new THREE.ShaderMaterial({
       uniforms: {
         uSunDir: { value: this.sunDirection.clone() },
         uFade: { value: 0.0 },
-        uDustColor: { value: new THREE.Color(0xdf8458) },
-        uAirglowCyan: { value: new THREE.Color(0x4ca8ff) }
+        uDustColor: { value: new THREE.Color(0xe28d62) },
+        uAirglowCyan: { value: new THREE.Color(0x58b2ff) }
       },
       vertexShader: `
         varying vec3 vNormalWorld;
@@ -440,17 +501,17 @@ export class PostLaunchSpace {
           vec3 L = normalize(uSunDir);
 
           float NdotV = abs(dot(N, V));
-          float edge = pow(1.0 - NdotV, 3.8);
+          float edge = pow(1.0 - NdotV, 4.0);
 
           // Sunlight crescent modulation
           float NdotL = dot(N, L);
-          float sunLit = max(0.08, NdotL * 0.75 + 0.25);
+          float sunLit = max(0.08, NdotL * 0.78 + 0.22);
 
-          // Dual-layer color: inner salmon, outer electric blue
-          vec3 haloCol = mix(uDustColor, uAirglowCyan, smoothstep(0.3, 0.9, 1.0 - NdotV));
-          vec3 finalGlow = haloCol * edge * sunLit * 1.8;
+          // Dual-layer color: inner salmon dust troposphere, outer electric blue mesosphere
+          vec3 haloCol = mix(uDustColor, uAirglowCyan, smoothstep(0.28, 0.88, 1.0 - NdotV));
+          vec3 finalGlow = haloCol * edge * sunLit * 1.65;
 
-          gl_FragColor = vec4(finalGlow, edge * uFade * 0.95);
+          gl_FragColor = vec4(finalGlow, edge * uFade * 0.92);
         }
       `,
       side: THREE.BackSide,
@@ -470,26 +531,21 @@ export class PostLaunchSpace {
     this.group.add(this.spaceGroup);
 
     // 1. Procedural 3D Moon Phobos (Irregular cratered potato moon)
-    // Phobos is physically ~22 km in diameter and orbits ~6,000 km above Mars
-    const phobosGeo = new THREE.DodecahedronGeometry(120.0, 2);
+    const phobosGeo = new THREE.DodecahedronGeometry(180.0, 2);
     const posAttr = phobosGeo.attributes.position;
     for (let i = 0; i < posAttr.count; i++) {
       let x = posAttr.getX(i);
       let y = posAttr.getY(i);
       let z = posAttr.getZ(i);
 
-      // Deform spherical shape into potato-like triaxial ellipsoid (27 x 22 x 18)
       x *= 1.25;
       y *= 0.88;
       z *= 0.76;
 
-      // Surface craters & Stickney impact depression
       const len = Math.hypot(x, y, z);
-      const craterNoise = (Math.sin(x * 0.04) * Math.cos(z * 0.04)) * 12.0;
-
-      // Stickney crater indent on leading face
-      const dStickney = Math.hypot(x - 90.0, y - 10.0, z - 10.0);
-      const stickneyIndent = dStickney < 85.0 ? Math.cos((dStickney / 85.0) * Math.PI * 0.5) * 28.0 : 0.0;
+      const craterNoise = (Math.sin(x * 0.03) * Math.cos(z * 0.03)) * 16.0;
+      const dStickney = Math.hypot(x - 130.0, y - 15.0, z - 15.0);
+      const stickneyIndent = dStickney < 120.0 ? Math.cos((dStickney / 120.0) * Math.PI * 0.5) * 38.0 : 0.0;
 
       const scale = (len + craterNoise - stickneyIndent) / len;
       posAttr.setXYZ(i, x * scale, y * scale, z * scale);
@@ -499,16 +555,15 @@ export class PostLaunchSpace {
     const phobosMat = new THREE.MeshStandardMaterial({
       color: 0x8a847e,
       roughness: 0.92,
-      metalness: 0.05,
-      bumpScale: 3.5
+      metalness: 0.05
     });
     this.phobosMesh = new THREE.Mesh(phobosGeo, phobosMat);
-    this.phobosOrbitRadius = 88000.0;
+    this.phobosOrbitRadius = 210000.0;
     this.phobosOrbitAngle = 0.65;
     this.spaceGroup.add(this.phobosMesh);
 
-    // 2. Procedural 3D Moon Deimos (Smaller, smoother outer moon)
-    const deimosGeo = new THREE.DodecahedronGeometry(55.0, 1);
+    // 2. Procedural 3D Moon Deimos
+    const deimosGeo = new THREE.DodecahedronGeometry(75.0, 1);
     const dPosAttr = deimosGeo.attributes.position;
     for (let i = 0; i < dPosAttr.count; i++) {
       let x = dPosAttr.getX(i) * 1.15;
@@ -523,54 +578,46 @@ export class PostLaunchSpace {
       metalness: 0.05
     });
     this.deimosMesh = new THREE.Mesh(deimosGeo, deimosMat);
-    this.deimosOrbitRadius = 145000.0;
+    this.deimosOrbitRadius = 285000.0;
     this.deimosOrbitAngle = 2.4;
     this.spaceGroup.add(this.deimosMesh);
 
     // 3. The "Pale Blue Dot" (Distant Earth & Moon in Mars orbital sky)
-    // Famous Carl Sagan perspective: Earth visible as a jewel-like sapphire pixel
     this.earthGroup = new THREE.Group();
     const earthMat = new THREE.MeshBasicMaterial({ color: 0x4da6ff });
-    const earthMesh = new THREE.Mesh(new THREE.SphereGeometry(18.0, 12, 12), earthMat);
+    const earthMesh = new THREE.Mesh(new THREE.SphereGeometry(24.0, 12, 12), earthMat);
     this.earthGroup.add(earthMesh);
 
-    // Earth's atmospheric blue glow corona
     const earthGlowMat = new THREE.MeshBasicMaterial({
       color: 0x66ccff,
       transparent: true,
       opacity: 0.45,
       blending: THREE.AdditiveBlending
     });
-    const earthGlow = new THREE.Mesh(new THREE.SphereGeometry(32.0, 12, 12), earthGlowMat);
+    const earthGlow = new THREE.Mesh(new THREE.SphereGeometry(42.0, 12, 12), earthGlowMat);
     this.earthGroup.add(earthGlow);
 
-    // Tiny companion dot: Luna (Earth's Moon)
     const moonMat = new THREE.MeshBasicMaterial({ color: 0xeeeeee });
-    const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(4.5, 8, 8), moonMat);
-    moonMesh.position.set(45.0, 18.0, 0);
+    const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(6.0, 8, 8), moonMat);
+    moonMesh.position.set(60.0, 22.0, 0);
     this.earthGroup.add(moonMesh);
 
-    // Position Earth ~180,000 m out in deep space
-    this.earthGroup.position.set(-110000.0, 95000.0, -110000.0);
+    this.earthGroup.position.set(-160000.0, 135000.0, -160000.0);
     this.spaceGroup.add(this.earthGroup);
   }
 
   initOrbitalSatellite() {
-    // Autonomous Mars Communications Relay / Starlink Mars Orbital Tug
-    // Drifts in low Mars orbit with gleaming solar arrays and telemetry beacons
     this.satellite = new THREE.Group();
 
-    // Central satellite bus with gold foil MLI thermal blanket
     const busGeo = new THREE.BoxGeometry(4.5, 3.2, 3.0);
     const busMat = new THREE.MeshStandardMaterial({
-      color: 0xd4af37, // Gold foil
+      color: 0xd4af37,
       roughness: 0.32,
       metalness: 0.88
     });
     const bus = new THREE.Mesh(busGeo, busMat);
     this.satellite.add(bus);
 
-    // Parabolic High-Gain Antenna pointing toward Earth
     const dishGeo = new THREE.CylinderGeometry(2.4, 0.4, 0.9, 12, 1, true);
     dishGeo.rotateX(Math.PI / 2);
     const dishMat = new THREE.MeshStandardMaterial({
@@ -584,10 +631,9 @@ export class PostLaunchSpace {
     dish.lookAt(new THREE.Vector3(-1, 0.8, -1));
     this.satellite.add(dish);
 
-    // Twin Photovoltaic Solar Array Wings
     const panelGeo = new THREE.BoxGeometry(11.0, 0.08, 2.6);
     const panelMat = new THREE.MeshStandardMaterial({
-      color: 0x1a3366, // Dark blue silicon solar cells
+      color: 0x1a3366,
       roughness: 0.2,
       metalness: 0.92
     });
@@ -599,22 +645,20 @@ export class PostLaunchSpace {
     rightPanel.position.set(8.2, 0, 0);
     this.satellite.add(rightPanel);
 
-    // Blinking Optical Telemetry LED
     const beaconGeo = new THREE.SphereGeometry(0.35, 8, 8);
     this.beaconMat = new THREE.MeshBasicMaterial({ color: 0x33ff88 });
     const beacon = new THREE.Mesh(beaconGeo, this.beaconMat);
     beacon.position.set(0, -1.8, 0);
     this.satellite.add(beacon);
 
-    this.satelliteOrbitRadius = 57000.0;
+    this.satelliteOrbitRadius = 172000.0;
     this.satelliteOrbitAngle = 1.25;
     this.spaceGroup.add(this.satellite);
   }
 
   update(dt, alt, speed, shipPos) {
-    // Smooth fade-in as Starship ascends into space:
-    // Starts revealing curvature at 4 km, reaching full planetary majesty by 18 km+
-    const fade = THREE.MathUtils.clamp((alt - 3800.0) / 14000.0, 0.0, 1.0);
+    // Smooth cross-fade between the 36km regional Martian surface (0 - 16km) and the 165km 3D planetary globe (4.5km - 100km+)
+    const fade = THREE.MathUtils.smoothstep(alt, 4200.0, 15500.0);
     this.group.visible = fade > 0.005;
 
     if (!this.group.visible) return;
@@ -628,27 +672,27 @@ export class PostLaunchSpace {
       this.airglowMat.uniforms.uFade.value = fade;
     }
 
-    // Anchor the 3D Mars globe below Starship:
-    // At low altitude, top of sphere is tangent to surface at pad elevation.
-    // As altitude increases, planet centers gracefully below the flight trajectory,
-    // producing authentic spherical perspective curvature of the Red Planet.
-    const padX = this.padCoords.x;
-    const padZ = this.padCoords.y;
+    // Keep the 165km Mars globe horizontally centered directly beneath the active camera (shipPos.x, shipPos.z)
+    // so the spacecraft NEVER flies off the edge of the planet during downrange ascent or landing!
+    const groundElev = shipPos.y - Math.max(0, alt);
+    const globeCenterY = groundElev - this.planetRadius - Math.min(Math.max(0, alt), 100000.0) * 0.14;
 
-    const globeCenterY = shipPos.y - this.planetRadius - Math.min(alt, 120000.0) * 0.42;
-    this.planetMesh.position.set(padX, globeCenterY, padZ);
-    this.airglowMesh.position.set(padX, globeCenterY, padZ);
+    this.planetMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
+    this.airglowMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
 
-    // Slow planetary diurnal rotation
-    this.orbitRotation += dt * 0.003;
-    this.planetMesh.rotation.y = -Math.PI * 0.42 + this.orbitRotation * 0.05;
+    // Rotate the planet surface smoothly as the spacecraft travels downrange and orbits
+    this.orbitRotation += dt * (0.0025 + Math.max(0, speed - 400) * 0.000004);
+    const downrangeLon = (shipPos.x - this.padCoords.x) * 0.000008;
+    const downrangeLat = (shipPos.z - this.padCoords.y) * 0.000008;
+    this.planetMesh.rotation.y = -Math.PI * 0.42 + this.orbitRotation * 0.12 - downrangeLon;
+    this.planetMesh.rotation.x = THREE.MathUtils.clamp(downrangeLat, -0.35, 0.35);
 
     // Orbit Phobos across the Martian space sky
     if (this.phobosMesh) {
       this.phobosOrbitAngle += dt * 0.008;
-      const px = padX + Math.cos(this.phobosOrbitAngle) * this.phobosOrbitRadius;
-      const pz = padZ + Math.sin(this.phobosOrbitAngle) * this.phobosOrbitRadius;
-      const py = globeCenterY + Math.sin(this.phobosOrbitAngle * 0.6) * 14000.0 + 26000.0;
+      const px = shipPos.x + Math.cos(this.phobosOrbitAngle) * this.phobosOrbitRadius;
+      const pz = shipPos.z + Math.sin(this.phobosOrbitAngle) * this.phobosOrbitRadius;
+      const py = globeCenterY + Math.sin(this.phobosOrbitAngle * 0.6) * 24000.0 + 115000.0;
       this.phobosMesh.position.set(px, py, pz);
       this.phobosMesh.rotation.y += dt * 0.02;
     }
@@ -656,26 +700,20 @@ export class PostLaunchSpace {
     // Orbit Deimos in the far distance
     if (this.deimosMesh) {
       this.deimosOrbitAngle += dt * 0.003;
-      const dx = padX + Math.cos(this.deimosOrbitAngle) * this.deimosOrbitRadius;
-      const dz = padZ + Math.sin(this.deimosOrbitAngle) * this.deimosOrbitRadius;
-      const dy = globeCenterY + 54000.0;
+      const dx = shipPos.x + Math.cos(this.deimosOrbitAngle) * this.deimosOrbitRadius;
+      const dz = shipPos.z + Math.sin(this.deimosOrbitAngle) * this.deimosOrbitRadius;
+      const dy = globeCenterY + 165000.0;
       this.deimosMesh.position.set(dx, dy, dz);
     }
 
     // Orbit Communications Satellite
     if (this.satellite) {
       this.satelliteOrbitAngle += dt * 0.035;
-      const sx = padX + Math.cos(this.satelliteOrbitAngle) * this.satelliteOrbitRadius;
-      const sz = padZ + Math.sin(this.satelliteOrbitAngle) * this.satelliteOrbitRadius;
-      const sy = globeCenterY + 49500.0 + Math.sin(this.satelliteOrbitAngle * 2.0) * 2200.0;
+      const sx = shipPos.x + Math.cos(this.satelliteOrbitAngle) * this.satelliteOrbitRadius;
+      const sz = shipPos.z + Math.sin(this.satelliteOrbitAngle) * this.satelliteOrbitRadius;
+      const sy = globeCenterY + 162000.0 + Math.sin(this.satelliteOrbitAngle * 2.0) * 2200.0;
       this.satellite.position.set(sx, sy, sz);
       this.satellite.rotation.y += dt * 0.15;
-
-      // Pulse telemetry beacon (1 Hz blink)
-      if (this.beaconMat) {
-        const blink = (Math.sin(performance.now() * 0.006) > 0.3) ? 1.0 : 0.05;
-        this.beaconMat.opacity = blink;
-      }
     }
   }
 

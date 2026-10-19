@@ -255,7 +255,7 @@ export class MarsGameEngine {
     const mobileControls = document.getElementById('mobile-controls');
 
     if (this.mode === 'starship') {
-      this.camera.far = 250000;
+      this.camera.far = 500000;
       this.camera.updateProjectionMatrix();
       this.cameraController.initialized = false;
 
@@ -285,6 +285,7 @@ export class MarsGameEngine {
 
       this.atmosphere.setFlightMode(false);
       this.atmosphere.setAltitude(0, 0);
+      this.terrain.setCameraAltitude(0);
       this.audio.updateRocket(0, 0, 0);
     }
   }
@@ -428,6 +429,7 @@ export class MarsGameEngine {
       // Anchor atmosphere skydome & altitude to the active camera so Ground/Tower/Booster cams keep Starbase's sky!
       const camAltitude = Math.max(0, this.camera.position.y - this.missionPhysics.padElevation);
       this.atmosphere.setAltitude(camAltitude, this.missionPhysics.speed);
+      this.terrain.setCameraAltitude(camAltitude);
 
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
       this.atmosphere.update(dt, this.camera.position, {
@@ -440,9 +442,12 @@ export class MarsGameEngine {
         speedKmh: this.missionPhysics.speed * 3.6
       });
 
-      // Keep terrain updated around the active camera whenever viewing near the Martian surface (< 2,500m)
-      if (camAltitude < 2500) {
+      // Keep terrain & surface rocks updated around the active camera during launch and landing descent (< 8,000m)
+      if (camAltitude < 8000) {
         this.terrain.update(this.camera.position);
+        if (camAltitude < 1800) {
+          this.scatter.update(this.camera.position);
+        }
       }
 
       // Render Scene

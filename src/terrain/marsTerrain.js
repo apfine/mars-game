@@ -21,7 +21,8 @@ export function createMarsTerrainMaterial(options = {}) {
     uGridScale: { value: 10.0 }, // 10 meter topographical survey grid
     uFogNear: { value: 100.0 },
     uFogFar: { value: 520.0 },
-    uQuality: { value: 2.0 }     // 0 = Low, 1 = Medium, 2 = High/Ultra
+    uQuality: { value: 2.0 },    // 0 = Low, 1 = Medium, 2 = High/Ultra
+    uCamAltitude: { value: 0.0 }
   };
 
   const vertexShader = `
@@ -57,6 +58,7 @@ export function createMarsTerrainMaterial(options = {}) {
     uniform float uFogNear;
     uniform float uFogFar;
     uniform float uQuality;
+    uniform float uCamAltitude;
 
     varying vec3 vWorldPosition;
     varying vec3 vNormal;
@@ -123,9 +125,13 @@ export function createMarsTerrainMaterial(options = {}) {
     void main() {
       vec3 toCam = cameraPosition - vWorldPosition;
       float camDist = length(toCam);
+      float horizDist = length(toCam.xz);
 
-      // Early exit if completely obscured by distant dust haze
-      if (camDist >= uFogFar) {
+      // Use horizontal distance for fog when at high altitude so ground directly beneath is crystal clear during landing!
+      float effectiveFogDist = mix(camDist, horizDist, clamp(uCamAltitude / 350.0, 0.0, 1.0));
+
+      // Early exit if completely obscured by distant horizon dust haze
+      if (effectiveFogDist >= uFogFar) {
         gl_FragColor = vec4(uMarsDustHazeColor, 1.0);
         return;
       }
@@ -174,11 +180,13 @@ export function createMarsTerrainMaterial(options = {}) {
       vec3 surfaceAlbedo = mix(slabCol, uMarsSandColor, sandMix);
       surfaceAlbedo = mix(surfaceAlbedo, uMarsDuneShadowColor * 0.55, crack * 0.7 * rockSlabFactor);
 
-      // Multi-scale sand mottling
+      // Multi-scale sand mottling + macro geological albedo for realistic high-altitude descent views
+      float mottleMacro = vnoise(vWorldPosition.xz * 0.004);
       float mottleLarge = vnoise(vWorldPosition.xz * 0.045);
       float mottleMid = vnoise(vWorldPosition.xz * 0.35 + 7.3);
       float mottle = mottleLarge * 0.62 + mottleMid * 0.38;
       surfaceAlbedo *= 0.80 + 0.40 * mottle;
+      surfaceAlbedo = mix(surfaceAlbedo, uMarsBasaltRockColor * 0.75, smoothstep(0.58, 0.85, mottleMacro) * 0.35);
       surfaceAlbedo = mix(surfaceAlbedo, uMarsDuneShadowColor, smoothstep(0.62, 0.9, mottleLarge) * 0.28);
       surfaceAlbedo = mix(surfaceAlbedo, uMarsSandLightColor * 1.08, smoothstep(0.65, 0.95, mottleMid) * 0.22 * (1.0 - rockSlabFactor));
 
@@ -223,9 +231,9 @@ export function createMarsTerrainMaterial(options = {}) {
         finalColor = mix(finalColor, uGridColor, gridIntensity * gridFade * 0.45);
       }
 
-      // 4. Seamless Atmospheric Distance Fog
-      float fogFactor = clamp((camDist - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
-      fogFactor = fogFactor * (fogFactor * 0.4 + 0.6); // Fast smooth atmospheric perspective curve
+      // 4. Seamless Atmospheric Distance Fog (blends edge of chunk grid into regional surface & horizon)
+      float fogFactor = clamp((effectiveFogDist - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
+      fogFactor = fogFactor * (fogFactor * 0.4 + 0.6);
 
       finalColor = mix(finalColor, uMarsDustHazeColor, fogFactor);
 
@@ -263,6 +271,14 @@ export class MarsTerrainManager {
   setQuality(preset) {
     const qVal = preset === 'Low' ? 0.0 : preset === 'Medium' ? 1.0 : 2.0;
     this.material.uniforms.uQuality.value = qVal;
+  }
+
+  setCameraAltitude(alt) {
+    const a = Math.max(0, alt);
+    this.material.uniforms.uCamAltitude.value = a;
+    // Keep chunk border fog aligned with the 420m chunk grid radius so chunks blend seamlessly into the regional planet surface
+    this.material.uniforms.uFogNear.value = 110.0 + Math.min(140.0, a * 0.25);
+    this.material.uniforms.uFogFar.value = 395.0;
   }
 
   getChunkKey(cx, cz) {
