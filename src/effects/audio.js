@@ -100,6 +100,84 @@ export class MarsAudioEngine {
     } catch (_) {}
   }
 
+  playFootstepSound(isRunning = false) {
+    if (!this.initialized || this.muted) return;
+    try {
+      const t = this.ctx.currentTime;
+      // 1. Low-frequency boot sole impact thud through suit frame
+      const thudOsc = this.ctx.createOscillator();
+      const thudGain = this.ctx.createGain();
+      thudOsc.type = 'sine';
+      const startFreq = isRunning ? 105 : 82;
+      thudOsc.frequency.setValueAtTime(startFreq + (Math.random() - 0.5) * 12, t);
+      thudOsc.frequency.exponentialRampToValueAtTime(28, t + 0.11);
+      thudGain.gain.setValueAtTime(isRunning ? 0.28 : 0.18, t);
+      thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      thudOsc.connect(thudGain);
+      thudGain.connect(this.masterGain);
+      thudOsc.start(t);
+      thudOsc.stop(t + 0.13);
+
+      // 2. Crisp Martian regolith gravel crunch (bandpass noise burst)
+      const crunchDur = isRunning ? 0.095 : 0.12;
+      const bufSize = Math.floor(this.ctx.sampleRate * crunchDur);
+      const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) {
+        const env = Math.sin((i / bufSize) * Math.PI);
+        data[i] = (Math.random() * 2 - 1) * env;
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buf;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(920 + (Math.random() - 0.5) * 240, t);
+      filter.Q.setValueAtTime(1.6, t);
+
+      const crunchGain = this.ctx.createGain();
+      crunchGain.gain.setValueAtTime(isRunning ? 0.22 : 0.14, t);
+      crunchGain.gain.exponentialRampToValueAtTime(0.001, t + crunchDur);
+
+      noise.connect(filter);
+      filter.connect(crunchGain);
+      crunchGain.connect(this.masterGain);
+      noise.start(t);
+    } catch (_) {}
+  }
+
+  playLaunchButtonSound() {
+    if (!this.initialized || this.muted) return;
+    try {
+      const t = this.ctx.currentTime;
+      // Heavy mechanical switch clunk
+      const clunk = this.ctx.createOscillator();
+      const clunkGain = this.ctx.createGain();
+      clunk.type = 'triangle';
+      clunk.frequency.setValueAtTime(190, t);
+      clunk.frequency.exponentialRampToValueAtTime(48, t + 0.09);
+      clunkGain.gain.setValueAtTime(0.45, t);
+      clunkGain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      clunk.connect(clunkGain);
+      clunkGain.connect(this.masterGain);
+      clunk.start(t);
+      clunk.stop(t + 0.11);
+
+      // Two-tone Starbase pad arming confirmation chime
+      const chime = this.ctx.createOscillator();
+      const chimeGain = this.ctx.createGain();
+      chime.type = 'sine';
+      chime.frequency.setValueAtTime(880, t + 0.08);
+      chime.frequency.setValueAtTime(1320, t + 0.22);
+      chimeGain.gain.setValueAtTime(0.22, t + 0.08);
+      chimeGain.gain.exponentialRampToValueAtTime(0.001, t + 0.48);
+      chime.connect(chimeGain);
+      chimeGain.connect(this.masterGain);
+      chime.start(t + 0.08);
+      chime.stop(t + 0.5);
+    } catch (_) {}
+  }
+
   updateRocket(throttle, altitude, heat) {
     if (!this.initialized || this.muted) return;
     const t = this.ctx.currentTime;

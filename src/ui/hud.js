@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { MarsMap } from './map.js';
-import { getPresenceClient } from '../utils/presenceClient.js';
 
-// HUD Telemetry, drune.io-style Waypoint Badges, Mobile Touch Controls & Settings Modal
+// Unified SpaceX Glassmorphic HUD for Mars Rover & First-Person Walking Mode
 export class MarsHUD {
   constructor(inputManager, options = {}) {
     this.inputManager = inputManager;
@@ -13,35 +12,32 @@ export class MarsHUD {
 
     this.dom = {
       container: document.getElementById('hud-layer'),
+      modeBadge: document.getElementById('rover-mode-badge'),
+      camBar: document.getElementById('rover-cam-bar'),
+      walkBtn: document.getElementById('rover-walk-btn'),
+      primaryActionBtn: document.getElementById('rover-primary-action-btn'),
+      physicalLaunchBtn: document.getElementById('pad-physical-launch-btn'),
+      padPrompt: document.getElementById('pad-launch-prompt'),
+      walkReticle: document.getElementById('walk-reticle'),
+      leftTitle: document.getElementById('rover-left-title'),
+      starbaseDistVal: document.getElementById('starbase-dist-val'),
+
       speedometer: document.getElementById('speed-val'),
       speedBar: document.getElementById('speed-bar'),
       speedMsVal: document.getElementById('speed-ms-val'),
       nitroBar: document.getElementById('nitro-fill'),
-      nitroText: document.getElementById('nitro-pct'),
       badgeContainer: document.getElementById('waypoint-badges'),
       mobileControls: document.getElementById('mobile-controls'),
       settingsModal: document.getElementById('settings-modal'),
       escBtn: document.getElementById('esc-btn'),
       closeSettingsBtn: document.getElementById('close-settings'),
-      roverOnlineVal: document.getElementById('online-count-val') || document.getElementById('online-players-count'),
 
-      // Scientific Clocks & Sensors
-      solClock: document.getElementById('sol-clock'),
       metClock: document.getElementById('met-clock'),
-      coordsVal: document.getElementById('sci-coords-val'),
       elevVal: document.getElementById('sci-elev-val'),
-      pressVal: document.getElementById('sci-press-val'),
-      tempVal: document.getElementById('sci-temp-val'),
-      radVal: document.getElementById('sci-rad-val'),
-
-      // Vehicle Diagnostics
       gyroVal: document.getElementById('rover-gyro-val'),
       headingVal: document.getElementById('rover-heading-val'),
       odomVal: document.getElementById('rover-odom-val')
     };
-
-    this.onlineCount = 43;
-    this.lastOnlineUpdate = 0;
 
     this.touchState = {
       throttle: 0,
@@ -53,26 +49,97 @@ export class MarsHUD {
     this.inputManager.touchState = this.touchState;
 
     this.initMobileTouch();
+    this.initControlsAndGimbal();
     this.initSettingsModal();
-    this.initPredefinedWaypoints();
     this.map = new MarsMap(this);
     this.frameCount = 0;
   }
 
-  initPredefinedWaypoints() {
-    this.predefinedPOIs = [];
+  initControlsAndGimbal() {
+    // Rover Camera Switcher Tabs (CHASE / COCKPIT / ORBIT)
+    if (this.dom.camBar) {
+      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
+      tabs.forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const modeIdx = parseInt(btn.getAttribute('data-rcam'), 10);
+          if (!Number.isNaN(modeIdx) && this.options.onSelectRoverCamera) {
+            this.options.onSelectRoverCamera(modeIdx);
+            tabs.forEach((t) => t.classList.toggle('active', t === btn));
+          }
+        });
+      });
+    }
+
+    // Walk / Board Rover Toggle Buttons
+    const handleWalkToggle = (e) => {
+      e.preventDefault();
+      if (this.options.onToggleWalk) {
+        this.options.onToggleWalk();
+      }
+    };
+    if (this.dom.walkBtn) this.dom.walkBtn.addEventListener('click', handleWalkToggle);
+    if (this.dom.primaryActionBtn) this.dom.primaryActionBtn.addEventListener('click', handleWalkToggle);
+
+    const mobileWalkBtn = document.getElementById('btn-walk-mobile');
+    if (mobileWalkBtn) mobileWalkBtn.addEventListener('click', handleWalkToggle);
+
+    // Physical Launch Button Trigger (Available when walking right up to the Launch Pedestal)
+    if (this.dom.physicalLaunchBtn) {
+      this.dom.physicalLaunchBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onPressPhysicalLaunch) {
+          this.options.onPressPhysicalLaunch();
+        }
+      });
+    }
+
+    // 360° Gimbal Pad Buttons for Rover & Walking Cameras
+    const bindGimbalHold = (id, dyaw, dpitch) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      let interval = null;
+      const step = () => {
+        if (this.options.onGimbalPan) this.options.onGimbalPan(dyaw, dpitch);
+      };
+      const start = (e) => {
+        e.preventDefault();
+        step();
+        if (interval) clearInterval(interval);
+        interval = setInterval(step, 30);
+      };
+      const stop = () => {
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      };
+      el.addEventListener('mousedown', start);
+      el.addEventListener('touchstart', start, { passive: false });
+      window.addEventListener('mouseup', stop);
+      window.addEventListener('touchend', stop);
+    };
+
+    bindGimbalHold('rover-gimbal-left', 0.06, 0);
+    bindGimbalHold('rover-gimbal-right', -0.06, 0);
+    bindGimbalHold('rover-gimbal-up', 0, 0.05);
+    bindGimbalHold('rover-gimbal-down', 0, -0.05);
+
+    const resetGimbalBtn = document.getElementById('rover-gimbal-reset');
+    if (resetGimbalBtn) {
+      resetGimbalBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onGimbalReset) this.options.onGimbalReset();
+      });
+    }
   }
 
   initMobileTouch() {
-    // Only show mobile touch controls if mobile is detected or touch is triggered
     const isMobile = this.inputManager.isMobile;
-    if (this.dom.mobileControls) {
-      if (isMobile) {
-        this.dom.mobileControls.style.display = 'block';
-      }
+    if (this.dom.mobileControls && isMobile) {
+      this.dom.mobileControls.style.display = 'block';
     }
 
-    // Touch button handlers helper
     const setupTouchBtn = (id, onDown, onUp) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -93,8 +160,6 @@ export class MarsHUD {
       el.addEventListener('touchstart', handleStart, { passive: false });
       el.addEventListener('touchend', handleEnd, { passive: false });
       el.addEventListener('touchcancel', handleEnd, { passive: false });
-
-      // Support mouse click for PC testing
       el.addEventListener('mousedown', handleStart);
       window.addEventListener('mouseup', () => {
         if (el.classList.contains('active')) {
@@ -104,7 +169,6 @@ export class MarsHUD {
       });
     };
 
-    // Steering buttons
     setupTouchBtn('btn-left',
       () => { this.touchState.steer = -1; },
       () => { if (this.touchState.steer === -1) this.touchState.steer = 0; }
@@ -113,8 +177,6 @@ export class MarsHUD {
       () => { this.touchState.steer = 1; },
       () => { if (this.touchState.steer === 1) this.touchState.steer = 0; }
     );
-
-    // Throttle & Brake
     setupTouchBtn('btn-gas',
       () => { this.touchState.throttle = 1; },
       () => { if (this.touchState.throttle === 1) this.touchState.throttle = 0; }
@@ -123,8 +185,6 @@ export class MarsHUD {
       () => { this.touchState.throttle = -1; },
       () => { if (this.touchState.throttle === -1) this.touchState.throttle = 0; }
     );
-
-    // Action buttons
     setupTouchBtn('btn-nitro',
       () => { this.touchState.nitro = true; },
       () => { this.touchState.nitro = false; }
@@ -133,27 +193,6 @@ export class MarsHUD {
       () => { this.touchState.handbrake = true; },
       () => { this.touchState.handbrake = false; }
     );
-    setupTouchBtn('btn-assist',
-      () => { this.touchState.assist = true; },
-      () => { this.touchState.assist = false; }
-    );
-
-    // Camera and Marker touch triggers
-    const camBtn = document.getElementById('btn-cam');
-    if (camBtn) {
-      camBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.inputManager.state.cameraToggle = true;
-      });
-    }
-
-    const markBtn = document.getElementById('btn-mark');
-    if (markBtn) {
-      markBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.inputManager.state.markBeacon = true;
-      });
-    }
   }
 
   initSettingsModal() {
@@ -174,7 +213,6 @@ export class MarsHUD {
       }
     });
 
-    // Grid toggle
     const gridCheckbox = document.getElementById('toggle-grid');
     if (gridCheckbox) {
       gridCheckbox.addEventListener('change', (e) => {
@@ -184,7 +222,6 @@ export class MarsHUD {
       });
     }
 
-    // Audio toggle
     const audioCheckbox = document.getElementById('toggle-audio');
     if (audioCheckbox) {
       audioCheckbox.addEventListener('change', (e) => {
@@ -194,7 +231,6 @@ export class MarsHUD {
       });
     }
 
-    // Quality selector
     const qualitySelect = document.getElementById('quality-select');
     if (qualitySelect) {
       qualitySelect.addEventListener('change', (e) => {
@@ -204,7 +240,6 @@ export class MarsHUD {
       });
     }
 
-    // Reset Rover button
     const resetBtn = document.getElementById('btn-reset-pos');
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
@@ -227,109 +262,128 @@ export class MarsHUD {
     }
   }
 
-  addBeacon(pos, name = null) {
-    const beaconName = name || `Marker #${this.beaconIdCounter++}`;
-    this.userBeacons.push({
-      id: 'b_' + Date.now() + '_' + Math.random(),
-      name: beaconName,
-      position: pos.clone(),
-      isMystery: false
+  syncCameraTab(modeIdx) {
+    if (!this.dom.camBar) return;
+    const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
+    tabs.forEach((t) => {
+      t.classList.toggle('active', parseInt(t.getAttribute('data-rcam'), 10) === modeIdx);
     });
   }
 
-  update(physics, camera, scatterPOIs = []) {
+  update(activeActor, camera, scatterPOIs = [], context = {}) {
     this.frameCount++;
+    const isWalking = Boolean(context.isWalking);
+    const terminalPos = context.terminalPos;
+    const roverPos = context.roverPos;
 
-    // 1. Update Speedometer & Nitro every frame (or when value changes)
-    const speed = physics.speedKmh;
-    if (this.dom.speedometer && this._lastSpeed !== speed) {
-      this._lastSpeed = speed;
-      this.dom.speedometer.textContent = `${speed}`;
+    // 1. Mode-Specific UI State (Rover vs 1st-Person Walking)
+    if (this._lastWalkingState !== isWalking) {
+      this._lastWalkingState = isWalking;
+      if (this.dom.modeBadge) {
+        this.dom.modeBadge.textContent = isWalking
+          ? 'EVA WALK // 1ST PERSON OPTICS'
+          : 'ROVER // STARBASE APPROACH';
+      }
+      if (this.dom.leftTitle) {
+        this.dom.leftTitle.textContent = isWalking ? 'EVA SUIT' : 'MARS ROVER';
+      }
+      if (this.dom.walkBtn) {
+        this.dom.walkBtn.textContent = isWalking ? 'ROVER [E]' : 'WALK [E]';
+        this.dom.walkBtn.classList.toggle('active', isWalking);
+      }
+      if (this.dom.primaryActionBtn) {
+        this.dom.primaryActionBtn.textContent = isWalking ? 'BOARD ROVER [E]' : 'EXIT ROVER [E]';
+      }
+      if (this.dom.walkReticle) {
+        this.dom.walkReticle.style.display = isWalking ? 'flex' : 'none';
+      }
+      // Strictly 1st-person in walking mode: hide camera switcher tabs when walking
+      if (this.dom.camBar) {
+        this.dom.camBar.style.display = isWalking ? 'none' : 'flex';
+      }
+    }
+
+    // 2. Speedometer, Velocity & Proper G-Force
+    const speedKmh = Math.abs(Math.round((activeActor.speed || 0) * 3.6));
+    if (this.dom.speedometer && this._lastSpeed !== speedKmh) {
+      this._lastSpeed = speedKmh;
+      this.dom.speedometer.textContent = `${speedKmh}`;
     }
     if (this.dom.speedBar) {
-      const pct = Math.min(100, (speed / 160) * 100);
+      const maxRef = isWalking ? 25 : 160;
+      const pct = Math.min(100, (speedKmh / maxRef) * 100);
       this.dom.speedBar.style.width = `${pct}%`;
     }
-
     if (this.dom.nitroBar) {
-      const nitroPct = Math.round((physics.nitro / physics.nitroCapacity) * 100);
+      const nitroPct = isWalking
+        ? 100
+        : Math.round(((activeActor.nitro || 0) / (activeActor.nitroCapacity || 100)) * 100);
       if (this._lastNitro !== nitroPct) {
         this._lastNitro = nitroPct;
         this.dom.nitroBar.style.width = `${nitroPct}%`;
-        if (this.dom.nitroText) {
-          this.dom.nitroText.textContent = `${nitroPct}%`;
-        }
-      }
-      if (this._lastNitroActive !== physics.isNitroActive) {
-        this._lastNitroActive = physics.isNitroActive;
-        this.dom.nitroBar.classList.toggle('active', physics.isNitroActive);
       }
     }
 
-    // 2. Throttle Secondary Telemetry Clocks & Sensors to every 6 frames (~10Hz) to prevent DOM layout churn
-    if (this.frameCount % 6 === 0) {
-      const presence = getPresenceClient();
-      if (presence && this.dom.roverOnlineVal && this.onlineCount !== presence.onlineCount) {
-        this.onlineCount = presence.onlineCount;
-        this.dom.roverOnlineVal.textContent = presence.onlineCount;
+    // 3. Proximity to Physical Launch Control Pedestal & Rover
+    if (terminalPos && activeActor.position) {
+      const dxTerm = terminalPos.x - activeActor.position.x;
+      const dzTerm = terminalPos.z - activeActor.position.z;
+      const distToTerminal = Math.hypot(dxTerm, dzTerm);
+
+      const bearingRad = Math.atan2(dxTerm, dzTerm);
+      let bearingDeg = Math.round(((bearingRad * 180) / Math.PI + 360) % 360);
+      const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      const dirStr = dirs[Math.round(bearingDeg / 45) % 8];
+
+      if (this.dom.starbaseDistVal && this.frameCount % 4 === 0) {
+        this.dom.starbaseDistVal.textContent = `LAUNCH PEDESTAL: ${Math.round(distToTerminal)}m ${dirStr}`;
       }
 
+      const canPressButton = isWalking && distToTerminal <= 8.5;
+      if (this.dom.physicalLaunchBtn) {
+        this.dom.physicalLaunchBtn.style.display = canPressButton ? 'inline-flex' : 'none';
+      }
+
+      if (this.dom.padPrompt) {
+        if (canPressButton) {
+          this.dom.padPrompt.style.display = 'block';
+          this.dom.padPrompt.textContent = 'LAUNCH PEDESTAL ARMED // CLICK RED PHYSICAL BUTTON ON CONSOLE OR PRESS [F] TO LAUNCH';
+        } else if (isWalking && distToTerminal <= 45.0) {
+          this.dom.padPrompt.style.display = 'block';
+          this.dom.padPrompt.textContent = `WALK TO RED LAUNCH CONTROL PEDESTAL (${Math.round(distToTerminal)}m AHEAD) & CLICK BUTTON`;
+        } else if (!isWalking && distToTerminal <= 65.0) {
+          this.dom.padPrompt.style.display = 'block';
+          this.dom.padPrompt.textContent = `STARBASE LAUNCH PAD REACHED (${Math.round(distToTerminal)}m) // PRESS [E] TO EXIT ROVER & WALK TO LAUNCH BUTTON`;
+        } else {
+          this.dom.padPrompt.style.display = 'none';
+        }
+      }
+    }
+
+    // 4. Secondary Telemetry & Inertial Readouts
+    if (this.frameCount % 5 === 0) {
       const elapsedSec = (performance.now() - this.startTime) / 1000;
       if (this.dom.metClock) {
         const metH = Math.floor(elapsedSec / 3600).toString().padStart(2, '0');
         const metM = Math.floor((elapsedSec % 3600) / 60).toString().padStart(2, '0');
         const metS = Math.floor(elapsedSec % 60).toString().padStart(2, '0');
-        const metTenths = Math.floor((elapsedSec * 10) % 10);
-        this.dom.metClock.textContent = `MET +${metH}:${metM}:${metS}.${metTenths}`;
+        this.dom.metClock.textContent = `T+ ${metH}:${metM}:${metS}`;
       }
 
-      if (this.dom.solClock) {
-        const earthSec = Date.now() / 1000;
-        const lmstSec = Math.floor((earthSec * 1.02749125) % 86400);
-        const solH = Math.floor(lmstSec / 3600).toString().padStart(2, '0');
-        const solM = Math.floor((lmstSec % 3600) / 60).toString().padStart(2, '0');
-        const solS = Math.floor(lmstSec % 60).toString().padStart(2, '0');
-        this.dom.solClock.textContent = `SOL 492 · LMST ${solH}:${solM}:${solS}`;
+      if (activeActor.position && this.dom.elevVal) {
+        const elev = Math.round(activeActor.position.y);
+        this.dom.elevVal.textContent = `${elev}`;
       }
 
-      if (physics.position) {
-        const posX = physics.position.x;
-        const posY = physics.position.y;
-        const posZ = physics.position.z;
-
-        const lat = 18.38 + (posZ / 59300);
-        const lon = 226.02 - (posX / 59300);
-        if (this.dom.coordsVal) {
-          const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
-          const lonStr = `${Math.abs(lon).toFixed(2)}°W`;
-          this.dom.coordsVal.textContent = `${latStr} ${lonStr}`;
-        }
-
-        const molaElev = Math.round(-1420 + posY);
-        if (this.dom.elevVal) {
-          this.dom.elevVal.textContent = `${molaElev >= 0 ? '+' : ''}${molaElev} m`;
-        }
-
-        const pressKPa = 0.636 * Math.exp(-posY / 11100);
-        if (this.dom.pressVal) {
-          this.dom.pressVal.textContent = `${pressKPa.toFixed(3)} kPa`;
-        }
-
-        const tempC = -62.4 - (posY * 0.0025);
-        if (this.dom.tempVal) {
-          this.dom.tempVal.textContent = `${tempC.toFixed(1)}°C`;
-        }
-      }
-
-      const pitchDeg = Math.round(((physics.pitch || 0) * 180) / Math.PI);
-      const rollDeg = Math.round(((physics.roll || 0) * 180) / Math.PI);
+      const pitchDeg = Math.round(((activeActor.pitch || 0) * 180) / Math.PI);
+      const rollDeg = Math.round(((activeActor.roll || 0) * 180) / Math.PI);
       if (this.dom.gyroVal) {
         const pSign = pitchDeg >= 0 ? '+' : '';
         const rSign = rollDeg >= 0 ? '+' : '';
         this.dom.gyroVal.textContent = `PITCH ${pSign}${pitchDeg}° · ROLL ${rSign}${rollDeg}°`;
       }
 
-      let yawDeg = Math.round((((physics.yaw || 0) * 180) / Math.PI) % 360);
+      let yawDeg = Math.round((((activeActor.yaw || 0) * 180) / Math.PI) % 360);
       if (yawDeg < 0) yawDeg += 360;
       const compassDirections = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
       const compassIdx = Math.round(yawDeg / 45) % 8;
@@ -337,25 +391,29 @@ export class MarsHUD {
         this.dom.headingVal.textContent = `${yawDeg.toString().padStart(3, '0')}° ${compassDirections[compassIdx]}`;
       }
 
-      const odomMeters = Math.round(physics.distanceTraveled || 0);
+      const odomMeters = Math.round(activeActor.distanceTraveled || 0);
       if (this.dom.odomVal) {
-        this.dom.odomVal.textContent = odomMeters >= 1000 ? `${(odomMeters / 1000).toFixed(2)} km` : `${odomMeters} m`;
+        this.dom.odomVal.textContent = `${odomMeters}`;
       }
 
       if (this.dom.speedMsVal) {
-        this.dom.speedMsVal.textContent = `${(physics.speed || 0).toFixed(1)} m/s`;
+        const ms = Math.abs(activeActor.speed || 0).toFixed(1);
+        const gVal = activeActor.gForce || '0.38';
+        this.dom.speedMsVal.textContent = `${ms} M/S · ${gVal}G`;
       }
     }
 
-    // 3. Update 3D projected waypoint badges using pooled DOM elements (zero innerHTML churn)
-    if (this.frameCount % 3 === 0) this.updateWaypointBadges(physics.position, camera, scatterPOIs);
+    // 5. Update 3D Projected Waypoint Badges (Always includes Launch Control Pedestal!)
+    if (this.frameCount % 3 === 0) {
+      this.updateWaypointBadges(activeActor.position, camera, scatterPOIs, terminalPos, isWalking ? roverPos : null);
+    }
 
-    // 4. Minimap / full map
-    this.map.update(physics, scatterPOIs);
+    // 6. Minimap / Full Map
+    this.map.update(activeActor, scatterPOIs);
   }
 
-  updateWaypointBadges(playerPos, camera, scatterPOIs) {
-    if (!this.dom.badgeContainer) return;
+  updateWaypointBadges(playerPos, camera, scatterPOIs, terminalPos, roverPos) {
+    if (!this.dom.badgeContainer || !playerPos) return;
 
     if (!this._badgePool) {
       this._badgePool = [];
@@ -371,18 +429,39 @@ export class MarsHUD {
     }
 
     const candidates = [];
-    for (let i = 0; i < this.userBeacons.length; i++) {
-      const b = this.userBeacons[i];
-      const d = playerPos.distanceTo(b.position);
-      if (d > 15) candidates.push({ name: b.name, position: b.position, dist: d });
+    if (terminalPos) {
+      const dTerm = playerPos.distanceTo(terminalPos);
+      if (dTerm > 2.2) {
+        candidates.push({
+          name: 'LAUNCH PEDESTAL (PAD 1)',
+          position: new THREE.Vector3(terminalPos.x, terminalPos.y + 3.8, terminalPos.z),
+          dist: dTerm,
+          priority: true
+        });
+      }
     }
+    if (roverPos) {
+      const dRover = playerPos.distanceTo(roverPos);
+      if (dRover > 3.5) {
+        candidates.push({
+          name: 'MARS ROVER [E]',
+          position: new THREE.Vector3(roverPos.x, roverPos.y + 2.2, roverPos.z),
+          dist: dRover,
+          priority: true
+        });
+      }
+    }
+
     for (let i = 0; i < scatterPOIs.length; i++) {
       const p = scatterPOIs[i];
       const d = playerPos.distanceTo(p.position);
-      if (d > 15) candidates.push({ name: p.name, position: p.position, dist: d });
+      if (d > 20) candidates.push({ name: p.name, position: p.position, dist: d, priority: false });
     }
 
-    candidates.sort((a, b) => a.dist - b.dist);
+    candidates.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority ? -1 : 1;
+      return a.dist - b.dist;
+    });
 
     const tempVec = this._tempVec;
     const w = window.innerWidth;
@@ -401,11 +480,11 @@ export class MarsHUD {
       const screenY = -(tempVec.y * halfH) + halfH;
       if (screenX < 20 || screenX > w - 20 || screenY < 20 || screenY > h - 60) continue;
 
-      const distLabel = wp.dist < 1000 ? `${Math.round(wp.dist)} m` : `${(wp.dist / 1000).toFixed(1)} km`;
+      const distLabel = wp.dist < 1000 ? `${Math.round(wp.dist)}m` : `${(wp.dist / 1000).toFixed(1)}km`;
       const el = this._badgePool[activeIdx++];
       el.style.display = 'block';
       el.style.transform = `translate3d(${screenX | 0}px, ${screenY | 0}px, 0)`;
-      const text = `📍 ${wp.name} · ${distLabel}`;
+      const text = `${wp.name} · ${distLabel}`;
       if (el._lastText !== text) {
         el._lastText = text;
         el.textContent = text;

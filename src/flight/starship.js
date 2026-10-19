@@ -10,101 +10,194 @@ import * as THREE from 'three';
 // 5. Vacuum "Space Jellyfish" twilight plume & hypersonic plasma sheath
 // -------------------------------------------------------------
 
-let _cachedSteel = null;
-function createSteelTexture() {
-  if (_cachedSteel) return _cachedSteel;
+let _cachedSteelMaps = null;
+function createSteelMaps() {
+  if (_cachedSteelMaps) return _cachedSteelMaps;
   const c = document.createElement('canvas');
-  c.width = c.height = 256;
+  const b = document.createElement('canvas');
+  c.width = c.height = 512;
+  b.width = b.height = 512;
   const g = c.getContext('2d');
-  g.fillStyle = '#dcdad5';
-  g.fillRect(0, 0, 256, 256);
+  const bg = b.getContext('2d');
 
-  // Brushed steel vertical grain
-  for (let i = 0; i < 600; i++) {
-    g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(100,105,115,0.08)';
-    g.fillRect(Math.random() * 256, 0, 1 + Math.random() * 2, 256);
-  }
+  // Base 304L cold-rolled stainless steel reflectance
+  g.fillStyle = '#d8d7d3';
+  g.fillRect(0, 0, 512, 512);
+  bg.fillStyle = '#808080';
+  bg.fillRect(0, 0, 512, 512);
 
-  // Welded ring seams every 32px
-  g.strokeStyle = 'rgba(75,80,90,0.55)';
-  g.lineWidth = 1.5;
-  for (let y = 0; y <= 256; y += 32) {
-    g.beginPath();
-    g.moveTo(0, y);
-    g.lineTo(256, y);
-    g.stroke();
-  }
+  // Subtle barrel ring-by-ring reflectance variation (8 rings across 512px)
+  const ringH = 64;
+  for (let r = 0; r < 8; r++) {
+    const shade = 210 + ((r * 17) % 18) - 8;
+    g.fillStyle = `rgb(${shade}, ${shade + 1}, ${shade + 3})`;
+    g.fillRect(0, r * ringH, 512, ringH);
 
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(2, 6);
-  _cachedSteel = tex;
-  return tex;
-}
-
-let _cachedHeatshield = null;
-function createHeatshieldTexture() {
-  if (_cachedHeatshield) return _cachedHeatshield;
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d');
-  g.fillStyle = '#111215';
-  g.fillRect(0, 0, 128, 128);
-
-  // Hexagonal tile seam grid
-  g.strokeStyle = 'rgba(40,42,48,0.7)';
-  g.lineWidth = 1;
-  const r = 8;
-  const h = r * Math.sqrt(3);
-  for (let y = 0; y < 140; y += h) {
-    for (let x = 0; x < 140; x += r * 3) {
-      drawHex(g, x, y, r);
-      drawHex(g, x + r * 1.5, y + h / 2, r);
+    // Staggered vertical barrel panel weld seams
+    const numPanels = 4;
+    const offset = (r % 2) * 64;
+    for (let p = 0; p < numPanels; p++) {
+      const px = (p * (512 / numPanels) + offset) % 512;
+      g.fillStyle = 'rgba(70, 74, 82, 0.55)';
+      g.fillRect(px, r * ringH, 2, ringH);
+      bg.fillStyle = '#404040';
+      bg.fillRect(px, r * ringH, 2, ringH);
     }
   }
 
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(4, 12);
-  _cachedHeatshield = tex;
-  return tex;
+  // Fine anisotropic circumferential & vertical brushed grain
+  for (let i = 0; i < 1400; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const w = 1 + Math.random() * 2.5;
+    const h = 18 + Math.random() * 60;
+    g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.065)' : 'rgba(85,90,100,0.065)';
+    g.fillRect(x, y, w, h);
+    bg.fillStyle = Math.random() > 0.5 ? 'rgba(205,205,205,0.12)' : 'rgba(60,60,60,0.12)';
+    bg.fillRect(x, y, w, h);
+  }
+
+  // Circumferential ring weld seams with heat-affected zone (HAZ) gold/blue tint
+  for (let y = 0; y <= 512; y += ringH) {
+    const hazGrad = g.createLinearGradient(0, y - 5, 0, y + 5);
+    hazGrad.addColorStop(0, 'rgba(180, 165, 140, 0.0)');
+    hazGrad.addColorStop(0.35, 'rgba(165, 145, 115, 0.28)');
+    hazGrad.addColorStop(0.5, 'rgba(55, 60, 68, 0.78)');
+    hazGrad.addColorStop(0.65, 'rgba(135, 150, 175, 0.25)');
+    hazGrad.addColorStop(1, 'rgba(180, 165, 140, 0.0)');
+    g.fillStyle = hazGrad;
+    g.fillRect(0, y - 5, 512, 10);
+
+    // Raised weld bead on bump map
+    bg.fillStyle = '#d8d8d8';
+    bg.fillRect(0, y - 1, 512, 2);
+    bg.fillStyle = '#383838';
+    bg.fillRect(0, y + 1, 512, 1);
+  }
+
+  const map = new THREE.CanvasTexture(c);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(3, 7);
+
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(3, 7);
+
+  _cachedSteelMaps = { map, bumpMap };
+  return _cachedSteelMaps;
 }
 
-function drawHex(g, x, y, r) {
+let _cachedHeatshieldMaps = null;
+function createHeatshieldMaps() {
+  if (_cachedHeatshieldMaps) return _cachedHeatshieldMaps;
+  const c = document.createElement('canvas');
+  const b = document.createElement('canvas');
+  c.width = c.height = 256;
+  b.width = b.height = 256;
+  const g = c.getContext('2d');
+  const bg = b.getContext('2d');
+
+  g.fillStyle = '#121317';
+  g.fillRect(0, 0, 256, 256);
+  bg.fillStyle = '#202020';
+  bg.fillRect(0, 0, 256, 256);
+
+  // Interlocking hexagonal TUFROC ceramic tiles with individual tile variation
+  const r = 10;
+  const h = r * Math.sqrt(3);
+  let idx = 0;
+  for (let y = -h; y < 256 + h; y += h) {
+    for (let x = -r * 3; x < 256 + r * 3; x += r * 3) {
+      drawHexTile(g, bg, x, y, r, idx++);
+      drawHexTile(g, bg, x + r * 1.5, y + h / 2, r, idx++);
+    }
+  }
+
+  const map = new THREE.CanvasTexture(c);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(5, 14);
+
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(5, 14);
+
+  _cachedHeatshieldMaps = { map, bumpMap };
+  return _cachedHeatshieldMaps;
+}
+
+function drawHexTile(g, bg, x, y, r, seed) {
+  const shade = 18 + ((seed * 29) % 14);
+  g.fillStyle = `rgb(${shade}, ${shade + 1}, ${shade + 3})`;
+  g.strokeStyle = '#07080a';
+  g.lineWidth = 1.4;
+
   g.beginPath();
   for (let i = 0; i < 6; i++) {
     const a = (i * Math.PI) / 3;
-    const px = x + r * Math.cos(a);
-    const py = y + r * Math.sin(a);
+    const px = x + (r - 0.5) * Math.cos(a);
+    const py = y + (r - 0.5) * Math.sin(a);
     if (i === 0) g.moveTo(px, py);
     else g.lineTo(px, py);
   }
   g.closePath();
+  g.fill();
   g.stroke();
+
+  // Raised ceramic pillow center in bump map with recessed expansion gap
+  const bShade = 175 + ((seed * 13) % 35);
+  bg.fillStyle = `rgb(${bShade}, ${bShade}, ${bShade})`;
+  bg.strokeStyle = '#151515';
+  bg.lineWidth = 1.8;
+  bg.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i * Math.PI) / 3;
+    const px = x + (r - 0.8) * Math.cos(a);
+    const py = y + (r - 0.8) * Math.sin(a);
+    if (i === 0) bg.moveTo(px, py);
+    else bg.lineTo(px, py);
+  }
+  bg.closePath();
+  bg.fill();
+  bg.stroke();
 }
 
 export class StarshipMissionVehicle {
   constructor() {
     this.group = new THREE.Group();
 
-    // Textures & Shared PBR Materials
-    const steelTex = createSteelTexture();
-    const heatshieldTex = createHeatshieldTexture();
+    // High-Resolution Procedural PBR Textures & Bump Maps
+    const steelMaps = createSteelMaps();
+    const heatshieldMaps = createHeatshieldMaps();
 
     this.matSteel = new THREE.MeshStandardMaterial({
-      map: steelTex,
-      metalness: 0.95,
-      roughness: 0.22,
-      color: 0xefedf0
+      map: steelMaps.map,
+      bumpMap: steelMaps.bumpMap,
+      bumpScale: 0.045,
+      metalness: 0.94,
+      roughness: 0.24,
+      color: 0xf2f0ec
     });
 
     this.matHeatshield = new THREE.MeshStandardMaterial({
-      map: heatshieldTex,
-      metalness: 0.15,
-      roughness: 0.88,
-      color: 0x141518
+      map: heatshieldMaps.map,
+      bumpMap: heatshieldMaps.bumpMap,
+      bumpScale: 0.055,
+      metalness: 0.16,
+      roughness: 0.84,
+      color: 0x16181c
+    });
+
+    this.matCryoFrost = new THREE.MeshStandardMaterial({
+      map: steelMaps.map,
+      bumpMap: steelMaps.bumpMap,
+      bumpScale: 0.03,
+      color: 0xeef5fc,
+      metalness: 0.25,
+      roughness: 0.72,
+      transparent: true,
+      opacity: 0.78
     });
 
     this.matDarkMetal = new THREE.MeshStandardMaterial({
@@ -150,12 +243,15 @@ export class StarshipMissionVehicle {
     this.boosterGroup = new THREE.Group();
     this.starshipGroup = new THREE.Group();
     this.launchPadGroup = new THREE.Group();
+    this.launchTerminalGroup = new THREE.Group();
 
     this.group.add(this.launchPadGroup);
+    this.group.add(this.launchTerminalGroup);
     this.group.add(this.boosterGroup);
     this.group.add(this.starshipGroup);
 
     this.buildLaunchComplex();
+    this.buildLaunchTerminal();
     this.buildSuperHeavyBooster();
     this.buildStarship();
     this.buildFX();
@@ -523,6 +619,129 @@ export class StarshipMissionVehicle {
   }
 
   // -------------------------------------------------------------
+  // 1B. PHYSICAL LAUNCH CONTROL PEDESTAL NEAR PAD (Walk & Click to Launch!)
+  // -------------------------------------------------------------
+  buildLaunchTerminal() {
+    const T = this.launchTerminalGroup;
+
+    // Concrete platform pad at astronaut approach perimeter
+    const basePad = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.6, 3.0, 0.28, 18),
+      this.matConcrete
+    );
+    basePad.position.y = 0.14;
+    basePad.receiveShadow = true;
+    T.add(basePad);
+
+    // Illuminated perimeter safety ring on ground
+    const ringGlow = new THREE.Mesh(
+      new THREE.RingGeometry(2.35, 2.52, 24),
+      new THREE.MeshBasicMaterial({ color: 0xff4422, side: THREE.DoubleSide })
+    );
+    ringGlow.rotation.x = -Math.PI / 2;
+    ringGlow.position.y = 0.29;
+    T.add(ringGlow);
+
+    // Angled Stainless Steel & Dark Carbon Control Pedestal Pillar
+    const pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.65, 1.18, 0.52),
+      this.matDarkMetal
+    );
+    pillar.position.set(0, 0.72, 0);
+    pillar.castShadow = true;
+    T.add(pillar);
+
+    // Sloped Console Top Deck (at astronaut hand/chest height ~1.32m)
+    const consoleHead = new THREE.Group();
+    consoleHead.position.set(0, 1.32, 0.05);
+    consoleHead.rotation.x = 0.42; // Tilted toward astronaut approaching from -Z / -X
+
+    const deckPlate = new THREE.Mesh(
+      new THREE.BoxGeometry(0.84, 0.14, 0.64),
+      this.matSteel
+    );
+    consoleHead.add(deckPlate);
+
+    // Protective Industrial Yellow/Dark Safety Collar around the Physical Launch Button
+    const collar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.21, 0.23, 0.09, 20, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0xeeb422, metalness: 0.7, roughness: 0.35, side: THREE.DoubleSide })
+    );
+    collar.position.set(0, 0.10, 0.04);
+    consoleHead.add(collar);
+
+    // THE PHYSICAL LAUNCH PUSH-BUTTON (Raycast clickable & [F] interactive!)
+    this.launchButtonMat = new THREE.MeshStandardMaterial({
+      color: 0xff2211,
+      emissive: new THREE.Color(0xff2a00),
+      emissiveIntensity: 1.35,
+      metalness: 0.3,
+      roughness: 0.25
+    });
+    this.launchButtonMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.17, 0.11, 24),
+      this.launchButtonMat
+    );
+    this.launchButtonMesh.position.set(0, 0.12, 0.04);
+    this.launchButtonMesh.name = 'PHYSICAL_LAUNCH_BUTTON';
+    consoleHead.add(this.launchButtonMesh);
+
+    // Status LED indicators above the button
+    const ledArmed = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.03, 0.08),
+      new THREE.MeshBasicMaterial({ color: 0x34d399 })
+    );
+    ledArmed.position.set(-0.22, 0.08, -0.18);
+    consoleHead.add(ledArmed);
+
+    const ledPad = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.03, 0.08),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
+    ledPad.position.set(0.22, 0.08, -0.18);
+    consoleHead.add(ledPad);
+
+    T.add(consoleHead);
+
+    // Overhead Beacon Pole so astronaut/rover can easily spot the Launch Control Pedestal
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.06, 3.6, 8),
+      this.matDarkMetal
+    );
+    pole.position.set(0, 1.8, -0.22);
+    T.add(pole);
+
+    this.terminalBeaconMat = new THREE.MeshBasicMaterial({ color: 0xff3b1f });
+    const beaconLamp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 12, 10),
+      this.terminalBeaconMat
+    );
+    beaconLamp.position.set(0, 3.65, -0.22);
+    T.add(beaconLamp);
+  }
+
+  placeLaunchTerminal(x, y, z, rotationY = -Math.PI * 0.75) {
+    this.launchTerminalGroup.position.set(x, y, z);
+    this.launchTerminalGroup.rotation.y = rotationY;
+  }
+
+  setLaunchButtonPressed(pressed) {
+    if (!this.launchButtonMesh || !this.launchButtonMat) return;
+    this.launchButtonMesh.position.y = pressed ? 0.075 : 0.12;
+    if (pressed) {
+      this.launchButtonMat.color.setHex(0x10b981);
+      this.launchButtonMat.emissive.setHex(0x10b981);
+      this.launchButtonMat.emissiveIntensity = 1.8;
+      if (this.terminalBeaconMat) this.terminalBeaconMat.color.setHex(0x10b981);
+    } else {
+      this.launchButtonMat.color.setHex(0xff2211);
+      this.launchButtonMat.emissive.setHex(0xff2a00);
+      this.launchButtonMat.emissiveIntensity = 1.35;
+      if (this.terminalBeaconMat) this.terminalBeaconMat.color.setHex(0xff3b1f);
+    }
+  }
+
+  // -------------------------------------------------------------
   // 2. SUPER HEAVY BOOSTER (STAGE 1) (Ref Images 0, 1)
   // -------------------------------------------------------------
   buildSuperHeavyBooster() {
@@ -532,17 +751,32 @@ export class StarshipMissionVehicle {
     this.boosterHeight = boosterHeight;
 
     // Main Stainless Steel Cylinder Body
-    const cylGeo = new THREE.CylinderGeometry(radius, radius, boosterHeight, 28, 2);
+    const cylGeo = new THREE.CylinderGeometry(radius, radius, boosterHeight, 32, 4);
     const body = new THREE.Mesh(cylGeo, this.matSteel);
     body.position.y = boosterHeight / 2;
     body.castShadow = body.receiveShadow = true;
     B.add(body);
 
-    // Aerodynamic Chines / Forward Cable Trunks along the side
-    const chineGeo = new THREE.BoxGeometry(0.4, boosterHeight * 0.75, 0.9);
+    // Cryogenic LOX & LCH4 Tank Condensation Frost Bands
+    const loxFrost = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 1.004, radius * 1.004, 24.0, 32),
+      this.matCryoFrost
+    );
+    loxFrost.position.y = 19.0;
+    B.add(loxFrost);
+
+    const ch4Frost = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 1.004, radius * 1.004, 19.0, 32),
+      this.matCryoFrost
+    );
+    ch4Frost.position.y = 48.0;
+    B.add(ch4Frost);
+
+    // Aerodynamic Chines / COPV & Autogenous Pressurization Trunks along the side
+    const chineGeo = new THREE.BoxGeometry(0.55, boosterHeight * 0.78, 1.15);
     for (const sx of [-1, 1]) {
       const chine = new THREE.Mesh(chineGeo, this.matSteel);
-      chine.position.set(sx * (radius + 0.15), boosterHeight * 0.45, 0);
+      chine.position.set(sx * (radius + 0.18), boosterHeight * 0.44, 0);
       B.add(chine);
     }
 
@@ -573,10 +807,21 @@ export class StarshipMissionVehicle {
 
     // Vented Hot-Staging Interstage Ring (sits between Booster and Ship)
     const hotRingY = boosterHeight + 2.5;
-    const hotRingGeo = new THREE.CylinderGeometry(radius, radius, 5.0, 24);
+    const hotRingGeo = new THREE.CylinderGeometry(radius, radius, 5.0, 28);
     const hotRing = new THREE.Mesh(hotRingGeo, this.matDarkMetal);
     hotRing.position.y = hotRingY;
     B.add(hotRing);
+
+    // Hot-stage exhaust blast slots around the interstage perimeter
+    const slotGeo = new THREE.BoxGeometry(0.95, 2.8, 0.25);
+    const slotMat = new THREE.MeshBasicMaterial({ color: 0x060709 });
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const slot = new THREE.Mesh(slotGeo, slotMat);
+      slot.position.set(Math.cos(a) * (radius + 0.02), hotRingY, Math.sin(a) * (radius + 0.02));
+      slot.rotation.y = -a + Math.PI / 2;
+      B.add(slot);
+    }
 
     // 33 Raptor Engine Cluster at Booster Base using a single InstancedMesh (1 draw call instead of 33)
     const raptorGeo = new THREE.CylinderGeometry(0.4, 0.75, 1.8, 10);
@@ -653,42 +898,58 @@ export class StarshipMissionVehicle {
     this.shipHeight = barrelH + noseH;
 
     // Main barrel cylinder
-    const barrelGeo = new THREE.CylinderGeometry(r, r, barrelH, 28, 2);
+    const barrelGeo = new THREE.CylinderGeometry(r, r, barrelH, 32, 4);
     const barrel = new THREE.Mesh(barrelGeo, this.matSteel);
     barrel.position.y = barrelH / 2;
     barrel.castShadow = barrel.receiveShadow = true;
     S.add(barrel);
 
+    // Leeward Cryogenic Propellant Condensation Frost Band on Ship Tank Section
+    const shipCryoFrost = new THREE.Mesh(
+      new THREE.CylinderGeometry(r * 1.004, r * 1.004, 16.0, 32, 1, false, Math.PI * 0.5, Math.PI),
+      this.matCryoFrost
+    );
+    shipCryoFrost.position.y = 14.5;
+    S.add(shipCryoFrost);
+
     // Black Ceramic Heat Shield Layer on +Z Windward Belly (faces planet & plasma during +pitch reentry/bellyflop)
-    const shieldBellyGeo = new THREE.CylinderGeometry(r * 1.01, r * 1.01, barrelH, 28, 1, false, -Math.PI * 0.5, Math.PI);
+    const shieldBellyGeo = new THREE.CylinderGeometry(r * 1.012, r * 1.012, barrelH, 32, 1, false, -Math.PI * 0.5, Math.PI);
     const shieldBelly = new THREE.Mesh(shieldBellyGeo, this.matHeatshield);
     shieldBelly.position.y = barrelH / 2;
     S.add(shieldBelly);
 
     // Authentic Gothic Ogive Nosecone
     const ogivePoints = [];
-    const ogiveSteps = 14;
+    const ogiveSteps = 16;
     for (let i = 0; i <= ogiveSteps; i++) {
       const t = i / ogiveSteps;
       const y = t * noseH;
       const rad = r * Math.cos(t * Math.PI * 0.5);
       ogivePoints.push(new THREE.Vector2(rad, y));
     }
-    const noseSteelGeo = new THREE.LatheGeometry(ogivePoints, 28);
+    const noseSteelGeo = new THREE.LatheGeometry(ogivePoints, 32);
     const nose = new THREE.Mesh(noseSteelGeo, this.matSteel);
     nose.position.y = barrelH;
     nose.castShadow = true;
     S.add(nose);
 
     // Nosecone Heatshield half on +Z Windward Belly
-    const noseShieldGeo = new THREE.LatheGeometry(ogivePoints, 28, -Math.PI * 0.5, Math.PI);
-    noseShieldGeo.scale(1.008, 1.0, 1.008);
+    const noseShieldGeo = new THREE.LatheGeometry(ogivePoints, 32, -Math.PI * 0.5, Math.PI);
+    noseShieldGeo.scale(1.01, 1.0, 1.01);
     const noseShield = new THREE.Mesh(noseShieldGeo, this.matHeatshield);
     noseShield.position.y = barrelH;
     S.add(noseShield);
 
+    // Starlink "Pez Dispenser" Payload Slot on forward barrel
+    const pezSlot = new THREE.Mesh(
+      new THREE.BoxGeometry(3.4, 0.42, 0.25),
+      this.matDarkMetal
+    );
+    pezSlot.position.set(0, barrelH - 3.6, -(r + 0.02));
+    S.add(pezSlot);
+
     // Raceway conduit down the -Z leeward stainless steel spine
-    const raceway = new THREE.Mesh(new THREE.BoxGeometry(0.35, barrelH + noseH * 0.6, 0.4), this.matDarkMetal);
+    const raceway = new THREE.Mesh(new THREE.BoxGeometry(0.38, barrelH + noseH * 0.6, 0.42), this.matDarkMetal);
     raceway.position.set(0, (barrelH + noseH * 0.6) / 2, -(r + 0.1));
     S.add(raceway);
 
@@ -699,12 +960,17 @@ export class StarshipMissionVehicle {
       S.add(shipPin);
     }
 
-    // 4 Articulating Aerodynamic Flaps
+    // 4 Articulating Aerodynamic Flaps with Aerodynamic Hinge Root Fairings
     this.forwardFlaps = [];
     this.aftFlaps = [];
 
-    const ffGeo = new THREE.BoxGeometry(0.3, 3.8, 3.2);
+    const ffGeo = new THREE.BoxGeometry(0.32, 3.8, 3.2);
+    const ffFairingGeo = new THREE.CylinderGeometry(0.45, 0.55, 4.1, 12);
     for (const sx of [-1, 1]) {
+      const fairing = new THREE.Mesh(ffFairingGeo, this.matHeatshield);
+      fairing.position.set(sx * (r - 0.15), barrelH + noseH * 0.45, 0);
+      S.add(fairing);
+
       const hinge = new THREE.Group();
       hinge.position.set(sx * (r - 0.2), barrelH + noseH * 0.45, 0);
 
@@ -716,8 +982,13 @@ export class StarshipMissionVehicle {
       this.forwardFlaps.push({ hinge, side: sx });
     }
 
-    const afGeo = new THREE.BoxGeometry(0.4, 11.0, 5.2);
+    const afGeo = new THREE.BoxGeometry(0.42, 11.0, 5.2);
+    const afFairingGeo = new THREE.CylinderGeometry(0.62, 0.72, 11.4, 12);
     for (const sx of [-1, 1]) {
+      const fairing = new THREE.Mesh(afFairingGeo, this.matHeatshield);
+      fairing.position.set(sx * (r - 0.1), 6.5, 0);
+      S.add(fairing);
+
       const hinge = new THREE.Group();
       hinge.position.set(sx * (r - 0.2), 6.5, 0);
 

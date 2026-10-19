@@ -8,23 +8,27 @@ export class MarsRoverPhysics {
   constructor(roverModel) {
     this.model = roverModel;
 
-    // Position & Heading
-    this.position = new THREE.Vector3(0, 0, 0);
-    this.yaw = 0; // Heading in radians (0 = forward along +Z)
+    // Position & Heading (Spawn on Starbase Approach ~190m SW of Launch Pad 1 so complex is directly ahead)
+    const startX = 1260;
+    const startZ = 1020;
+    this.position = new THREE.Vector3(startX, 0, startZ);
+    this.yaw = Math.atan2(1400 - startX, 1150 - startZ); // Facing Starbase OLM & Tower
     this.pitch = 0; // Slope pitch (up/down)
     this.roll = 0; // Slope roll (left/right bank)
     this.quaternion = new THREE.Quaternion();
 
-    // Velocities
+    // Velocities & Accelerometer G-Force
     this.speed = 0; // Forward linear speed (m/s)
     this.verticalVelocity = 0; // Up/down jump velocity (m/s)
     this.lateralVelocity = 0; // Sideways slip / drift (m/s)
     this.velocity = new THREE.Vector3(0, 0, 0);
+    this.prevVelocity = new THREE.Vector3(0, 0, 0);
+    this.gForce = '0.38'; // Proper accelerometer G-load on Mars surface (3.721 / 9.80665)
 
     // Initial position on Mars surface
     this.rideHeight = 0.95; // Fixed chassis height above dune surface
-    const initY = getMarsHeight(0, 0) + this.rideHeight;
-    this.position.set(0, initY, 0);
+    const initY = getMarsHeight(startX, startZ) + this.rideHeight;
+    this.position.set(startX, initY, startZ);
 
     // Vehicle Performance Specs
     this.acceleration = 24.0; // m/s²
@@ -281,15 +285,22 @@ export class MarsRoverPhysics {
     const euler = new THREE.Euler(this.pitch, this.yaw, this.roll, 'YXZ');
     this.quaternion.setFromEuler(euler);
 
-    // 10. Update Telemetry
+    // 10. Update Telemetry & Proper IMU G-Force
     this.speedKmh = Math.abs(Math.round(this.speed * 3.6));
     this.distanceTraveled += Math.abs(this.speed) * dt;
 
+    this.prevVelocity.copy(this.velocity);
     this.velocity.set(
       (sinY * this.speed + cosY * this.lateralVelocity),
       this.verticalVelocity,
       (cosY * this.speed - sinY * this.lateralVelocity)
     );
+
+    const ax = (this.velocity.x - this.prevVelocity.x) / dt;
+    const ay = ((this.velocity.y - this.prevVelocity.y) / dt) + (this.isAirborne ? 0.0 : 3.721);
+    const az = (this.velocity.z - this.prevVelocity.z) / dt;
+    const properG = Math.hypot(ax, ay, az) / 9.80665;
+    this.gForce = properG.toFixed(2);
 
     // 11. Update 3D Model Group
     this.model.group.position.copy(this.position);

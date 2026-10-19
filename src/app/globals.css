@@ -2200,4 +2200,177 @@ html, body {
   }
 }
 
+/* =========================================================
+   UNIFIED FROSTED GLASSMORPHISM OVERHAUL (ROVER, WALK & FLIGHT)
+   ========================================================= */
+.spx-hud-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+}
+
+.flight-phase-badge,
+.flight-cam-bar,
+.spx-traj-switch,
+.spx-gimbal-bar,
+.spx-trajectory-prompt,
+.flight-score-card,
+.hud-pill-btn,
+.modal-card {
+  background: rgba(10, 14, 22, 0.54) !important;
+  backdrop-filter: blur(22px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(165%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 10px 28px rgba(0, 0, 0, 0.45) !important;
+}
+
+.spx-broadcast-bar {
+  background: linear-gradient(180deg, rgba(10, 14, 22, 0.52) 0%, rgba(6, 9, 15, 0.68) 100%) !important;
+  backdrop-filter: blur(24px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(170%) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.24) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 -10px 32px rgba(0, 0, 0, 0.5) !important;
+}
+
+.hud-pill-btn {
+  color: rgba(255, 255, 255, 0.86) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 10.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: 1px !important;
+  padding: 6px 12px !important;
+  border-radius: 6px !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.hud-pill-btn:hover,
+.walk-toggle-btn.active {
+  background: rgba(255, 255, 255, 0.20) !important;
+  border-color: rgba(255, 255, 255, 0.58) !important;
+  color: #ffffff !important;
+}
+
+.spx-thr-btn.active {
+  background: rgba(88, 210, 255, 0.32) !important;
+  border-color: #7ce2ff !important;
+  color: #ffffff !important;
+}
+
+/* Position Minimap cleanly above the bottom broadcast bar */
+#minimap {
+  right: 22px !important;
+  bottom: 126px !important;
+  width: 116px !important;
+  height: 116px !important;
+  background: rgba(10, 14, 22, 0.52) !important;
+  backdrop-filter: blur(18px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.24) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Rover Drivetrain SVG & Starbase Pad Locator */
+.rover-chassis-svg {
+  fill: rgba(255, 255, 255, 0.10);
+  stroke: rgba(255, 255, 255, 0.42);
+  stroke-width: 1.4;
+}
+
+.raptor-nozzle.active {
+  fill: #ffffff;
+  stroke: #7cd4ff;
+  filter: drop-shadow(0 0 3px #66ddff);
+}
+
+.spx-pad-locator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 3px 12px;
+}
+
+.locator-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4422;
+  box-shadow: 0 0 8px #ff4422;
+}
+
+.locator-txt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.physical-pad-btn {
+  background: linear-gradient(135deg, rgba(255, 58, 32, 0.88), rgba(210, 24, 16, 0.92)) !important;
+  border-color: rgba(255, 160, 140, 0.85) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 22px rgba(255, 58, 32, 0.65) !important;
+}
+
+/* First-Person Astronaut Walking Reticle */
+.walk-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 75;
+}
+
+.reticle-ring {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.reticle-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 6px #ffffff;
+}
+
+/* Glassmorphic Action Prompt & Waypoint Badges */
+.flight-action-prompt {
+  background: rgba(10, 14, 22, 0.56);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  padding: 5px 14px;
+  color: #ffffff;
+}
+
+.waypoint-badge {
+  background: rgba(10, 14, 22, 0.58) !important;
+  backdrop-filter: blur(16px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(160%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.24) !important;
+  color: #ffffff !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.8px !important;
+  border-radius: 6px !important;
+  padding: 4px 10px !important;
+}
+
+
 

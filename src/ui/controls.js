@@ -17,7 +17,10 @@ export class InputManager {
       cameraToggle: false,
       markBeacon: false,
       toggleLights: false,
-      launchToggle: false
+      walkToggle: false,
+      interactAction: false,
+      legsToggle: false,
+      cargoToggle: false
     };
 
     this.keys = {};
@@ -38,13 +41,19 @@ export class InputManager {
 
   initKeyboard() {
     window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
       this.keys[e.code] = true;
 
       // Single-press action triggers
       if (e.code === 'KeyC') this.state.cameraToggle = true;
-      if (e.code === 'KeyM') this.state.markBeacon = true;
       if (e.code === 'KeyL') this.state.toggleLights = true;
-      if (e.code === 'KeyT') this.state.launchToggle = true;
+      if (e.code === 'KeyE') this.state.walkToggle = true;
+      if (e.code === 'KeyF') {
+        this.state.interactAction = true;
+        this.state.toggleLights = true;
+      }
+      if (e.code === 'KeyG') this.state.legsToggle = true;
+      if (e.code === 'KeyB') this.state.cargoToggle = true;
 
       // Prevent scrolling
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {

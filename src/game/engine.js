@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MarsTerrainManager } from '../terrain/marsTerrain.js';
 import { MarsScatterManager } from '../terrain/scatter.js';
+import { getMarsHeight } from '../terrain/noise.js';
 import { MarsRoverModel } from '../vehicle/rover.js';
 import { MarsRoverPhysics } from '../vehicle/physics.js';
 import { MarsAtmosphere } from '../effects/atmosphere.js';
@@ -19,11 +20,30 @@ export class MarsGameEngine {
     this.quality = 'High';
     this.gridEnabled = false;
     this.disposed = false;
-    this.mode = 'rover';
+    this.mode = 'rover'; // 'rover' | 'walking' | 'starship'
     this.loadedNotified = false;
     this.timeScales = [1, 2, 4, 8];
     this.timeScaleIdx = 0;
     this.timeScale = 1;
+
+    // First-Person Astronaut Walker State (No 3rd-person view, no human character mesh)
+    this.walker = {
+      position: new THREE.Vector3(1260, 0, 1020),
+      velocity: new THREE.Vector3(0, 0, 0),
+      yaw: 0.82,
+      pitch: 0,
+      roll: 0,
+      speed: 0,
+      speedKmh: 0,
+      distanceTraveled: 0,
+      bobPhase: 0,
+      lastStepIndex: 0,
+      eyeHeight: 1.75,
+      gForce: '0.38'
+    };
+
+    this.raycaster = new THREE.Raycaster();
+    this.pointerNDC = new THREE.Vector2();
 
     this.reportProgress(10, 'INITIALIZING SIMULATION ENGINE...');
     this.initRenderer();
@@ -124,10 +144,16 @@ export class MarsGameEngine {
     // 5. Audio Synthesizer
     this.audio = new MarsAudioEngine();
 
-    // 6. Camera Controller
+    // 6. Camera Controller (Universal 360° Gimbal across all cameras)
     this.cameraController = new MarsCameraController(this.camera, this.renderer.domElement);
 
-    // 7. Input & HUD
+    // 7. SpaceX Starship & Mission Flight System (Placed at Starbase 1400, 1150)
+    this.reportProgress(92, 'ERECTING 145M MECHAZILLA TOWER & LAUNCH PEDESTAL...');
+    this.starship = new StarshipMissionVehicle();
+    this.scene.add(this.starship.group);
+    this.missionPhysics = new StarshipMissionPhysics(this.starship, new THREE.Vector2(1400, 1150));
+
+    // 8. Input & Unified Glassmorphic HUD for Rover & Walking
     this.input = new InputManager();
     this.hud = new MarsHUD(this.input, {
       onToggleGrid: (enabled) => {
@@ -146,16 +172,32 @@ export class MarsGameEngine {
         this.applyQuality(quality);
       },
       onResetRover: () => {
-        this.physics.resetAt(0, 0);
+        this.physics.resetAt(1260, 1020);
+        this.physics.yaw = Math.atan2(1400 - 1260, 1150 - 1020);
+        if (this.mode === 'walking') {
+          this.setMode('rover');
+        }
+      },
+      onSelectRoverCamera: (modeIdx) => {
+        if (this.mode === 'rover') {
+          this.cameraController.setRoverMode(modeIdx);
+        }
+      },
+      onToggleWalk: () => {
+        this.toggleWalkMode();
+      },
+      onPressPhysicalLaunch: () => {
+        this.triggerPhysicalPadLaunch();
+      },
+      onGimbalPan: (dYaw, dPitch) => {
+        this.cameraController.adjustGimbal(dYaw, dPitch);
+      },
+      onGimbalReset: () => {
+        this.cameraController.resetGimbal();
       }
     });
 
-    // 8. SpaceX Starship & Mission Flight System
-    this.reportProgress(92, 'ERECTING 140M MECHAZILLA TOWER & STARSHIP...');
-    this.starship = new StarshipMissionVehicle();
-    this.scene.add(this.starship.group);
-    this.missionPhysics = new StarshipMissionPhysics(this.starship, new THREE.Vector2(1400, 1150));
-
+    // 9. SpaceX Flight HUD
     this.flightHud = new MissionFlightHUD({
       onStage: () => {
         this.handleFlightStageAction();
@@ -166,22 +208,10 @@ export class MarsGameEngine {
       onSelectTrajectory: (mode) => {
         this.missionPhysics.setTrajectoryMode(mode);
       },
-      onToggleBoosterTracking: () => {
-        const currentCam = this.cameraController.getFlightMode();
-        const targetCam = currentCam === 'BOOSTER_CAM' ? 'CHASE' : 'BOOSTER_CAM';
-        this.cameraController.setFlightMode(targetCam);
-        this.missionPhysics.boosterTracking = (targetCam === 'BOOSTER_CAM');
-        this.flightHud.notifyCameraMode(targetCam);
-      },
       onSelectCamera: (camMode) => {
         this.cameraController.setFlightMode(camMode);
         this.missionPhysics.boosterTracking = (camMode === 'BOOSTER_CAM');
         this.flightHud.notifyCameraMode(camMode);
-      },
-      onToggleCamera: () => {
-        const nextMode = this.cameraController.nextFlightMode();
-        this.missionPhysics.boosterTracking = (nextMode === 'BOOSTER_CAM');
-        this.flightHud.notifyCameraMode(nextMode);
       },
       onGimbalMove: (dYaw, dPitch) => {
         this.cameraController.adjustGimbal(dYaw, dPitch);
@@ -199,6 +229,19 @@ export class MarsGameEngine {
       onThrottleDown: () => {
         this.missionPhysics.throttle = Math.max(0.0, this.missionPhysics.throttle - 0.15);
       },
+      onManualStage: () => {
+        if (!this.audio.initialized) this.audio.init();
+        this.audio.ensureRunning();
+        this.missionPhysics.triggerStageSeparation();
+        this.audio.playStageSeparationSound();
+        this.cameraController.addShake(0.5);
+      },
+      onToggleLegs: () => {
+        this.missionPhysics.toggleLandingLegs();
+      },
+      onToggleCargo: () => {
+        this.missionPhysics.toggleCargoDoors();
+      },
       onTouchPitch: (val) => {
         this.input.state.pitch = val;
       },
@@ -206,17 +249,9 @@ export class MarsGameEngine {
         this.input.state.steer = val;
       },
       onExit: () => {
-        this.setMode('rover');
+        this.setMode('walking');
       }
     });
-
-    const launchBtn = document.getElementById('launch-mission-btn');
-    if (launchBtn) {
-      launchBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.toggleMode();
-      });
-    }
 
     const bindSpeedBtn = (id) => {
       const btn = document.getElementById(id);
@@ -249,9 +284,46 @@ export class MarsGameEngine {
 
     const roverBtn = document.getElementById('rover-speed-btn');
     if (roverBtn) {
-      roverBtn.innerHTML = `<span>${this.timeScale}X</span>`;
+      roverBtn.textContent = `${this.timeScale}X`;
       roverBtn.classList.toggle('active', isWarped);
     }
+  }
+
+  // Toggle between Rover Driving and First-Person Astronaut Walking
+  toggleWalkMode() {
+    if (this.mode === 'rover') {
+      // Disembark Rover onto Martian surface next to driver door
+      const rightX = Math.cos(this.physics.yaw) * 2.6;
+      const rightZ = -Math.sin(this.physics.yaw) * 2.6;
+      const wx = this.physics.position.x + rightX;
+      const wz = this.physics.position.z + rightZ;
+      const wy = getMarsHeight(wx, wz);
+
+      this.walker.position.set(wx, wy, wz);
+      // Face toward the Launch Control Pedestal so the player can immediately walk to the button
+      const dxTerm = this.missionPhysics.terminalPosition.x - wx;
+      const dzTerm = this.missionPhysics.terminalPosition.z - wz;
+      this.walker.yaw = Math.atan2(dxTerm, dzTerm);
+      this.walker.speed = 0;
+      this.walker.bobPhase = 0;
+      this.cameraController.resetGimbal();
+      this.setMode('walking');
+    } else if (this.mode === 'walking') {
+      this.cameraController.resetGimbal();
+      this.setMode('rover');
+    }
+  }
+
+  // Triggered when clicking the physical red launch button on the Starbase Launch Control Pedestal (or pressing [F] next to it)
+  triggerPhysicalPadLaunch() {
+    if (!this.audio.initialized) this.audio.init();
+    this.audio.ensureRunning();
+    this.audio.playLaunchButtonSound();
+    if (this.starship.setLaunchButtonPressed) {
+      this.starship.setLaunchButtonPressed(true);
+    }
+    this.setMode('starship');
+    this.missionPhysics.startLaunch();
   }
 
   handleFlightStageAction() {
@@ -259,27 +331,19 @@ export class MarsGameEngine {
     this.audio.ensureRunning();
 
     if (this.missionPhysics.phase === FLIGHT_PHASES.ON_PAD) {
+      this.audio.playLaunchButtonSound();
       this.missionPhysics.startLaunch();
-    } else if (
-      this.missionPhysics.phase === FLIGHT_PHASES.BOOSTER_ASCENT ||
-      this.missionPhysics.phase === FLIGHT_PHASES.HOT_STAGING
-    ) {
+    } else if (this.missionPhysics.phase === FLIGHT_PHASES.LANDED) {
+      this.walker.position.set(
+        this.missionPhysics.terminalPosition.x - 3.5,
+        this.missionPhysics.terminalPosition.y,
+        this.missionPhysics.terminalPosition.z - 3.5
+      );
+      this.setMode('walking');
+    } else if (!this.missionPhysics.autoMission && this.starship.isMated) {
       this.missionPhysics.triggerStageSeparation();
       this.audio.playStageSeparationSound();
       this.cameraController.addShake(0.5);
-    } else if (
-      this.missionPhysics.phase === FLIGHT_PHASES.ORBIT ||
-      this.missionPhysics.phase === FLIGHT_PHASES.STARSHIP_ASCENT
-    ) {
-      this.missionPhysics.triggerDeorbit();
-    } else if (
-      this.missionPhysics.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY ||
-      this.missionPhysics.phase === FLIGHT_PHASES.BELLYFLOP
-    ) {
-      this.missionPhysics.triggerLandingFlip();
-    } else if (this.missionPhysics.phase === FLIGHT_PHASES.LANDED) {
-      this.physics.resetAt(this.missionPhysics.position.x + 35, this.missionPhysics.position.z + 35);
-      this.setMode('rover');
     }
   }
 
@@ -297,7 +361,7 @@ export class MarsGameEngine {
       this.cameraController.initialized = false;
 
       this.starship.group.visible = true;
-      this.roverModel.group.visible = false;
+      this.roverModel.group.visible = true;
 
       if (roverHud) roverHud.style.display = 'none';
       if (mobileControls) mobileControls.style.display = 'none';
@@ -306,15 +370,16 @@ export class MarsGameEngine {
       this.atmosphere.setFlightMode(true);
       if (this.terrain) this.terrain.setFlightMode(true);
 
-      // Silence rover motor while in flight
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
     } else {
-      this.camera.near = 0.25;
-      this.camera.far = 2500;
+      // 'rover' or 'walking'
+      this.camera.near = 0.22;
+      this.camera.far = 3200;
       this.camera.updateProjectionMatrix();
       this.cameraController.initialized = false;
 
       this.roverModel.group.visible = true;
+      this.starship.group.visible = true;
       if (this.scatter?.group) this.scatter.group.visible = true;
 
       this.flightHud.show(false);
@@ -328,11 +393,10 @@ export class MarsGameEngine {
       this.atmosphere.setAltitude(0, 0);
       this.terrain.setCameraAltitude(0);
       this.audio.updateRocket(0, 0, 0);
+      if (this.mode === 'walking') {
+        this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
+      }
     }
-  }
-
-  toggleMode() {
-    this.setMode(this.mode === 'rover' ? 'starship' : 'rover');
   }
 
   applyQuality(preset) {
@@ -391,6 +455,88 @@ export class MarsGameEngine {
     window.addEventListener('keydown', this.startAudio);
     window.addEventListener('touchstart', this.startAudio);
     window.addEventListener('mousedown', this.startAudio);
+
+    // 3D Raycast Click on the Physical Launch Button on the Starbase Pedestal
+    let pointerDownPos = null;
+    this.onCanvasPointerDown = (e) => {
+      pointerDownPos = { x: e.clientX, y: e.clientY };
+    };
+    this.onCanvasPointerUp = (e) => {
+      if (!pointerDownPos) return;
+      const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+      pointerDownPos = null;
+      if (moveDist > 10) return; // Ignore camera gimbal drags
+
+      if (this.mode !== 'walking' && this.mode !== 'rover') return;
+      if (!this.starship?.launchTerminalGroup) return;
+
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      this.pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      this.pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      this.raycaster.setFromCamera(this.pointerNDC, this.camera);
+      const hits = this.raycaster.intersectObject(this.starship.launchTerminalGroup, true);
+      if (hits.length > 0) {
+        const activePos = this.mode === 'walking' ? this.walker.position : this.physics.position;
+        const distToPedestal = activePos.distanceTo(this.missionPhysics.terminalPosition);
+        if (this.mode === 'walking' && distToPedestal <= 15.0) {
+          this.triggerPhysicalPadLaunch();
+        } else if (this.mode === 'rover' && distToPedestal <= 35.0) {
+          // If clicked from inside the rover near the pad, disembark to walking mode facing the button
+          this.toggleWalkMode();
+        }
+      }
+    };
+    this.renderer.domElement.addEventListener('pointerdown', this.onCanvasPointerDown);
+    this.renderer.domElement.addEventListener('pointerup', this.onCanvasPointerUp);
+  }
+
+  updateWalkingPhysics(dt) {
+    const input = this.input.state;
+    const isRunning = Boolean(input.nitro);
+    const maxWalkSpeed = isRunning ? 8.2 : 4.8; // m/s on Martian 0.38G surface
+
+    // Turn azimuth with A/D or Left/Right arrow keys
+    if (Math.abs(input.steer) > 0.02) {
+      this.walker.yaw += input.steer * 2.1 * dt;
+    }
+
+    // Forward/backward walking velocity
+    const targetSpeed = (input.throttle || 0) * maxWalkSpeed;
+    this.walker.speed = THREE.MathUtils.lerp(this.walker.speed, targetSpeed, Math.min(1.0, dt * 10.0));
+    if (Math.abs(this.walker.speed) < 0.04) this.walker.speed = 0;
+
+    const sinY = Math.sin(this.walker.yaw);
+    const cosY = Math.cos(this.walker.yaw);
+    const moveX = sinY * this.walker.speed * dt;
+    const moveZ = cosY * this.walker.speed * dt;
+
+    this.walker.position.x += moveX;
+    this.walker.position.z += moveZ;
+    this.walker.position.y = getMarsHeight(this.walker.position.x, this.walker.position.z);
+
+    this.walker.velocity.set(sinY * this.walker.speed, 0, cosY * this.walker.speed);
+    this.walker.speedKmh = Math.abs(Math.round(this.walker.speed * 3.6));
+    this.walker.distanceTraveled += Math.abs(this.walker.speed) * dt;
+
+    // First-person walking stride phase & synthesized Martian boot footsteps
+    const absSpeed = Math.abs(this.walker.speed);
+    if (absSpeed > 0.25) {
+      const strideFreq = isRunning ? 3.4 : 2.35;
+      this.walker.bobPhase += dt * strideFreq * Math.PI;
+      const stepIdx = Math.floor(this.walker.bobPhase / Math.PI);
+      if (stepIdx !== this.walker.lastStepIndex) {
+        this.walker.lastStepIndex = stepIdx;
+        if (!this.audio.initialized) this.audio.init();
+        this.audio.ensureRunning();
+        this.audio.playFootstepSound(isRunning);
+      }
+      // Subtle proper G oscillation from astronaut stride impact around 0.38G
+      const strideG = 0.38 + Math.abs(Math.sin(this.walker.bobPhase)) * (isRunning ? 0.14 : 0.06);
+      this.walker.gForce = strideG.toFixed(2);
+    } else {
+      this.walker.gForce = '0.38';
+    }
   }
 
   animate() {
@@ -400,7 +546,7 @@ export class MarsGameEngine {
     const rawDt = this.clock.getDelta();
     const dt = Math.min(rawDt, 0.05);
 
-    // Adaptive resolution: trade pixel density for frame time so low-end devices stay locked at 60 FPS
+    // Adaptive resolution for smooth 60 FPS on all devices
     this.avgDt += (Math.min(rawDt, 0.1) - this.avgDt) * 0.08;
     if (++this.perfTick >= 35) {
       this.perfTick = 0;
@@ -423,55 +569,30 @@ export class MarsGameEngine {
     // 1. Update Input State
     this.input.update();
 
-    // Mode toggle shortcut (T key)
-    if (this.input.consumeSinglePress('launchToggle')) {
-      this.toggleMode();
-    }
-
+    // =========================================================
+    // MODE A: STARSHIP FLIGHT SIMULATION
+    // =========================================================
     if (this.mode === 'starship') {
-      // Space key triggers stage action during flight
       if (this.input.consumeSinglePress('handbrake')) {
         this.handleFlightStageAction();
       }
 
-      // Camera toggle shortcut (C key) during flight
       if (this.input.consumeSinglePress('cameraToggle')) {
         const nextMode = this.cameraController.nextFlightMode();
         this.missionPhysics.boosterTracking = (nextMode === 'BOOSTER_CAM');
         this.flightHud.notifyCameraMode(nextMode);
       }
 
-      // Update Starship Flight Physics (sub-stepped so 2x/4x/8x time warp preserves 100% accurate trajectories & landings)
       const steps = this.timeScale || 1;
       const scaledDt = Math.min(dt * steps, 0.25);
       for (let s = 0; s < steps; s++) {
         this.missionPhysics.update(dt, this.input.state);
       }
 
-      // Allow keyboard/D-pad gimbal rotation when viewing stationary Ground Cam or Tower Cam (when Auto Mode is active or on pad)
-      const activeFlightCam = this.cameraController.getFlightMode();
-      if (
-        (activeFlightCam === 'GROUND_CAM' || activeFlightCam === 'TOWER_CAM') &&
-        (this.missionPhysics.autoMission || this.missionPhysics.phase === FLIGHT_PHASES.ON_PAD)
-      ) {
-        if (this.input.state.steer || this.input.state.pitch) {
-          this.cameraController.adjustGimbal(
-            -(this.input.state.steer || 0) * dt * 1.4,
-            -(this.input.state.pitch || 0) * dt * 1.1
-          );
-        }
-      }
-
-      // Update Flight Camera first so atmosphere/skydome anchors to the active camera (fixes black sky in Ground/Tower cam!)
       this.cameraController.updateFlight(scaledDt, this.missionPhysics);
-
-      // Update Flight HUD
       this.flightHud.update(this.missionPhysics);
-
-      // Update Flight Audio (Raptor roar, staging pop, plasma roar)
       this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
 
-      // Anchor atmosphere skydome & altitude to the active camera so Ground/Tower/Booster cams keep Starbase's sky!
       const camAltitude = Math.max(0, this.camera.position.y - this.missionPhysics.padElevation);
       const targetNear = camAltitude > 2500 ? 4.5 : camAltitude > 400 ? 1.5 : 0.4;
       if (Math.abs(this.camera.near - targetNear) > 0.05) {
@@ -496,7 +617,6 @@ export class MarsGameEngine {
         speedKmh: this.missionPhysics.speed * 3.6
       });
 
-      // Keep terrain & surface rocks updated around the active camera during launch and landing descent (< 5,000m)
       if (camAltitude < 5000) {
         this.terrain.update(this.camera.position);
         if (camAltitude < 950) {
@@ -504,19 +624,33 @@ export class MarsGameEngine {
         }
       }
 
-      // Render Scene
       this.renderer.render(this.scene, this.camera);
       this.notifyFirstFrame();
       return;
     }
 
-    // 2. Single-press triggers
-    if (this.input.consumeSinglePress('cameraToggle')) {
-      this.cameraController.nextMode();
+    // =========================================================
+    // MODE B & C: MARS ROVER & FIRST-PERSON WALKING
+    // =========================================================
+    // Key E toggles between Rover Driving and First-Person Walking
+    if (this.input.consumeSinglePress('walkToggle')) {
+      this.toggleWalkMode();
     }
 
-    if (this.input.consumeSinglePress('markBeacon')) {
-      this.hud.addBeacon(this.physics.position);
+    // Key F presses the Physical Launch Button when walking near the Launch Pedestal
+    if (this.input.consumeSinglePress('interactAction')) {
+      const activePos = this.mode === 'walking' ? this.walker.position : this.physics.position;
+      const distToTerminal = activePos.distanceTo(this.missionPhysics.terminalPosition);
+      if (this.mode === 'walking' && distToTerminal <= 9.5) {
+        this.triggerPhysicalPadLaunch();
+      } else if (this.mode === 'rover' && distToTerminal <= 65.0) {
+        this.toggleWalkMode();
+      }
+    }
+
+    if (this.input.consumeSinglePress('cameraToggle') && this.mode === 'rover') {
+      this.cameraController.nextMode();
+      this.hud.syncCameraTab(this.cameraController.mode);
     }
 
     if (this.input.consumeSinglePress('toggleLights')) {
@@ -525,57 +659,80 @@ export class MarsGameEngine {
       }
     }
 
-    // 3. Update Vehicle Physics (sub-stepped for time warp)
     const steps = this.timeScale || 1;
     const scaledDt = Math.min(dt * steps, 0.20);
-    for (let s = 0; s < steps; s++) {
-      this.physics.update(dt, this.input.state);
-    }
 
-    // Distance-cull Starbase launch complex in rover mode when beyond fog range (680m)
-    const sbDx = this.physics.position.x - 1400;
-    const sbDz = this.physics.position.z - 1150;
-    this.starship.group.visible = (sbDx * sbDx + sbDz * sbDz) <= 680 * 680;
-
-    // Collision impact feedback (boulders, monuments)
-    if (this.physics.impact > 2.0) {
-      const k = Math.min(2.0, this.physics.impact / 10.0);
-      this.audio.playImpact(k);
-      this.cameraController.addShake(this.physics.impact * 0.1);
-      this.atmosphere.burstDust(this.physics.position, k * 0.7);
-    }
-    this.physics.impact = 0;
-
-    // Landing impact detection
-    if (this.lastOnGround === 0 && this.physics.onGroundCount > 0) {
-      const impactSpeed = this.physics.landSpeed || 0;
-      if (impactSpeed > 4.0) {
-        this.audio.playImpact(Math.min(2.0, impactSpeed / 8.0));
-        this.cameraController.addShake(impactSpeed * 0.08);
-        this.atmosphere.burstDust(this.physics.position, Math.min(2.0, impactSpeed / 8.0));
+    if (this.mode === 'walking') {
+      for (let s = 0; s < steps; s++) {
+        this.updateWalkingPhysics(dt);
       }
+      // Keep rover parked where the player left it
+      this.physics.update(dt, { throttle: 0, steer: 0, handbrake: true, nitro: false, assist: false });
+      this.cameraController.updateWalking(scaledDt, this.walker);
+
+      const activePos = this.walker.position;
+      this.terrain.update(activePos);
+      this.scatter.update(activePos);
+      this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
+      this.atmosphere.update(scaledDt, activePos, {
+        speed: this.walker.speed,
+        speedKmh: this.walker.speedKmh,
+        velocity: this.walker.velocity,
+        isNitroActive: false,
+        onGroundCount: 0
+      });
+
+      const nearbyPOIs = this.scatter.getNearbyPOIs(activePos);
+      this.hud.update(this.walker, this.camera, nearbyPOIs, {
+        isWalking: true,
+        terminalPos: this.missionPhysics.terminalPosition,
+        roverPos: this.physics.position
+      });
+    } else {
+      // Rover Driving Mode
+      for (let s = 0; s < steps; s++) {
+        this.physics.update(dt, this.input.state);
+      }
+
+      if (this.physics.impact > 2.0) {
+        const k = Math.min(2.0, this.physics.impact / 10.0);
+        this.audio.playImpact(k);
+        this.cameraController.addShake(this.physics.impact * 0.1);
+        this.atmosphere.burstDust(this.physics.position, k * 0.7);
+      }
+      this.physics.impact = 0;
+
+      if (this.lastOnGround === 0 && this.physics.onGroundCount > 0) {
+        const impactSpeed = this.physics.landSpeed || 0;
+        if (impactSpeed > 4.0) {
+          this.audio.playImpact(Math.min(2.0, impactSpeed / 8.0));
+          this.cameraController.addShake(impactSpeed * 0.08);
+          this.atmosphere.burstDust(this.physics.position, Math.min(2.0, impactSpeed / 8.0));
+        }
+      }
+      this.lastOnGround = this.physics.onGroundCount;
+
+      this.terrain.update(this.physics.position);
+      this.scatter.update(this.physics.position);
+      this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
+      this.atmosphere.update(scaledDt, this.physics.position, this.physics);
+      this.audio.update(this.physics);
+      this.cameraController.update(scaledDt, this.physics);
+
+      const nearbyPOIs = this.scatter.getNearbyPOIs(this.physics.position);
+      this.hud.update(this.physics, this.camera, nearbyPOIs, {
+        isWalking: false,
+        terminalPos: this.missionPhysics.terminalPosition,
+        roverPos: this.physics.position
+      });
     }
-    this.lastOnGround = this.physics.onGroundCount;
 
-    // 4. Update Infinite Terrain & Scatter
-    this.terrain.update(this.physics.position);
-    this.scatter.update(this.physics.position);
+    // Keep Starbase visible from anywhere within 1,200m so the 145m Mechazilla tower is a landmark on approach
+    const activeActorPos = this.mode === 'walking' ? this.walker.position : this.physics.position;
+    const sbDx = activeActorPos.x - 1400;
+    const sbDz = activeActorPos.z - 1150;
+    this.starship.group.visible = (sbDx * sbDx + sbDz * sbDz) <= 1200 * 1200;
 
-    // 5. Update Atmosphere & Particles
-    this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
-    this.atmosphere.update(scaledDt, this.physics.position, this.physics);
-
-    // 6. Update Audio
-    this.audio.update(this.physics);
-
-    // 7. Update Dynamic Camera
-    this.cameraController.update(scaledDt, this.physics);
-
-    // 8. Update HUD & Waypoints
-    const nearbyPOIs = this.scatter.getNearbyPOIs(this.physics.position);
-    this.hud.update(this.physics, this.camera, nearbyPOIs);
-
-    // 9. Render Scene
     this.renderer.render(this.scene, this.camera);
     this.notifyFirstFrame();
   }
@@ -599,6 +756,10 @@ export class MarsGameEngine {
     window.removeEventListener('keydown', this.startAudio);
     window.removeEventListener('touchstart', this.startAudio);
     window.removeEventListener('mousedown', this.startAudio);
+    if (this.renderer?.domElement) {
+      this.renderer.domElement.removeEventListener('pointerdown', this.onCanvasPointerDown);
+      this.renderer.domElement.removeEventListener('pointerup', this.onCanvasPointerUp);
+    }
     if (this.flightHud) {
       this.flightHud.show(false);
     }

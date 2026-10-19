@@ -18,9 +18,8 @@ export default function MarsCanvas() {
   useEffect(() => {
     let engine = null;
     let isMounted = true;
-    const presence = getPresenceClient();
+    getPresenceClient();
 
-    // Fast simulated progress increments (0-95% in ~800ms)
     const timer = setInterval(() => {
       setProgress((prev) => {
         if (prev < 92) return prev + Math.floor(Math.random() * 12 + 6);
@@ -28,7 +27,6 @@ export default function MarsCanvas() {
       });
     }, 75);
 
-    // Safety timeout: ensure loading screen NEVER blocks user for more than 1.4s
     const safetyTimeout = setTimeout(() => {
       if (isMounted) {
         clearInterval(timer);
@@ -81,7 +79,7 @@ export default function MarsCanvas() {
 
   return (
     <>
-      {/* Cinematic Martian Loading Screen */}
+      {/* Glassmorphic Loading Screen */}
       {loading && (
         <div
           id="mars-loading-screen"
@@ -91,7 +89,6 @@ export default function MarsCanvas() {
           aria-live="polite"
         >
           <div className="loading-card" onClick={(e) => e.stopPropagation()}>
-            {/* Animated Mars Radar Pulse */}
             <div className="loading-radar">
               <div className="radar-sweep"></div>
               <div className="radar-core"></div>
@@ -100,15 +97,14 @@ export default function MarsCanvas() {
             </div>
 
             <div className="loading-title-box">
-              <h1 className="loading-title">DUNES</h1>
-              <div className="loading-badge">RED PLANET EXPEDITION</div>
+              <h1 className="loading-title">STARBASE MARS</h1>
+              <div className="loading-badge">OLYMPUS EXPEDITION // FLIGHT & ROVER SIMULATOR</div>
             </div>
 
             <p className="loading-coords">
-              SECTOR: 18.65°N, 226.20°E // OLYMPUS MONS CALDERA // 0.020 kg/m³ CO₂
+              DRIVE ROVER TO LAUNCH PAD · PRESS [E] TO WALK · CLICK PHYSICAL PAD BUTTON TO LAUNCH
             </p>
 
-            {/* Glowing Amber Progress Bar */}
             <div className="loading-bar-wrap">
               <div className="loading-bar-fill" style={{ width: `${progress}%` }}>
                 <span className="loading-bar-flare"></span>
@@ -120,12 +116,11 @@ export default function MarsCanvas() {
               <span className="loading-pct">{progress}%</span>
             </div>
 
-            {/* Expedition Quick-Start Hints & Instant Launch Button */}
             <div className="loading-hint-footer">
-              <div className="hint-pill"><span className="key-chip">WASD</span> Drive Rover</div>
-              <div className="hint-pill"><span className="key-chip">T</span> Starship Mission</div>
-              <div className="hint-pill"><span className="key-chip">G</span> Expedition Map</div>
-              <div className="hint-pill"><span className="key-chip">SPACE</span> Drift / Stage</div>
+              <div className="hint-pill"><span className="key-chip">WASD</span> Drive / Walk</div>
+              <div className="hint-pill"><span className="key-chip">E</span> Exit / Board Rover</div>
+              <div className="hint-pill"><span className="key-chip">CLICK / F</span> Press Launch Button</div>
+              <div className="hint-pill"><span className="key-chip">DRAG</span> 360° Gimbal</div>
             </div>
 
             <button
@@ -133,7 +128,7 @@ export default function MarsCanvas() {
               onClick={dismissLoading}
               aria-label="Enter Simulation"
             >
-              🚀 ENTER EXPEDITION
+              ENTER SIMULATION
             </button>
           </div>
         </div>
@@ -141,142 +136,197 @@ export default function MarsCanvas() {
 
       <div id="canvas-container" ref={containerRef} />
 
-      {/* HUD & UI Layer */}
-      <div id="hud-layer">
-        {/* Top-Left Scientific Mission Branding */}
-        <div className="top-left-brand scientific-brand">
-          <div className="mission-tag-row">
-            <span className="mission-agency">NASA-JPL // SPX</span>
-            <span className="mission-dot">·</span>
-            <span className="mission-name">ARES-VI EXPEDITION</span>
-            <span className="sys-status-badge">SYS NOMINAL</span>
+      {/* =========================================================
+          ROVER & FIRST-PERSON WALKING HUD (SpaceX Glassmorphic UI)
+          ========================================================= */}
+      <div id="hud-layer" className="spx-hud-layer">
+        {/* Top Glassmorphic Bar */}
+        <div className="spx-top-bar">
+          <div className="spx-top-left">
+            <div id="rover-mode-badge" className="flight-phase-badge">
+              ROVER // STARBASE APPROACH
+            </div>
           </div>
-          <div className="brand-main-row">
-            <span className="brand-text">MARS TELEMETRY</span>
+
+          {/* Rover & Walking Camera Switcher (360° Gimbal Enabled on All) */}
+          <div className="flight-cam-bar" id="rover-cam-bar">
+            <button className="cam-tab-btn active" data-rcam="0">CHASE</button>
+            <button className="cam-tab-btn" data-rcam="1">COCKPIT</button>
+            <button className="cam-tab-btn" data-rcam="2">ORBIT</button>
           </div>
-          <div className="scientific-sub-telemetry">
-            <span id="sol-clock" className="sol-chip">SOL 492 · LMST 14:38:22</span>
-            <span className="telemetry-pipe">|</span>
-            <span id="met-clock" className="met-chip">MET +00:00:00.0</span>
+
+          <div className="spx-top-right">
+            <button
+              id="rover-speed-btn"
+              className="hud-pill-btn flight-speed-btn"
+              aria-label="Time Speed"
+              title="Cycle Simulation Time Speed (1x / 2x / 4x / 8x)"
+            >
+              1X
+            </button>
+            <button
+              id="rover-walk-btn"
+              className="hud-pill-btn walk-toggle-btn"
+              aria-label="Exit or Board Rover"
+              title="Exit Rover to Walk on Foot (Key E)"
+            >
+              WALK [E]
+            </button>
+            <button id="map-btn" className="hud-pill-btn" aria-label="Map" title="Expedition Map (Key M)">
+              MAP
+            </button>
+            <button id="esc-btn" className="hud-pill-btn" aria-label="Settings" title="System Settings">
+              SYS
+            </button>
           </div>
         </div>
 
-        {/* Top-Center Scientific Planetary Environmental Ribbon */}
-        <div className="top-center-scientific-bar">
-          <div className="sci-chip">
-            <span className="sci-lbl">COORDS</span>
-            <span id="sci-coords-val" className="sci-val">18.42°N 226.05°W</span>
-          </div>
-          <div className="sci-chip">
-            <span className="sci-lbl">ELEV (MOLA)</span>
-            <span id="sci-elev-val" className="sci-val">-1,420 m</span>
-          </div>
-          <div className="sci-chip">
-            <span className="sci-lbl">ATM. PRESS</span>
-            <span id="sci-press-val" className="sci-val">0.636 kPa</span>
-          </div>
-          <div className="sci-chip">
-            <span className="sci-lbl">SURF TEMP</span>
-            <span id="sci-temp-val" className="sci-val">-62.4°C</span>
-          </div>
-          <div className="sci-chip hide-mobile">
-            <span className="sci-lbl">RAD FLUX</span>
-            <span id="sci-rad-val" className="sci-val">0.24 mSv/d</span>
+        {/* 360° Gimbal Optics Bar for Rover & Walking Cameras */}
+        <div id="rover-gimbal-bar" className="spx-gimbal-bar">
+          <span className="gimbal-lbl">360° GIMBAL</span>
+          <div className="gimbal-pad-btns">
+            <button id="rover-gimbal-left" className="gimbal-btn" aria-label="Pan Left">◀</button>
+            <button id="rover-gimbal-up" className="gimbal-btn" aria-label="Tilt Up">▲</button>
+            <button id="rover-gimbal-down" className="gimbal-btn" aria-label="Tilt Down">▼</button>
+            <button id="rover-gimbal-right" className="gimbal-btn" aria-label="Pan Right">▶</button>
+            <button id="rover-gimbal-reset" className="gimbal-reset-btn" aria-label="Center Gimbal">CENTER</button>
           </div>
         </div>
 
-        {/* Top-Right Settings & Actions */}
-        <div className="top-right-bar">
-          <div className="online-pill scientific-online-pill" id="online-counter-pill" title="Deep Space Network Canberra 70m Dish">
-            <span className="online-dot"></span>
-            <span id="online-count-val" className="online-count-num">1</span>
-            <span className="online-lbl">ONLINE</span>
-            <span className="dsn-carrier-badge">DSN-43</span>
-            <span className="dsn-rtt-val" id="telemetry-rtt-val">24ms</span>
-          </div>
-          <button id="rover-speed-btn" className="hud-pill-btn scientific-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x)">
-            <span>1X</span>
-          </button>
-          <button id="launch-mission-btn" className="hud-pill-btn launch-pill scientific-btn" aria-label="Launch Starship Mission">
-            <span>STARSHIP</span>
-          </button>
-          <button id="map-btn" className="hud-pill-btn scientific-btn" aria-label="Map">
-            <span>MAP</span>
-            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
-          </button>
-          <button id="esc-btn" className="hud-pill-btn scientific-btn" aria-label="Settings">
-            <span>SYS</span>
-            <svg className="gear-icon" viewBox="0 0 24 24" width="14" height="14">
-              <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-            </svg>
-          </button>
+        {/* First-Person Walking Reticle (Visible only while walking on foot) */}
+        <div id="walk-reticle" className="walk-reticle" style={{ display: 'none' }}>
+          <span className="reticle-ring"></span>
+          <span className="reticle-dot"></span>
         </div>
 
-        {/* Minimap radar display */}
-        <canvas id="minimap" width="300" height="300" aria-label="Minimap"></canvas>
+        {/* Physical Launch Control Pedestal Proximity Banner */}
+        <div id="pad-launch-prompt" className="flight-action-prompt" style={{ display: 'none' }}></div>
+
+        {/* Minimap Radar */}
+        <canvas id="minimap" width="260" height="260" aria-label="Minimap"></canvas>
 
         {/* 3D Waypoint Projector Badges */}
         <div id="waypoint-badges"></div>
 
-        {/* Bottom Left Desktop Hints */}
-        <div className="bottom-left-hints">
-          <div className="hint-row"><span className="key-label">Drive:</span> WASD / arrow keys</div>
-          <div className="hint-row"><span className="key-label">Launch Starship:</span> T</div>
-          <div className="hint-row"><span className="key-label">Expedition Map:</span> G</div>
-          <div className="hint-row"><span className="key-label">Assist:</span> R</div>
-          <div className="hint-row"><span className="key-label">Nitro:</span> Shift / N</div>
-          <div className="hint-row"><span className="key-label">Handbrake:</span> Space</div>
-          <div className="hint-row"><span className="key-label">Camera:</span> C</div>
-          <div className="hint-row"><span className="key-label">Mark place:</span> M</div>
-          <div className="hint-row"><span className="key-label">Headlights:</span> L</div>
-        </div>
+        {/* Unified SpaceX Glassmorphic Bottom Broadcast Bar for Rover & Walking */}
+        <div className="spx-broadcast-bar rover-broadcast-bar">
+          {/* Left Wing: ROVER DRIVETRAIN / EVA SUIT TELEMETRY */}
+          <div className="spx-wing spx-booster-wing">
+            <div className="spx-engine-graphic" title="Rover 4x4 Electric Drivetrain">
+              <svg viewBox="0 0 84 84" className="spx-raptor-svg">
+                <circle cx="42" cy="42" r="40" className="raptor-housing-ring" />
+                <rect x="29" y="18" width="26" height="48" rx="6" className="rover-chassis-svg" />
+                <rect x="17" y="20" width="9" height="16" rx="3" className="raptor-nozzle active" />
+                <rect x="58" y="20" width="9" height="16" rx="3" className="raptor-nozzle active" />
+                <rect x="17" y="48" width="9" height="16" rx="3" className="raptor-nozzle active" />
+                <rect x="58" y="48" width="9" height="16" rx="3" className="raptor-nozzle active" />
+              </svg>
+            </div>
 
-        {/* Bottom Center Scientific Telemetry & Diagnostics Dashboard */}
-        <div className="bottom-center-telemetry scientific-dashboard">
-          {/* Scientific Vehicle Diagnostics Bar */}
-          <div className="rover-diagnostics-bar">
-            <div className="diag-chip">
-              <span className="diag-lbl">ATTITUDE</span>
-              <span id="rover-gyro-val" className="diag-val">PITCH +0.0° · ROLL +0.0°</span>
-            </div>
-            <div className="diag-chip">
-              <span className="diag-lbl">AZIMUTH</span>
-              <span id="rover-heading-val" className="diag-val">000° N</span>
-            </div>
-            <div className="diag-chip">
-              <span className="diag-lbl">ODOMETER</span>
-              <span id="rover-odom-val" className="diag-val">0 m</span>
-            </div>
-            <div className="diag-chip hide-mobile">
-              <span className="diag-lbl">POWER</span>
-              <span className="diag-val highlight-green">RTG 110 W · 28.4 V</span>
-            </div>
-          </div>
-
-          <div className="telemetry-gauges-row">
-            {/* Cold Gas Thruster Gauge */}
-            <div className="nitro-container scientific-gauge-box">
-              <div className="nitro-label">COLD GAS GN₂ <span id="nitro-pct">100%</span> · 240 bar</div>
-              <div className="nitro-track">
-                <div id="nitro-fill" className="nitro-fill" style={{ width: '100%' }}></div>
+            <div className="spx-telemetry-col">
+              <div className="spx-stage-header">
+                <span id="rover-left-title" className="spx-stage-title">MARS ROVER</span>
+                <span id="speed-ms-val" className="spx-stage-sub">0.0 M/S · 0.38G</span>
               </div>
-            </div>
-
-            {/* Scientific Main Speedometer */}
-            <div className="speedometer scientific-speedometer">
-              <div className="speed-number">
-                <span id="speed-val" className="speed-digits">0</span>
-                <span className="speed-unit">km/h</span>
-                <span className="speed-sub-unit" id="speed-ms-val">0.0 m/s</span>
+              <div className="spx-metrics-row">
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">SPEED</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="speed-val" className="spx-metric-num">0</span>
+                    <span className="spx-metric-unit">KM/H</span>
+                  </div>
+                </div>
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">ELEVATION</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="sci-elev-val" className="spx-metric-num">0</span>
+                    <span className="spx-metric-unit">M</span>
+                  </div>
+                </div>
               </div>
-              <div className="speed-bar-container">
-                <div id="speed-bar" className="speed-bar"></div>
+              <div className="spx-prop-stack">
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">GN₂</span>
+                  <div className="spx-prop-track">
+                    <div id="nitro-fill" className="spx-prop-fill lox-fill" style={{ width: '100%' }}></div>
+                  </div>
+                </div>
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">VEL</span>
+                  <div className="spx-prop-track">
+                    <div id="speed-bar" className="spx-prop-fill ch4-fill" style={{ width: '0%' }}></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+
+          {/* Center Bridge: Walk / Board / Physical Pad Launch Trigger & Starbase Distance */}
+          <div className="spx-center-bridge">
+            <div className="spx-action-row">
+              <button id="rover-primary-action-btn" className="flight-stage-btn" aria-label="Exit or Board Rover">
+                EXIT ROVER [E]
+              </button>
+              <button
+                id="pad-physical-launch-btn"
+                className="flight-stage-btn physical-pad-btn"
+                style={{ display: 'none' }}
+                aria-label="Press Physical Launch Button"
+              >
+                PRESS LAUNCH BUTTON [F]
+              </button>
+            </div>
+
+            <div id="met-clock" className="spx-mission-clock">T+ 00:00:00</div>
+
+            <div className="spx-pad-locator" id="starbase-locator-pill">
+              <span className="locator-dot"></span>
+              <span id="starbase-dist-val" className="locator-txt">STARBASE PAD: 190m NE</span>
+            </div>
+          </div>
+
+          {/* Right Wing: INERTIAL ATTITUDE, G-FORCE & NAVIGATION */}
+          <div className="spx-wing spx-ship-wing">
+            <div className="spx-telemetry-col">
+              <div className="spx-stage-header">
+                <span className="spx-stage-title">NAVIGATION</span>
+                <span id="rover-gyro-val" className="spx-stage-sub">PITCH 0° · ROLL 0°</span>
+              </div>
+              <div className="spx-metrics-row">
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">AZIMUTH</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="rover-heading-val" className="spx-metric-num">045°</span>
+                    <span className="spx-metric-unit">NE</span>
+                  </div>
+                </div>
+                <div className="spx-metric">
+                  <span className="spx-metric-lbl">ODOMETER</span>
+                  <div className="spx-metric-val-wrap">
+                    <span id="rover-odom-val" className="spx-metric-num">0</span>
+                    <span className="spx-metric-unit">M</span>
+                  </div>
+                </div>
+              </div>
+              <div className="spx-prop-stack">
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">RTG</span>
+                  <div className="spx-prop-track">
+                    <div className="spx-prop-fill lox-fill" style={{ width: '100%' }}></div>
+                  </div>
+                </div>
+                <div className="spx-prop-row">
+                  <span className="spx-prop-lbl">O₂</span>
+                  <div className="spx-prop-track">
+                    <div className="spx-prop-fill ch4-fill" style={{ width: '98%' }}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Mobile On-Screen Touch Controls */}
+        {/* Mobile Touch Controls for Rover & Walking */}
         <div id="mobile-controls" style={{ display: 'none' }}>
           <div className="touch-cluster left-cluster">
             <button id="btn-left" className="touch-btn steer-btn" aria-label="Steer Left">◀</button>
@@ -284,29 +334,29 @@ export default function MarsCanvas() {
           </div>
 
           <div className="touch-cluster right-cluster">
-            <button id="btn-gas" className="touch-btn pedal-btn gas-btn" aria-label="Accelerate">▲ GAS</button>
-            <button id="btn-brake" className="touch-btn pedal-btn brake-btn" aria-label="Brake/Reverse">▼ REV</button>
+            <button id="btn-gas" className="touch-btn pedal-btn gas-btn" aria-label="Forward">▲</button>
+            <button id="btn-brake" className="touch-btn pedal-btn brake-btn" aria-label="Reverse">▼</button>
           </div>
 
           <div className="touch-action-bar">
-            <button id="btn-nitro" className="touch-pill-btn nitro-pill" aria-label="Nitro Boost">⚡ NITRO</button>
-            <button id="btn-handbrake" className="touch-pill-btn" aria-label="Handbrake">🛑 DRIFT</button>
-            <button id="btn-assist" className="touch-pill-btn" aria-label="Assist Right">⟲ ASSIST</button>
-            <button id="btn-cam" className="touch-pill-btn" aria-label="Switch Camera">📹 CAM</button>
-            <button id="btn-mark" className="touch-pill-btn" aria-label="Mark Beacon">📍 MARK</button>
+            <button id="btn-nitro" className="touch-pill-btn nitro-pill" aria-label="Boost">BOOST</button>
+            <button id="btn-handbrake" className="touch-pill-btn" aria-label="Brake">BRAKE</button>
+            <button id="btn-walk-mobile" className="touch-pill-btn" aria-label="Walk">WALK</button>
           </div>
         </div>
       </div>
 
-      {/* SpaceX Starship Broadcast HUD */}
+      {/* =========================================================
+          STARSHIP FLIGHT HUD (SpaceX Glassmorphic Broadcast UI)
+          ========================================================= */}
       <div id="flight-hud" className="flight-hud-layer">
-        {/* Clean Minimalist Monochrome SpaceX Top Bar */}
+        {/* Top Glassmorphic Bar */}
         <div className="spx-top-bar">
           <div className="spx-top-left">
             <div id="flight-phase-badge" className="flight-phase-badge">STARBASE // PAD AWAITING LAUNCH</div>
           </div>
 
-          {/* Clean Camera Switcher Strip */}
+          {/* All 6 Flight Cameras (Every Camera on 360° Gimbal) */}
           <div className="flight-cam-bar" id="flight-cam-bar">
             <button className="cam-tab-btn active" data-cam="CHASE">SHIP</button>
             <button className="cam-tab-btn" id="flight-track-booster-btn" data-cam="BOOSTER_CAM">BOOSTER</button>
@@ -317,7 +367,6 @@ export default function MarsCanvas() {
           </div>
 
           <div className="spx-top-right">
-            {/* Orbital vs Suborbital Profile Selector */}
             <div className="spx-traj-switch" id="flight-traj-switch" title="Flight Trajectory Profile">
               <button className="traj-opt-btn active" data-traj="ORBITAL">ORBITAL</button>
               <button className="traj-opt-btn" data-traj="SUBORBITAL">SUBORBITAL</button>
@@ -325,19 +374,19 @@ export default function MarsCanvas() {
             <button id="flight-speed-btn" className="hud-pill-btn flight-speed-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x)">
               1X
             </button>
-            <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto Mission">
+            <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto or Manual Control">
               AUTO
             </button>
             <button id="flight-reset-btn" className="hud-pill-btn flight-reset-btn" aria-label="Reset to Launch Pad">
               PAD
             </button>
-            <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Exit to Rover">
-              EXIT
+            <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Return to Astronaut / Rover">
+              EVA
             </button>
           </div>
         </div>
 
-        {/* Pre-Space Trajectory Decision Prompt (Appears during Stage 2 Ascent before SECO) */}
+        {/* Pre-Space Trajectory Decision Prompt */}
         <div id="flight-trajectory-prompt" className="spx-trajectory-prompt" style={{ display: 'none' }}>
           <span className="traj-prompt-lbl">APPROACHING SPACE INSERTION // SELECT PROFILE</span>
           <div className="traj-prompt-actions">
@@ -346,15 +395,15 @@ export default function MarsCanvas() {
           </div>
         </div>
 
-        {/* 360° Gimbal Control Bar (Visible in Ground Cam & Tower Cam) */}
-        <div id="flight-gimbal-bar" className="spx-gimbal-bar" style={{ display: 'none' }}>
-          <span className="gimbal-lbl">360° GIMBAL OPTICS</span>
+        {/* Universal 360° Gimbal Control Bar (Active across ALL Flight Cameras) */}
+        <div id="flight-gimbal-bar" className="spx-gimbal-bar">
+          <span className="gimbal-lbl">360° GIMBAL</span>
           <div className="gimbal-pad-btns">
             <button id="gimbal-left" className="gimbal-btn" aria-label="Pan Left">◀</button>
             <button id="gimbal-up" className="gimbal-btn" aria-label="Tilt Up">▲</button>
             <button id="gimbal-down" className="gimbal-btn" aria-label="Tilt Down">▼</button>
             <button id="gimbal-right" className="gimbal-btn" aria-label="Pan Right">▶</button>
-            <button id="gimbal-reset" className="gimbal-reset-btn" aria-label="Reset Gimbal">CENTER PAD</button>
+            <button id="gimbal-reset" className="gimbal-reset-btn" aria-label="Reset Gimbal">CENTER</button>
           </div>
         </div>
 
@@ -379,7 +428,7 @@ export default function MarsCanvas() {
               </div>
               <div className="metric-box">
                 <span className="metric-lbl">VELOCITY</span>
-                <span className="metric-val" id="score-velocity-val">3,180 m/s</span>
+                <span className="metric-val" id="score-velocity-val">3,300 m/s</span>
               </div>
               <div className="metric-box">
                 <span className="metric-lbl">BOOSTER CATCH</span>
@@ -393,14 +442,13 @@ export default function MarsCanvas() {
           </div>
         </div>
 
-        {/* Authentic SpaceX Broadcast Bottom Telemetry Overlay */}
+        {/* SpaceX Broadcast Bottom Telemetry Bar */}
         <div className="spx-broadcast-bar">
           {/* Left Wing: SUPER HEAVY BOOSTER (33 Raptors + Telemetry + LOX/CH4) */}
           <div className="spx-wing spx-booster-wing" id="flight-booster-tank-box">
             <div className="spx-engine-graphic" id="spx-booster-engines" title="Super Heavy 33 Raptor Cluster">
               <svg viewBox="0 0 84 84" className="spx-raptor-svg">
                 <circle cx="42" cy="42" r="40" className="raptor-housing-ring" />
-                {/* Outer Ring: 20 Raptors */}
                 {Array.from({ length: 20 }).map((_, i) => {
                   const a = (i * 18 - 90) * (Math.PI / 180);
                   return (
@@ -413,7 +461,6 @@ export default function MarsCanvas() {
                     />
                   );
                 })}
-                {/* Middle Ring: 10 Raptors */}
                 {Array.from({ length: 10 }).map((_, i) => {
                   const a = (i * 36 - 90) * (Math.PI / 180);
                   return (
@@ -426,7 +473,6 @@ export default function MarsCanvas() {
                     />
                   );
                 })}
-                {/* Center Cluster: 3 Raptors */}
                 {Array.from({ length: 3 }).map((_, i) => {
                   const a = (i * 120 - 90) * (Math.PI / 180);
                   return (
@@ -452,7 +498,7 @@ export default function MarsCanvas() {
                   <span className="spx-metric-lbl">SPEED</span>
                   <div className="spx-metric-val-wrap">
                     <span id="spx-booster-speed" className="spx-metric-num">0</span>
-                    <span className="spx-metric-unit">KM/H</span>
+                    <span className="spx-metric-unit">M/S</span>
                   </div>
                 </div>
                 <div className="spx-metric">
@@ -480,14 +526,14 @@ export default function MarsCanvas() {
             </div>
           </div>
 
-          {/* Center Bridge: Primary Launch/Stage Button, T+ Mission Clock & Timeline */}
+          {/* Center Bridge: Primary Action, Full Manual Overrides, Mission Clock & Timeline */}
           <div className="spx-center-bridge">
             <div className="spx-action-row">
               <button id="flight-stage-btn" className="flight-stage-btn" aria-label="Primary Launch or Stage Action">
                 LAUNCH
               </button>
 
-              {/* Manual Throttle Controls (Shown when AUTO: OFF) */}
+              {/* Full Manual Mode Controls (Active anytime when AUTO: OFF) */}
               <div id="flight-manual-controls" className="spx-manual-controls" style={{ display: 'none' }}>
                 <button id="flight-btn-throttle-down" className="spx-thr-btn" aria-label="Throttle Down">-THR</button>
                 <div className="spx-thr-readout">
@@ -495,6 +541,9 @@ export default function MarsCanvas() {
                   <span id="flight-throttle-val" className="spx-thr-val">0%</span>
                 </div>
                 <button id="flight-btn-throttle-up" className="spx-thr-btn" aria-label="Throttle Up">+THR</button>
+                <button id="flight-btn-stage-now" className="spx-thr-btn" title="Hot-Stage Separate Booster">STAGE</button>
+                <button id="flight-btn-legs" className="spx-thr-btn" title="Deploy/Retract Landing Legs (Key G)">LEGS</button>
+                <button id="flight-btn-cargo" className="spx-thr-btn" title="Open/Close Cargo Bay (Key B)">CARGO</button>
               </div>
             </div>
 
@@ -532,19 +581,19 @@ export default function MarsCanvas() {
             </div>
           </div>
 
-          {/* Right Wing: STARSHIP (Telemetry + LOX/CH4 + 6 Raptors) */}
+          {/* Right Wing: STARSHIP (Strict Physics Velocity M/S + Altitude KM + IMU G-Force + 6 Raptors) */}
           <div className="spx-wing spx-ship-wing">
             <div className="spx-telemetry-col">
               <div className="spx-stage-header">
                 <span className="spx-stage-title">STARSHIP</span>
-                <span id="spx-ship-tag" className="spx-stage-sub">MACH 0.0 · 1.0G</span>
+                <span id="spx-ship-tag" className="spx-stage-sub">MACH 0.00 · 0.38G</span>
               </div>
               <div className="spx-metrics-row">
                 <div className="spx-metric">
                   <span className="spx-metric-lbl">SPEED</span>
                   <div className="spx-metric-val-wrap">
                     <span id="flight-speed-val" className="spx-metric-num">0</span>
-                    <span className="spx-metric-unit">KM/H</span>
+                    <span className="spx-metric-unit">M/S</span>
                   </div>
                 </div>
                 <div className="spx-metric">
@@ -569,7 +618,6 @@ export default function MarsCanvas() {
                   </div>
                 </div>
               </div>
-              {/* Re-entry Plasma Thermal Bar (Visible only during Hypersonic Entry) */}
               <div id="flight-heat-container" className="spx-heat-row" style={{ display: 'none' }}>
                 <span className="spx-heat-lbl">TPS PLASMA</span>
                 <div className="spx-prop-track">
@@ -581,7 +629,6 @@ export default function MarsCanvas() {
             <div className="spx-engine-graphic" id="spx-ship-engines" title="Starship 6 Raptor Cluster (3 RVac + 3 Sea-Level)">
               <svg viewBox="0 0 84 84" className="spx-raptor-svg">
                 <circle cx="42" cy="42" r="40" className="raptor-housing-ring" />
-                {/* Outer 3 Vacuum Raptors (RVac) */}
                 {Array.from({ length: 3 }).map((_, i) => {
                   const a = (i * 120 + 30) * (Math.PI / 180);
                   return (
@@ -594,7 +641,6 @@ export default function MarsCanvas() {
                     />
                   );
                 })}
-                {/* Center 3 Sea-Level Raptors */}
                 {Array.from({ length: 3 }).map((_, i) => {
                   const a = (i * 120 - 90) * (Math.PI / 180);
                   return (
@@ -612,15 +658,15 @@ export default function MarsCanvas() {
           </div>
         </div>
 
-        {/* Mobile On-Screen Flight Steering Cluster (Shown in Manual Mode or Touch) */}
+        {/* Attitude Steering D-Pad for Manual Flight Mode */}
         <div id="flight-mobile-steering" className="flight-mobile-steering" style={{ display: 'none' }}>
           <div className="flight-touch-dpad">
-            <button id="flight-btn-pitch-down" className="touch-btn flight-dir-btn" aria-label="Pitch Down">▲</button>
+            <button id="flight-btn-pitch-down" className="touch-btn flight-dir-btn" aria-label="Pitch Nose Up">▲</button>
             <div className="flight-dpad-middle">
               <button id="flight-btn-yaw-left" className="touch-btn flight-dir-btn" aria-label="Yaw Left">◀</button>
               <button id="flight-btn-yaw-right" className="touch-btn flight-dir-btn" aria-label="Yaw Right">▶</button>
             </div>
-            <button id="flight-btn-pitch-up" className="touch-btn flight-dir-btn" aria-label="Pitch Up">▼</button>
+            <button id="flight-btn-pitch-up" className="touch-btn flight-dir-btn" aria-label="Pitch Nose Down">▼</button>
           </div>
         </div>
       </div>
@@ -629,12 +675,12 @@ export default function MarsCanvas() {
       <div id="map-modal" className="modal-backdrop">
         <div className="modal-card map-card">
           <div className="modal-header">
-            <h2>EXPEDITION MAP</h2>
+            <h2>STARBASE & MARS EXPEDITION MAP</h2>
             <button id="close-map" className="close-btn">&times;</button>
           </div>
           <canvas id="map-full" width="760" height="760"></canvas>
           <div className="modal-footer">
-            <p>Cyan: Monuments & Starbase · Orange: User Beacons · Press G or Esc to close</p>
+            <p>Cyan: Starbase & Landmarks · Drive Rover to Starbase (1400, 1150) & walk to Launch Pedestal</p>
           </div>
         </div>
       </div>
@@ -643,7 +689,7 @@ export default function MarsCanvas() {
       <div id="settings-modal" className="modal-backdrop">
         <div className="modal-card">
           <div className="modal-header">
-            <h2>MARS EXPEDITION SETTINGS</h2>
+            <h2>SIMULATION SETTINGS</h2>
             <button id="close-settings" className="close-btn">&times;</button>
           </div>
           <div className="modal-body">
@@ -669,11 +715,11 @@ export default function MarsCanvas() {
 
             <div className="setting-item">
               <label>Emergency Recovery</label>
-              <button id="btn-reset-pos" className="btn-action">Reset Rover to Coordinates (0,0)</button>
+              <button id="btn-reset-pos" className="btn-action">Reset Rover to Starbase Approach</button>
             </div>
           </div>
           <div className="modal-footer">
-            <p>Mars Surface Simulation · Atmosphere: CO₂ / Dust Haze · DUNES</p>
+            <p>Mars Surface & Orbital Flight Simulation · Glassmorphic Telemetry</p>
           </div>
         </div>
       </div>
