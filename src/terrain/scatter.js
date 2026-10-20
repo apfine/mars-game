@@ -507,6 +507,16 @@ export class MarsScatterManager {
     cp.beamMat.opacity = 0.16 + 0.07 * Math.sin(t * 2.0);
   }
 
+  // Earth's Starbase is a separate surface environment. Hide every Mars-only
+  // instanced rock and POI monument without destroying the sector pool.
+  setVisible(visible) {
+    this.enabled = visible;
+    if (this.rockMeshes) {
+      for (const m of this.rockMeshes) m.visible = visible;
+    }
+    if (this.poiGroup) this.poiGroup.visible = visible;
+  }
+
   setQuality(preset) {
     this.maxRocksPerSector = preset === 'Low' ? 10 : preset === 'Medium' ? 13 : 16;
     const recvShadow = preset === 'High' || preset === 'Ultra';
@@ -717,6 +727,7 @@ export class MarsScatterManager {
   }
 
   update(playerPos) {
+    if (this.enabled === false) return;
     const centerSx = Math.floor(playerPos.x / this.sectorSize);
     const centerSz = Math.floor(playerPos.z / this.sectorSize);
 

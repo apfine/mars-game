@@ -276,12 +276,12 @@ export class MarsHUD {
     const terminalPos = context.terminalPos;
     const roverPos = context.roverPos;
 
-    // 1. Mode-Specific UI State (Rover vs 1st-Person Walking)
+    // 1. Mode-Specific UI State (Rover vs Third-Person EVA)
     if (this._lastWalkingState !== isWalking) {
       this._lastWalkingState = isWalking;
       if (this.dom.modeBadge) {
         this.dom.modeBadge.textContent = isWalking
-          ? 'EVA WALK // 1ST PERSON OPTICS'
+          ? 'EVA WALK // THIRD-PERSON SUIT CAM'
           : 'ROVER // STARBASE APPROACH';
       }
       if (this.dom.leftTitle) {
@@ -295,9 +295,9 @@ export class MarsHUD {
         this.dom.primaryActionBtn.textContent = isWalking ? 'BOARD ROVER [E]' : 'EXIT ROVER [E]';
       }
       if (this.dom.walkReticle) {
-        this.dom.walkReticle.style.display = isWalking ? 'flex' : 'none';
+        // Third-person camera: the reticle is not needed and obscures the suit.
+        this.dom.walkReticle.style.display = 'none';
       }
-      // Strictly 1st-person in walking mode: hide camera switcher tabs when walking
       if (this.dom.camBar) {
         this.dom.camBar.style.display = isWalking ? 'none' : 'flex';
       }

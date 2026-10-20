@@ -54,6 +54,10 @@ export class MarsAtmosphere {
         uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Luminous dusty salmon horizon matched to terrain fog
         uSunColor: { value: new THREE.Color(0xfff6ea) },      // High-altitude solar disk
         uSunHaloBlue: { value: new THREE.Color(0x62a8dc) },   // Authentic Mars fine-dust blue Mie halo
+        uForwardTint: { value: new THREE.Color(0x382416) },   // Dust forward-scattering tint
+        uLimbTint: { value: new THREE.Color(0xe07a45) },      // Inner limb band colour
+        uGroundTint: { value: new THREE.Color(0x94502f) },    // Below-horizon ground fill
+        uAtmoHeight: { value: 13500.0 },                      // Effective scale height (m)
         uSpaceFade: { value: 0.0 },                           // 0 = surface, 1 = orbit/space
         uAltitude: { value: 0.0 }                             // active camera altitude in meters
       },
@@ -72,6 +76,10 @@ export class MarsAtmosphere {
         uniform vec3 uSkyHorizon;
         uniform vec3 uSunColor;
         uniform vec3 uSunHaloBlue;
+        uniform vec3 uForwardTint;
+        uniform vec3 uLimbTint;
+        uniform vec3 uGroundTint;
+        uniform float uAtmoHeight;
         uniform float uSpaceFade;
         uniform float uAltitude;
         varying vec3 vLocalDir;
@@ -101,9 +109,10 @@ export class MarsAtmosphere {
           vec3 sunDir = normalize(uSunPos);
           float sc = max(dot(dir, sunDir), 0.0);
 
-          // Atmospheric density scale height (H = 11.1 km on Mars)
+          // Atmospheric density scale height: 13.5 km effective on Mars,
+          // 8.5 km on Earth. Set from the active planet profile.
           float alt = max(0.0, uAltitude);
-          float atmoDensity = exp(-alt / 13500.0);
+          float atmoDensity = exp(-alt / max(1000.0, uAtmoHeight));
 
           // Natural spherical horizon dip as altitude increases
           float horizonDip = -clamp(sqrt(alt / 55000.0) * 0.34, 0.0, 0.36);
@@ -136,8 +145,9 @@ export class MarsAtmosphere {
           float zenithFactor = clamp(elevAboveHorizon * 1.45, 0.0, 1.0);
           vec3 daySky = mix(uSkyHorizon, uSkyZenith, pow(zenithFactor, 0.72));
 
-          // Forward solar scattering through suspended ferric oxide dust
-          daySky += vec3(0.22, 0.14, 0.08) * pow(sc, 3.0);
+          // Forward solar scattering through suspended aerosols. Mars uses a
+          // ferric-oxide tint; Earth uses a much cooler, cleaner white-blue.
+          daySky += uForwardTint * pow(sc, 3.0);
 
           // Martian Mie Blue Scattering Halo around the Sun
           float blueMie = pow(sc, 10.0) * 0.34 * atmoDensity;
@@ -148,7 +158,7 @@ export class MarsAtmosphere {
           float upperBlueBand = exp(-abs(elevAboveHorizon - 0.075) * 28.0) * (1.0 - atmoDensity * 0.5);
           float sunSide = max(0.15, dot(normalize(vec3(dir.x, 0.0, dir.z)), normalize(vec3(sunDir.x, 0.0, sunDir.z))) * 0.65 + 0.35);
 
-          vec3 limbGlow = mix(vec3(0.88, 0.48, 0.28), uSkyHorizon, atmoDensity) * limbBand * sunSide * 0.85;
+          vec3 limbGlow = mix(uLimbTint, uSkyHorizon, atmoDensity) * limbBand * sunSide * 0.85;
           limbGlow += vec3(0.32, 0.66, 0.98) * upperBlueBand * sunSide * 0.55;
 
           // Blend daytime sky dome with cosmic space as altitude rises
@@ -159,7 +169,7 @@ export class MarsAtmosphere {
           // Lower hemisphere ground fill when inside the atmosphere (prevents dark void below horizon during landing/ascent)
           if (elevAboveHorizon < 0.04) {
             float belowFactor = smoothstep(0.04, -0.18, elevAboveHorizon);
-            vec3 groundFill = mix(uSkyHorizon, vec3(0.58, 0.31, 0.20), smoothstep(0.0, -0.45, elevAboveHorizon));
+            vec3 groundFill = mix(uSkyHorizon, uGroundTint, smoothstep(0.0, -0.45, elevAboveHorizon));
             float groundVis = clamp(atmoDensity * 1.15, 0.0, 1.0);
             sky = mix(sky, groundFill, belowFactor * groundVis);
           }
@@ -195,13 +205,16 @@ export class MarsAtmosphere {
     this.sunLight.shadow.mapSize.width = 1024;
     this.sunLight.shadow.mapSize.height = 1024;
     this.sunLight.shadow.camera.near = 10;
-    this.sunLight.shadow.camera.far = 900;
-    const d = 32;
+    this.sunLight.shadow.camera.far = 1200;
+    // Cover the full Starbase footprint instead of a tiny 64 m box around the
+    // camera, so the tower/vehicle shadows read on the apron.
+    const d = 115;
     this.sunLight.shadow.camera.left = -d;
     this.sunLight.shadow.camera.right = d;
     this.sunLight.shadow.camera.top = d;
     this.sunLight.shadow.camera.bottom = -d;
-    this.sunLight.shadow.bias = -0.0005;
+    this.sunLight.shadow.bias = -0.00035;
+    this.sunLight.shadow.normalBias = 0.025;
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
@@ -654,14 +667,71 @@ export class MarsAtmosphere {
     this.scene.add(this.flightAtmosphereGroup);
   }
 
+  // Retints the physical sky for the active world. Earth gets a true
+  // Rayleigh-blue dome with a cool limb, Mars keeps its butterscotch dust
+  // scattering. Called on arrival and when resetting to Mars.
+  setPlanet(planetId) {
+    const sky = planetId === 'earth'
+      ? {
+          zenith: 0x2f6fd0,
+          horizon: 0xbcd8f0,
+          sun: 0xfff7e8,
+          halo: 0x9fc8ff,
+          forward: 0x9fb9c9,
+          limb: 0x7fb4ff,
+          ground: 0x2f5a34,
+          atmoHeight: 8500
+        }
+      : {
+          zenith: 0xc47e5a,
+          horizon: 0xe0aa8c,
+          sun: 0xfff6ea,
+          halo: 0x62a8dc,
+          forward: 0x382416,
+          limb: 0xe07a45,
+          ground: 0x94502f,
+          atmoHeight: 13500
+        };
+
+    if (this.skyMat) {
+      const u = this.skyMat.uniforms;
+      u.uSkyZenith.value.setHex(sky.zenith);
+      u.uSkyHorizon.value.setHex(sky.horizon);
+      u.uSunColor.value.setHex(sky.sun);
+      u.uSunHaloBlue.value.setHex(sky.halo);
+      u.uForwardTint.value.setHex(sky.forward);
+      u.uLimbTint.value.setHex(sky.limb);
+      u.uGroundTint.value.setHex(sky.ground);
+      u.uAtmoHeight.value = sky.atmoHeight;
+    }
+
+    if (this.sunLight) {
+      this.sunLight.color.setHex(planetId === 'earth' ? 0xfff5e2 : 0xffe6d0);
+      this.sunLight.intensity = planetId === 'earth' ? 2.35 : 1.8;
+    }
+
+    if (this.scene?.fog) {
+      this.scene.fog.color.setHex(planetId === 'earth' ? 0xbcd8f0 : 0xe0aa8c);
+    }
+
+    // Surface dust, tracks and Martian moons are Mars-only.
+    const isMars = planetId !== 'earth';
+    if (this.dustPoints) this.dustPoints.visible = isMars && !this.isFlight;
+    if (this.tracks) this.tracks.visible = isMars && !this.isFlight;
+    if (this.phobos) this.phobos.visible = isMars && !this.isFlight;
+    if (this.deimos) this.deimos.visible = isMars && !this.isFlight;
+    this.planetId = planetId;
+  }
+
   setFlightMode(isFlight) {
     this.isFlight = isFlight;
-    if (this.dustPoints) this.dustPoints.visible = !isFlight;
-    if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = !isFlight;
-    if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight && this.dustDensity > 0.45;
-    if (this.tracks) this.tracks.visible = !isFlight;
-    if (this.phobos) this.phobos.visible = !isFlight;
-    if (this.deimos) this.deimos.visible = !isFlight;
+    const isMars = this.planetId !== 'earth';
+    if (this.dustPoints) this.dustPoints.visible = !isFlight && isMars;
+    if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = !isFlight && isMars;
+    if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight && isMars && this.dustDensity > 0.45;
+    if (this.tracks) this.tracks.visible = !isFlight && isMars;
+    if (this.phobos) this.phobos.visible = !isFlight && isMars;
+    if (this.deimos) this.deimos.visible = !isFlight && isMars;
     if (this.flightAtmosphereGroup) this.flightAtmosphereGroup.visible = isFlight;
     if (this.postLaunchSpace) this.postLaunchSpace.group.visible = isFlight;
 
@@ -669,6 +739,11 @@ export class MarsAtmosphere {
       if (isFlight) {
         this.scene.fog.near = 150000;
         this.scene.fog.far = 1000000;
+      } else if (this.planetId === 'earth') {
+        // Earth's launch site sits in open coastal terrain; keep the treeline
+        // and hills readable instead of burying them in a 500 m Mars dust fog.
+        this.scene.fog.near = 260;
+        this.scene.fog.far = 7600;
       } else {
         this.scene.fog.near = 110;
         this.scene.fog.far = 520;
@@ -959,9 +1034,16 @@ export class MarsAtmosphere {
   }
 
   updateVehicleEffects(dt, playerPos, physics) {
-    const speed = Math.abs(physics.speed);
-    const slip = Math.abs(physics.lateralVelocity);
-    const forward = physics._vForward;
+    // Walking passes a lightweight walker state (position/velocity only), not
+    // the rover physics object. There are no wheels, tire tracks or nitro
+    // plumes to update in that mode - and dereferencing wheelContacts here used
+    // to throw before renderer.render(), which made EVA appear as a black
+    // screen. Skip vehicle-only effects, then let ambient dust devils continue.
+    if (!physics || !Array.isArray(physics.wheelContacts)) return;
+
+    const speed = Math.abs(physics.speed || 0);
+    const slip = Math.abs(physics.lateralVelocity || 0);
+    const forward = physics._vForward || { x: 0, z: 1 };
     const grounded = !physics.isAirborne;
 
     // --- Sand dust behind the wheels (rate scales with speed, throttle and drift) ---
@@ -1110,11 +1192,12 @@ export class MarsAtmosphere {
       this.regionalMat.uniforms.uOpacity.value = regOpacity;
     }
     if (this.scene.fog && !this.isFlight) {
-      this.scene.fog.near = THREE.MathUtils.lerp(110, 80000, spaceFade);
-      this.scene.fog.far = THREE.MathUtils.lerp(520, 250000, spaceFade);
+      const isEarth = this.planetId === 'earth';
+      this.scene.fog.near = THREE.MathUtils.lerp(isEarth ? 260 : 110, 80000, spaceFade);
+      this.scene.fog.far = THREE.MathUtils.lerp(isEarth ? 7600 : 520, 250000, spaceFade);
     }
     if (this.dustPoints) {
-      this.dustPoints.visible = !this.isFlight && a < 600;
+      this.dustPoints.visible = !this.isFlight && a < 600 && this.planetId !== 'earth';
     }
     this.updateSpeedStreamers(a, speed);
   }
@@ -1159,7 +1242,11 @@ export class MarsAtmosphere {
       this.windDustUniforms.uPlayerPos.value.copy(playerPos);
     }
 
-    // 3. Vehicle dust, tracks and nitro plumes; ambient dust devils
+    // 3. Vehicle dust, tracks and nitro plumes; ambient dust devils (Mars only)
+    if (this.planetId === 'earth') {
+      if (this.devilPool?.points) this.devilPool.points.visible = false;
+      return;
+    }
     this.updateVehicleEffects(dt, playerPos, physics);
     this.updateDustDevils(dt, playerPos);
   }

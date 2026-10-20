@@ -15,6 +15,11 @@ export class MissionFlightHUD {
       camBar: document.getElementById('flight-cam-bar'),
       trajSwitch: document.getElementById('flight-traj-switch'),
       trajectoryPrompt: document.getElementById('flight-trajectory-prompt'),
+      destSwitch: document.getElementById('flight-dest-switch'),
+      transferBtn: document.getElementById('flight-transfer-btn'),
+      deorbitBtn: document.getElementById('flight-deorbit-btn'),
+      roadsterBtn: document.getElementById('flight-roadster-btn'),
+      opsStatus: document.getElementById('flight-ops-status'),
 
       // Universal 360° Gimbal Bar (Active on ALL Cameras)
       gimbalBar: document.getElementById('flight-gimbal-bar'),
@@ -98,6 +103,38 @@ export class MissionFlightHUD {
       this.dom.resetBtn.addEventListener('click', (e) => {
         e.preventDefault();
         if (this.options.onResetMission) this.options.onResetMission();
+      });
+    }
+
+    if (this.dom.destSwitch) {
+      const btns = this.dom.destSwitch.querySelectorAll('[data-dest]');
+      btns.forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const dest = btn.getAttribute('data-dest');
+          if (dest && this.options.onSelectDestination) this.options.onSelectDestination(dest);
+        });
+      });
+    }
+
+    if (this.dom.transferBtn) {
+      this.dom.transferBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onTransfer) this.options.onTransfer();
+      });
+    }
+
+    if (this.dom.deorbitBtn) {
+      this.dom.deorbitBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onDeorbit) this.options.onDeorbit();
+      });
+    }
+
+    if (this.dom.roadsterBtn) {
+      this.dom.roadsterBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onToggleRoadster) this.options.onToggleRoadster();
       });
     }
 
@@ -260,6 +297,24 @@ export class MissionFlightHUD {
     }
   }
 
+  notifyTransfer(target) {
+    this.transferTarget = target || null;
+    if (this.dom.transferBtn) {
+      this.dom.transferBtn.classList.toggle('active', Boolean(target));
+    }
+  }
+
+  notifyPlanet(planetId) {
+    this.currentPlanet = planetId || 'mars';
+  }
+
+  notifyRoadster(enabled) {
+    if (this.dom.roadsterBtn) {
+      this.dom.roadsterBtn.classList.toggle('active', Boolean(enabled));
+      this.dom.roadsterBtn.textContent = enabled ? 'ROADSTER ON' : 'ROADSTER';
+    }
+  }
+
   show(visible = true, isMobile = false) {
     this.isMobile = isMobile;
     if (!this.dom.container) return;
@@ -311,6 +366,35 @@ export class MissionFlightHUD {
           btn.classList.toggle('active', btn.getAttribute('data-traj') === trajMode);
         });
       }
+    }
+
+    // Destination & interplanetary transfer controls
+    const destination = (physics.destination || 'earth').toLowerCase();
+    const currentPlanet = (physics.planetId || 'mars').toLowerCase();
+    if (this.dom.destSwitch) {
+      const btns = this.dom.destSwitch.querySelectorAll('[data-dest]');
+      btns.forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-dest') === destination.toUpperCase());
+      });
+    }
+    const inOrbit = physics.phase === FLIGHT_PHASES.ORBIT;
+    const inTransit = physics.phase === FLIGHT_PHASES.INTERPLANETARY;
+    if (this.dom.transferBtn) {
+      const targetName = destination === currentPlanet ? 'LOCAL DEORBIT' : destination.toUpperCase();
+      this.dom.transferBtn.textContent = inTransit ? 'IN TRANSIT' : `TRANSFER · ${targetName}`;
+      this.dom.transferBtn.disabled = !inOrbit;
+      this.dom.transferBtn.classList.toggle('available', inOrbit);
+    }
+    if (this.dom.deorbitBtn) {
+      this.dom.deorbitBtn.disabled = !inOrbit;
+      this.dom.deorbitBtn.classList.toggle('available', inOrbit);
+    }
+    if (this.dom.opsStatus) {
+      const transferText = inTransit
+        ? `HELIOCENTRIC CRUISE // ${destination.toUpperCase()} · INTERPLANETARY TRANSFER`
+        : '';
+      this.dom.opsStatus.textContent = physics.opsMessage || transferText || '';
+      this.dom.opsStatus.classList.toggle('active', Boolean(physics.opsMessage || transferText));
     }
 
     // 2. Mission Clock (T- / T+)
@@ -444,6 +528,7 @@ export class MissionFlightHUD {
         [FLIGHT_PHASES.HOT_STAGING]: 3,
         [FLIGHT_PHASES.STARSHIP_ASCENT]: physics.boosterState === 'CAUGHT' ? 4 : 3,
         [FLIGHT_PHASES.ORBIT]: 5,
+        [FLIGHT_PHASES.INTERPLANETARY]: 5,
         [FLIGHT_PHASES.DEORBIT]: 5,
         [FLIGHT_PHASES.HYPERSONIC_ENTRY]: 6,
         [FLIGHT_PHASES.BELLYFLOP]: 6,
@@ -478,14 +563,15 @@ export class MissionFlightHUD {
     // 10. Phase Badge, Primary Launch/Stage Button & Prompt
     if (this.dom.phaseBadge) {
       const titles = {
-        [FLIGHT_PHASES.ON_PAD]: 'STARBASE // PAD AWAITING LAUNCH',
+        [FLIGHT_PHASES.ON_PAD]: `${(physics.planetProfile?.name || 'MARS')} STARBASE // PAD AWAITING LAUNCH`,
         [FLIGHT_PHASES.COUNTDOWN]: 'T-MINUS // 33 RAPTOR IGNITION',
         [FLIGHT_PHASES.BOOSTER_ASCENT]: 'STAGE 1 // SUPER HEAVY ASCENT',
         [FLIGHT_PHASES.HOT_STAGING]: 'HOT-STAGING // STAGE SEPARATION',
         [FLIGHT_PHASES.STARSHIP_ASCENT]: trajMode === 'SUBORBITAL'
           ? 'STAGE 2 // SUBORBITAL ASCENT'
           : 'STAGE 2 // ORBITAL INSERTION',
-        [FLIGHT_PHASES.ORBIT]: 'SECO // LOW MARS ORBIT COAST',
+        [FLIGHT_PHASES.ORBIT]: `SECO // LOW ${physics.planetProfile?.name || 'MARS'} ORBIT COAST`,
+        [FLIGHT_PHASES.INTERPLANETARY]: `INTERPLANETARY TRANSFER // CRUISE TO ${(physics.destination || 'earth').toUpperCase()}`,
         [FLIGHT_PHASES.DEORBIT]: 'DEORBIT BURN // RETROGRADE FIRING',
         [FLIGHT_PHASES.HYPERSONIC_ENTRY]: 'ATMOSPHERIC ENTRY // PLASMA INTERFACE',
         [FLIGHT_PHASES.BELLYFLOP]: 'SUBSONIC SKYDIVE // FLAP TRIM',
@@ -514,7 +600,11 @@ export class MissionFlightHUD {
 
     if (this.dom.actionPrompt) {
       let promptHtml = '';
-      if (!physics.autoMission) {
+      if (physics.opsMessage) {
+        promptHtml = `<span class="glow-text">${physics.opsMessage}</span>`;
+      } else if (physics.phase === FLIGHT_PHASES.INTERPLANETARY) {
+        promptHtml = `<span class="glow-text">INTERPLANETARY CRUISE // ${(physics.destination || 'earth').toUpperCase()} ARRIVAL · ENTRY GUIDANCE ARMED · USE TIME WARP TO COMPRESS TRANSIT</span>`;
+      } else if (!physics.autoMission) {
         promptHtml = `<span class="glow-text">MANUAL FLIGHT ACTIVE // W/S: THROTTLE · ARROWS/AD: PITCH & YAW · Q/E: ROLL · X: STAGE · G: LEGS · B: CARGO</span>`;
       } else if (physics.phase === FLIGHT_PHASES.ON_PAD) {
         promptHtml = `<span class="glow-text">LAUNCH SEQUENCE ARMED // CLICK IGNITE OR PRESS [SPACE]</span>`;
@@ -525,7 +615,7 @@ export class MissionFlightHUD {
           promptHtml = `<span class="glow-text">TRACKING SUPER HEAVY RETURN TO MECHAZILLA CHOPSTICKS</span>`;
         }
       } else if (physics.phase === FLIGHT_PHASES.LANDED) {
-        promptHtml = `<span class="glow-text">${physics.shipCaughtByTower ? 'STARSHIP SECURED IN MECHAZILLA ARMS' : 'STARSHIP LANDED ON MARS'} // CLICK EVA OR PAD TO RESET</span>`;
+        promptHtml = `<span class="glow-text">${physics.shipCaughtByTower ? 'STARSHIP SECURED IN MECHAZILLA ARMS' : `STARSHIP LANDED ON ${(physics.planetProfile?.name || 'MARS')}`} // RECOVERY CREWS INBOUND</span>`;
       }
       if (this._lastPromptHtml !== promptHtml) {
         this._lastPromptHtml = promptHtml;

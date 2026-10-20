@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getMarsHeight } from '../terrain/noise.js';
 import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
+import { PLANET_PROFILES, getPlanetProfile } from './planetProfiles.js';
 
 export const FLIGHT_PHASES = {
   ON_PAD: 'ON_PAD',
@@ -10,6 +11,7 @@ export const FLIGHT_PHASES = {
   BOOSTER_CATCH: 'BOOSTER_CATCH',
   STARSHIP_ASCENT: 'STARSHIP_ASCENT',
   ORBIT: 'ORBIT',
+  INTERPLANETARY: 'INTERPLANETARY',
   DEORBIT: 'DEORBIT',
   HYPERSONIC_ENTRY: 'HYPERSONIC_ENTRY',
   BELLYFLOP: 'BELLYFLOP',
@@ -163,27 +165,36 @@ export class StarshipMissionPhysics {
     this.boosterFuel = 100.0;
     this.starshipFuel = 100.0;
 
-    // Mars atmospheric & gravitational constants
-    this.marsGravity = 3.721;    // Surface gravity (m/s²)
-    this.surfaceDensity = MARS_SURFACE_DENSITY;
-    this.scaleHeight = MARS_ATM_LAYERS[0].scaleHeight;
-    this.atmoDensity = MARS_SURFACE_DENSITY;
-    this.atmoPressurePa = 610;
-    this.atmoTempK = 214;
-    this.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * 214);
+    // Mars atmospheric & gravitational constants. These are swapped for the
+    // active planet profile when the vehicle arrives at another world.
+    this.planetId = 'mars';
+    this.planetProfile = PLANET_PROFILES.mars;
+    this.planetRadius = this.planetProfile.radius;
+    this.atmLayers = this.planetProfile.layers;
+    this.marsGravity = this.planetProfile.gravity;    // Surface gravity (m/s²)
+    this.surfaceDensity = this.planetProfile.surfaceDensity;
+    this.scaleHeight = this.atmLayers[0].scaleHeight;
+    this.atmoDensity = this.planetProfile.surfaceDensity;
+    this.atmoPressurePa = this.planetProfile.surfacePressurePa;
+    this.atmoTempK = this.planetProfile.seaLevelTemperatureK;
+    this.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * this.atmoTempK);
     this.windSpeed = 0;
+    this.destination = 'earth';
+    this.transferTarget = null;
+    this.scriptedControl = false;
+    this.opsMessage = '';
     this._atmoSample = {
-      density: MARS_SURFACE_DENSITY,
-      pressure: 610,
-      temperature: 214,
+      density: this.planetProfile.surfaceDensity,
+      pressure: this.planetProfile.surfacePressurePa,
+      temperature: this.planetProfile.seaLevelTemperatureK,
       soundSpeed: 240,
       layer: 0,
       wind: new THREE.Vector3()
     };
     this._boosterAtmo = {
-      density: MARS_SURFACE_DENSITY,
-      pressure: 610,
-      temperature: 214,
+      density: this.planetProfile.surfaceDensity,
+      pressure: this.planetProfile.surfacePressurePa,
+      temperature: this.planetProfile.seaLevelTemperatureK,
       soundSpeed: 240,
       layer: 0,
       wind: new THREE.Vector3()
@@ -225,21 +236,22 @@ export class StarshipMissionPhysics {
   // altitude. This feeds drag, Mach, dynamic pressure and Sutton-Graves heat.
   sampleAtmosphere(altitude, out = this._atmoSample) {
     const h = Math.max(0.0, altitude);
+    const layers = this.atmLayers;
     let temperature;
     let density;
-    let layerIndex = MARS_ATM_LAYERS.length - 1;
-    let layer = MARS_ATM_LAYERS[layerIndex];
+    let layerIndex = layers.length - 1;
+    let layer = layers[layerIndex];
 
-    for (let i = 0; i < MARS_ATM_LAYERS.length; i++) {
-      if (h <= MARS_ATM_LAYERS[i].top) {
-        layer = MARS_ATM_LAYERS[i];
+    for (let i = 0; i < layers.length; i++) {
+      if (h <= layers[i].top) {
+        layer = layers[i];
         layerIndex = i;
         break;
       }
     }
 
-    if (h > MARS_ATM_LAYERS[MARS_ATM_LAYERS.length - 1].top) {
-      const top = MARS_ATM_LAYERS[MARS_ATM_LAYERS.length - 1];
+    if (h > layers[layers.length - 1].top) {
+      const top = layers[layers.length - 1];
       density = top.densityTop * Math.exp(-(h - top.top) / 2600.0);
       temperature = top.tempTop;
     } else {
@@ -249,7 +261,7 @@ export class StarshipMissionPhysics {
       density = layer.densityBottom * Math.exp(-(h - layer.bottom) / layer.scaleHeight);
     }
 
-    const windMagnitude = 6.2 * Math.exp(-h / 9000.0);
+    const windMagnitude = (this.planetId === 'earth' ? 18.0 : 6.2) * Math.exp(-h / 9000.0);
     const windDirection = 0.62 + h * 0.000012;
     out.wind.set(
       Math.cos(windDirection) * windMagnitude,
@@ -268,6 +280,9 @@ export class StarshipMissionPhysics {
   resetToPad() {
     this.phase = FLIGHT_PHASES.ON_PAD;
     this.boosterState = BOOSTER_STATES.ATTACHED;
+    this.scriptedControl = false;
+    this.yardControl = false;
+    this.transferTarget = null;
     this.boosterTimer = 0.0;
     this.boosterTracking = false;
     this.orbitTimer = 0.0;
@@ -280,6 +295,10 @@ export class StarshipMissionPhysics {
     this.shipCaughtByTower = false;
 
     this.position.set(this.padCoords.x, this.padElevation, this.padCoords.y);
+    // The booster has its own yard transform. Reset it alongside the ship or a
+    // freshly produced stack keeps the old booster's factory position.
+    this.boosterPosition.set(this.padCoords.x, this.padElevation, this.padCoords.y);
+    this.boosterQuaternion.identity();
     this.velocity.set(0, 0, 0);
     this.prevVelocity.set(0, 0, 0);
     this.acceleration.set(0, 0, 0);
@@ -378,6 +397,96 @@ export class StarshipMissionPhysics {
     this.vehicle.setLaunchChopsticks(1.0, L.launchTower.armY);
     this.boosterState = BOOSTER_STATES.ATTACHED;
     this.phase = FLIGHT_PHASES.ON_PAD;
+  }
+
+  // Swaps gravity, atmosphere layers and sky metadata. The Starbase layout is
+  // identical on every world (one master plan), so the catch points remain at
+  // the same local coordinates and all guidance laws keep working unchanged.
+  setPlanet(planetId) {
+    const profile = getPlanetProfile(planetId);
+    this.planetId = profile.id;
+    this.planetProfile = profile;
+    this.planetRadius = profile.radius;
+    this.atmLayers = profile.layers;
+    this.marsGravity = profile.gravity;
+    this.surfaceDensity = profile.surfaceDensity;
+    this.scaleHeight = profile.layers[0].scaleHeight;
+    this.atmoDensity = profile.surfaceDensity;
+    this.atmoPressurePa = profile.surfacePressurePa;
+    this.atmoTempK = profile.seaLevelTemperatureK;
+    this.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * this.atmoTempK);
+    this.boosterArmY = L.boosterTower.armY;
+    this.shipArmY = L.shipTower.armY;
+    return profile;
+  }
+
+  setDestination(planetId) {
+    if (PLANET_PROFILES[planetId]) this.destination = planetId;
+    return this.destination;
+  }
+
+  // Requests a heliocentric transfer. The scene-scale trajectory is flown by
+  // InterplanetaryJourney; physics pops back in for the destination entry.
+  triggerInterplanetary(target = null) {
+    const destination = target || (this.planetId === 'mars' ? 'earth' : 'mars');
+    if (!PLANET_PROFILES[destination] || destination === this.planetId) return false;
+    if (this.vehicle.isMated) return false;
+    this.transferTarget = destination;
+    this.phase = FLIGHT_PHASES.INTERPLANETARY;
+    this.scriptedControl = true;
+    this.yardControl = false;
+    this.throttle = 0;
+    this.velocity.set(0, 0, 0);
+    this.boosterVelocity.set(0, 0, 0);
+    this.vehicle.setStarshipThrottle(0, true);
+    this.vehicle.setBoosterThrottle(0);
+    this.vehicle.boosterGroup.visible = false;
+    return true;
+  }
+
+  // Drops the ship into a physically guided entry over the destination
+  // Starbase. The entry-shield attitude and aero guidance then fly the same
+  // HYPERSONIC_ENTRY -> BELLYFLOP -> LANDING_FLIP -> TOUCHDOWN chain used at
+  // Mars, with the destination profile's gravity and atmosphere.
+  enterPlanetEntry(planetId, options = {}) {
+    const profile = this.setPlanet(planetId);
+    this.scriptedControl = false;
+    this.yardControl = false;
+    this.phase = FLIGHT_PHASES.HYPERSONIC_ENTRY;
+    this.vehicle.setMated(false);
+    this.vehicle.starshipGroup.visible = true;
+    this.vehicle.boosterGroup.visible = false;
+    // Arrival propellant state: the ship has spent most of its propellant on
+    // the transfer and only retains the landing reserve.
+    this.starshipFuel = 18.0;
+    this.starshipFlameout = false;
+    this.cargoDoorsDeployed = false;
+    this.landingLegsDeployed = false;
+    this.shipCaughtByTower = false;
+
+    const target = this.shipCatchCoords;
+    // Compressed arrival interface directly over the destination Starbase.
+    // The belly-flop and landing-burn guidance handle the final descent; this
+    // avoids flying a 1,000 km hypersonic ground track that the local scene
+    // cannot represent.
+    const entryAlt = options.altitude || 28000;
+    this.position.set(target.x, this.padElevation + entryAlt, target.y);
+    this.velocity.set(0, -120.0, 0);
+    this.yaw = 0;
+    this.pitch = 0.55;
+    this.roll = 0.0;
+    this.pitchVel = 0;
+    this.yawVel = 0;
+    this.rollVel = 0;
+    this.throttle = 0;
+    this.heat = 0.78;
+    this.entryStartAlt = entryAlt;
+    this.missionTime = 0;
+    this.orbitTimer = 0;
+    this.vehicle.setReentryHeat(this.heat);
+    this.vehicle.setCargoDoors(0);
+    this.vehicle.setLandingLegs(0);
+    return profile;
   }
 
   getBoosterMass() {
@@ -515,12 +624,16 @@ export class StarshipMissionPhysics {
   // -------------------------------------------------------------
   update(dt, input = {}) {
     if (dt <= 0) return;
-    if (dt > 0.05) dt = 0.05;
+    // Orbit coasting is stable at high compression, so 100×/1000× warp can be
+    // integrated in larger steps. Atmospheric phases remain at 20 Hz.
+    if (dt > 0.05) {
+      dt = this.phase === FLIGHT_PHASES.ORBIT ? Math.min(dt, 1.5) : 0.05;
+    }
 
     // Automated Starbase recovery/production owns both vehicle transforms while
     // a catch is being unloaded, inspected, rebuilt and re-stacked. Flight
     // dynamics resume only after a fresh stack has been armed on the pad.
-    if (this.yardControl) {
+    if (this.yardControl || this.scriptedControl) {
       this.updateYardVisuals(dt);
       return;
     }
@@ -546,8 +659,8 @@ export class StarshipMissionPhysics {
     const agl = Math.max(0.0, this.position.y - supportFloorY);
 
     // Altitude-dependent Mars gravity g(h) = g0 * (R / (R + h))^2
-    const rFromCenter = MARS_RADIUS + Math.max(0.0, this.altitude);
-    const localGravity = this.marsGravity * Math.pow(MARS_RADIUS / rFromCenter, 2);
+    const rFromCenter = this.planetRadius + Math.max(0.0, this.altitude);
+    const localGravity = this.marsGravity * Math.pow(this.planetRadius / rFromCenter, 2);
 
     // Layered Martian atmosphere: density, pressure, temperature, speed of
     // sound and the local wind vector (all altitude dependent).
@@ -1002,7 +1115,15 @@ export class StarshipMissionPhysics {
         }
         this.orbitTimer += dt;
         if (this.orbitTimer >= 7.0) {
-          this.triggerDeorbit();
+          // AUTO flies the interplanetary itinerary first. If the requested
+          // destination is the planet we are already orbiting, deorbit and fly
+          // the local tower-catch profile instead.
+          const target = this.destination || 'earth';
+          if (target !== this.planetId && this.triggerInterplanetary(target)) {
+            this.orbitTimer = 0;
+          } else {
+            this.triggerDeorbit();
+          }
         }
         break;
       }
@@ -1257,7 +1378,7 @@ export class StarshipMissionPhysics {
     const towardPadVel = this.boosterVelocity.x * toPadDir.x + this.boosterVelocity.z * toPadDir.z;
     const altitudeAboveCatch = Math.max(0.0, this.boosterPosition.y - targetCatchElevation);
     const boosterAlt = Math.max(0.0, this.boosterPosition.y - this.padElevation);
-    const localG = this.marsGravity * Math.pow(MARS_RADIUS / (MARS_RADIUS + boosterAlt), 2);
+    const localG = this.marsGravity * Math.pow(this.planetRadius / (this.planetRadius + boosterAlt), 2);
 
     // Time remaining before free-fall brings the booster back to catch height.
     // Includes the coast up to apogee so the lateral prediction is honest.

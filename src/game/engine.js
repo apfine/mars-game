@@ -4,6 +4,7 @@ import { MarsScatterManager } from '../terrain/scatter.js';
 import { getMarsHeight } from '../terrain/noise.js';
 import { MarsRoverModel } from '../vehicle/rover.js';
 import { MarsRoverPhysics } from '../vehicle/physics.js';
+import { AstronautAvatar } from '../vehicle/astronaut.js';
 import { MarsAtmosphere } from '../effects/atmosphere.js';
 import { MarsAudioEngine } from '../effects/audio.js';
 import { InputManager } from '../ui/controls.js';
@@ -12,6 +13,10 @@ import { MarsCameraController } from '../camera.js';
 import { StarshipMissionVehicle } from '../flight/starship.js';
 import { StarshipMissionPhysics, FLIGHT_PHASES } from '../flight/missionPhysics.js';
 import { MissionFlightHUD } from '../flight/missionUI.js';
+import { InterplanetaryJourney } from '../flight/interplanetary.js';
+import { StarbaseOperations } from '../flight/starbaseOperations.js';
+import { FlyingRoadster } from '../flight/roadster.js';
+import { PLANET_PROFILES } from '../flight/planetProfiles.js';
 
 export class MarsGameEngine {
   constructor(container, options = {}) {
@@ -22,11 +27,14 @@ export class MarsGameEngine {
     this.disposed = false;
     this.mode = 'rover'; // 'rover' | 'walking' | 'starship'
     this.loadedNotified = false;
-    this.timeScales = [1, 2, 4, 8];
+    this.flightTimeScales = [1, 2, 4, 8, 100, 1000];
+    this.groundTimeScales = [1, 2, 4, 8];
+    this.timeScales = this.flightTimeScales;
     this.timeScaleIdx = 0;
     this.timeScale = 1;
 
-    // First-Person Astronaut Walker State (No 3rd-person view, no human character mesh)
+    // EVA walker state. The visible articulated suit lives in AstronautAvatar;
+    // this object remains the authoritative ground position/heading.
     this.walker = {
       position: new THREE.Vector3(1260, 0, 1020),
       velocity: new THREE.Vector3(0, 0, 0),
@@ -53,6 +61,10 @@ export class MarsGameEngine {
 
     this.initSystems();
     this.initEvents();
+
+    // Debug/automation handle used by the browser smoke tests. It also makes
+    // it possible to inspect mission state from the developer console.
+    if (typeof window !== 'undefined') window.__marsGame = this;
 
     this.clock = new THREE.Clock();
     this.lastOnGround = 4;
@@ -84,19 +96,25 @@ export class MarsGameEngine {
     const isLowTier = this.detectOptimalQuality() !== 'High';
     this.renderer = new THREE.WebGLRenderer({
       powerPreference: 'high-performance',
-      antialias: !isLowTier,
-      stencil: false
+      // Keep MSAA on even on mid-range GPUs: the hard-edged stainless vehicle
+      // and truss towers alias badly without it. Resolution adaptation below
+      // handles the performance budget without turning the image into pixels.
+      antialias: true,
+      stencil: false,
+      alpha: false
     });
 
-    const dpr = Math.min(window.devicePixelRatio || 1, isLowTier ? 1.0 : 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, isLowTier ? 1.15 : 1.5);
     this.renderer.setPixelRatio(dpr);
     this.pixelBase = dpr;
     this.dynPR = dpr;
+    this.minDynPR = isLowTier ? 0.8 : 1.0;
     this.avgDt = 0.016;
     this.perfTick = 0;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -141,6 +159,9 @@ export class MarsGameEngine {
     this.physics = new MarsRoverPhysics(this.roverModel);
     this.physics.collider = this.scatter;
 
+    this.astronaut = new AstronautAvatar();
+    this.scene.add(this.astronaut.group);
+
     // 5. Audio Synthesizer
     this.audio = new MarsAudioEngine();
 
@@ -152,6 +173,28 @@ export class MarsGameEngine {
     this.starship = new StarshipMissionVehicle();
     this.scene.add(this.starship.group);
     this.missionPhysics = new StarshipMissionPhysics(this.starship, new THREE.Vector2(1400, 1150));
+
+    // Earth, the Moon, both satellite networks and the compressed interplanetary
+    // cruise. Entry hands control back to the real flight integrator.
+    this.journey = new InterplanetaryJourney(this.scene, this.missionPhysics, this.starship, {
+      onArrive: (planetId) => this.handlePlanetArrival(planetId)
+    });
+    this.journey.setPlanet('mars');
+    this.atmosphere.setPlanet('mars');
+
+    this.operations = new StarbaseOperations(this.missionPhysics, this.starship, {
+      onRelaunch: () => {
+        if (this.missionPhysics.phase === FLIGHT_PHASES.ON_PAD && this.missionPhysics.autoMission) {
+          this.operations.reset();
+          this.missionPhysics.startLaunch();
+          this.setMode('starship');
+          this.cameraController.resetGimbal();
+        }
+      }
+    });
+
+    this.roadster = new FlyingRoadster(this.scene, this.missionPhysics);
+    this.roadster.setPlanet('mars');
 
     // 8. Input & Unified Glassmorphic HUD for Rover & Walking
     this.input = new InputManager();
@@ -208,6 +251,18 @@ export class MarsGameEngine {
       onSelectTrajectory: (mode) => {
         this.missionPhysics.setTrajectoryMode(mode);
       },
+      onSelectDestination: (planetId) => {
+        this.selectDestination(planetId);
+      },
+      onTransfer: () => {
+        this.beginTransfer();
+      },
+      onDeorbit: () => {
+        this.beginDeorbit();
+      },
+      onToggleRoadster: () => {
+        this.toggleRoadster();
+      },
       onSelectCamera: (camMode) => {
         this.cameraController.setFlightMode(camMode);
         this.missionPhysics.boosterTracking = (camMode === 'BOOSTER_CAM');
@@ -220,7 +275,13 @@ export class MarsGameEngine {
         this.cameraController.resetGimbal();
       },
       onResetMission: () => {
+        this.missionPhysics.setPlanet('mars');
         this.missionPhysics.resetToPad();
+        this.missionPhysics.destination = 'earth';
+        this.journey.reset();
+        this.operations?.reset();
+        this.applyPlanetEnvironment('mars');
+        this.setTimeScale(1);
         this.cameraController.resetGimbal();
       },
       onThrottleUp: () => {
@@ -265,6 +326,14 @@ export class MarsGameEngine {
     bindSpeedBtn('flight-speed-btn');
     bindSpeedBtn('rover-speed-btn');
 
+    const roverRoadsterBtn = document.getElementById('rover-roadster-btn');
+    if (roverRoadsterBtn) {
+      roverRoadsterBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.toggleRoadster();
+      });
+    }
+
     const optimalPreset = this.detectOptimalQuality();
     this.applyQuality(optimalPreset);
     const qualitySelect = document.getElementById('quality-select');
@@ -272,14 +341,27 @@ export class MarsGameEngine {
   }
 
   cycleTimeScale() {
-    this.timeScaleIdx = (this.timeScaleIdx + 1) % this.timeScales.length;
-    this.timeScale = this.timeScales[this.timeScaleIdx];
+    const scales = this.mode === 'starship' ? this.flightTimeScales : this.groundTimeScales;
+    this.timeScales = scales;
+    const current = scales.indexOf(this.timeScale);
+    this.setTimeScale(scales[(current + 1) % scales.length]);
+  }
+
+  setTimeScale(value) {
+    const scales = this.mode === 'starship' ? this.flightTimeScales : this.groundTimeScales;
+    this.timeScales = scales;
+    const idx = scales.indexOf(value);
+    this.timeScale = idx >= 0 ? scales[idx] : value;
+    this.timeScaleIdx = Math.max(0, idx);
     const isWarped = this.timeScale > 1;
 
     const flightBtn = document.getElementById('flight-speed-btn');
     if (flightBtn) {
       flightBtn.textContent = `${this.timeScale}X`;
       flightBtn.classList.toggle('active', isWarped);
+      flightBtn.title = this.timeScale >= 100
+        ? 'High time compression for orbit and interplanetary cruise'
+        : 'Cycle Simulation Speed (1x / 2x / 4x / 8x / 100x / 1000x)';
     }
 
     const roverBtn = document.getElementById('rover-speed-btn');
@@ -289,15 +371,86 @@ export class MarsGameEngine {
     }
   }
 
-  // Toggle between Rover Driving and First-Person Astronaut Walking
+  selectDestination(planetId) {
+    const target = String(planetId || '').toLowerCase();
+    if (!PLANET_PROFILES[target]) return;
+    this.missionPhysics.setDestination(target);
+  }
+
+  // Starts the heliocentric transfer when the vehicle is in orbit. AUTO mode
+  // uses 100× compression automatically; MANUAL can still choose 1× or 1000×.
+  beginTransfer() {
+    const target = this.missionPhysics.destination;
+    if (!target || target === this.missionPhysics.planetId) {
+      this.beginDeorbit();
+      return;
+    }
+    if (!this.missionPhysics.triggerInterplanetary(target)) return;
+    this.setTimeScale(this.missionPhysics.autoMission ? 100 : Math.max(8, this.timeScale));
+    this.ensureTransferStarted();
+  }
+
+  beginDeorbit() {
+    if (this.missionPhysics.phase === FLIGHT_PHASES.ORBIT) {
+      this.missionPhysics.triggerDeorbit();
+    }
+  }
+
+  ensureTransferStarted() {
+    if (this.missionPhysics.phase !== FLIGHT_PHASES.INTERPLANETARY) return;
+    if (this.journey.active || this.journey.arrived) return;
+    const target = this.missionPhysics.transferTarget || this.missionPhysics.destination;
+    if (target && target !== this.missionPhysics.planetId) {
+      this.journey.start(target);
+      this.setTimeScale(this.missionPhysics.autoMission ? 100 : Math.max(8, this.timeScale));
+      this.flightHud?.notifyTransfer(target);
+    }
+  }
+
+  // Hands the entry interface back to the flight integrator once the cruise is
+  // complete, then swaps terrain/sky to the destination environment.
+  handlePlanetArrival(planetId) {
+    this.missionPhysics.enterPlanetEntry(planetId);
+    this.applyPlanetEnvironment(planetId);
+    this.missionPhysics.setDestination(planetId === 'mars' ? 'earth' : 'mars');
+    this.setTimeScale(1);
+    this.cameraController.initialized = false;
+    this.flightHud?.notifyTransfer(null);
+    this.flightHud?.notifyPlanet(planetId);
+  }
+
+  applyPlanetEnvironment(planetId) {
+    const isEarth = planetId === 'earth';
+    this.atmosphere.setPlanet(planetId);
+    this.journey.setPlanet(planetId);
+    this.roadster?.setPlanet(planetId);
+    if (this.terrain?.group) this.terrain.group.visible = !isEarth;
+    if (this.scatter?.setVisible) this.scatter.setVisible(!isEarth);
+  }
+
+  toggleRoadster() {
+    if (!this.roadster) return;
+    const on = this.roadster.toggle();
+    this.flightHud?.notifyRoadster(on);
+    const btn = document.getElementById('rover-roadster-btn');
+    if (btn) {
+      btn.classList.toggle('active', on);
+      btn.textContent = on ? 'ROADSTER ON' : 'ROADSTER';
+    }
+  }
+
+  // Toggle between rover driving and third-person EVA walking.
   toggleWalkMode() {
     if (this.mode === 'rover') {
-      // Disembark Rover onto Martian surface next to driver door
-      const rightX = Math.cos(this.physics.yaw) * 2.6;
-      const rightZ = -Math.sin(this.physics.yaw) * 2.6;
+      // Disembark clear of the rover so the third-person camera does not start
+      // inside a wheel/body with the astronaut hidden behind it.
+      const side = 5.2;
+      const forward = 1.6;
+      const rightX = Math.cos(this.physics.yaw) * side + Math.sin(this.physics.yaw) * forward;
+      const rightZ = -Math.sin(this.physics.yaw) * side + Math.cos(this.physics.yaw) * forward;
       const wx = this.physics.position.x + rightX;
       const wz = this.physics.position.z + rightZ;
-      const wy = getMarsHeight(wx, wz);
+      const wy = this.getSurfaceHeight(wx, wz);
 
       this.walker.position.set(wx, wy, wz);
       // Face toward the Launch Control Pedestal so the player can immediately walk to the button
@@ -323,6 +476,7 @@ export class MarsGameEngine {
       this.starship.setLaunchButtonPressed(true);
     }
     this.setMode('starship');
+    this.operations?.reset();
     this.missionPhysics.startLaunch();
   }
 
@@ -332,13 +486,12 @@ export class MarsGameEngine {
 
     if (this.missionPhysics.phase === FLIGHT_PHASES.ON_PAD) {
       this.audio.playLaunchButtonSound();
+      this.operations?.reset();
       this.missionPhysics.startLaunch();
     } else if (this.missionPhysics.phase === FLIGHT_PHASES.LANDED) {
-      this.walker.position.set(
-        this.missionPhysics.terminalPosition.x - 3.5,
-        this.missionPhysics.terminalPosition.y,
-        this.missionPhysics.terminalPosition.z - 3.5
-      );
+      const wx = this.missionPhysics.terminalPosition.x - 3.5;
+      const wz = this.missionPhysics.terminalPosition.z - 3.5;
+      this.walker.position.set(wx, this.getSurfaceHeight(wx, wz), wz);
       this.setMode('walking');
     } else if (!this.missionPhysics.autoMission && this.starship.isMated) {
       this.missionPhysics.triggerStageSeparation();
@@ -350,6 +503,9 @@ export class MarsGameEngine {
   setMode(targetMode) {
     if (this.mode === targetMode) return;
     this.mode = targetMode;
+    this.timeScales = targetMode === 'starship' ? this.flightTimeScales : this.groundTimeScales;
+    if (targetMode !== 'starship' && this.timeScale > 8) this.setTimeScale(8);
+    if (this.astronaut) this.astronaut.group.visible = targetMode === 'walking';
 
     const roverHud = document.getElementById('hud-layer');
     const mobileControls = document.getElementById('mobile-controls');
@@ -369,6 +525,9 @@ export class MarsGameEngine {
       this.flightHud.notifyCameraMode(this.cameraController.getFlightMode());
       this.atmosphere.setFlightMode(true);
       if (this.terrain) this.terrain.setFlightMode(true);
+      const onEarth = this.missionPhysics.planetId === 'earth';
+      if (this.terrain?.group) this.terrain.group.visible = !onEarth;
+      if (this.scatter?.group) this.scatter.group.visible = !onEarth;
 
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
     } else {
@@ -380,7 +539,9 @@ export class MarsGameEngine {
 
       this.roverModel.group.visible = true;
       this.starship.group.visible = true;
-      if (this.scatter?.group) this.scatter.group.visible = true;
+      const onEarth = this.missionPhysics.planetId === 'earth';
+      if (this.scatter?.group) this.scatter.group.visible = !onEarth;
+      if (this.terrain?.group) this.terrain.group.visible = !onEarth;
 
       this.flightHud.show(false);
       if (roverHud) roverHud.style.display = 'block';
@@ -400,33 +561,48 @@ export class MarsGameEngine {
   }
 
   applyQuality(preset) {
+    // Safe Render is the compatibility path: the same lightweight scene as Low,
+    // but with shadows and dynamic resolution scaling disabled so a weak or
+    // software WebGL implementation can always present the sky, terrain and
+    // vehicle instead of a black canvas.
+    const isSafe = preset === 'Safe';
+    const renderPreset = isSafe ? 'Low' : preset;
     this.quality = preset;
     this.perfTick = 0;
-    this.atmosphere.setQuality(preset);
-    if (this.terrain) this.terrain.setQuality(preset);
-    if (this.scatter) this.scatter.setQuality(preset);
+    this.atmosphere.setQuality(renderPreset);
+    if (this.terrain) this.terrain.setQuality(renderPreset);
+    if (this.scatter) this.scatter.setQuality(renderPreset);
 
-    const isLow = preset === 'Low';
-    const isMed = preset === 'Medium';
-    const isHigh = preset === 'High';
-    const isUltra = preset === 'Ultra';
+    const isLow = renderPreset === 'Low';
+    const isMed = renderPreset === 'Medium';
+    const isHigh = renderPreset === 'High';
+    const isUltra = renderPreset === 'Ultra';
 
-    if (isLow) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 0.85));
+    if (isSafe) {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
+      this.minDynPR = 1.0;
+      this.renderer.shadowMap.enabled = false;
+      this.atmosphere.sunLight.castShadow = false;
+    } else if (isLow) {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
+      this.minDynPR = 0.8;
       this.renderer.shadowMap.enabled = false;
       this.atmosphere.sunLight.castShadow = false;
     } else if (isMed) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.input.isMobile ? 1.0 : 1.15));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.input.isMobile ? 1.15 : 1.3));
+      this.minDynPR = 0.9;
       this.renderer.shadowMap.enabled = true;
       this.atmosphere.sunLight.castShadow = true;
       this.atmosphere.sunLight.shadow.mapSize.set(1024, 1024);
     } else if (isHigh) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      this.minDynPR = 1.0;
       this.renderer.shadowMap.enabled = true;
       this.atmosphere.sunLight.castShadow = true;
-      this.atmosphere.sunLight.shadow.mapSize.set(1024, 1024);
+      this.atmosphere.sunLight.shadow.mapSize.set(2048, 2048);
     } else if (isUltra) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.0));
+      this.minDynPR = 1.0;
       this.renderer.shadowMap.enabled = true;
       this.atmosphere.sunLight.castShadow = true;
       this.atmosphere.sunLight.shadow.mapSize.set(2048, 2048);
@@ -491,10 +667,20 @@ export class MarsGameEngine {
     this.renderer.domElement.addEventListener('pointerup', this.onCanvasPointerUp);
   }
 
+  getSurfaceHeight(x, z) {
+    if (this.missionPhysics.planetId === 'earth') {
+      const dx = x - this.missionPhysics.padCoords.x;
+      const dz = z - this.missionPhysics.padCoords.y;
+      // Concrete apron around the launch complex, grass beyond it.
+      return this.missionPhysics.padGroundY + (dx * dx + dz * dz < 470 * 470 ? 0.14 : 0.06);
+    }
+    return getMarsHeight(x, z);
+  }
+
   updateWalkingPhysics(dt) {
     const input = this.input.state;
     const isRunning = Boolean(input.nitro);
-    const maxWalkSpeed = isRunning ? 8.2 : 4.8; // m/s on Martian 0.38G surface
+    const maxWalkSpeed = isRunning ? 8.2 : 4.8; // m/s on the local surface
 
     // Turn azimuth with A/D or Left/Right arrow keys
     if (Math.abs(input.steer) > 0.02) {
@@ -513,7 +699,7 @@ export class MarsGameEngine {
 
     this.walker.position.x += moveX;
     this.walker.position.z += moveZ;
-    this.walker.position.y = getMarsHeight(this.walker.position.x, this.walker.position.z);
+    this.walker.position.y = this.getSurfaceHeight(this.walker.position.x, this.walker.position.z);
 
     this.walker.velocity.set(sinY * this.walker.speed, 0, cosY * this.walker.speed);
     this.walker.speedKmh = Math.abs(Math.round(this.walker.speed * 3.6));
@@ -531,11 +717,12 @@ export class MarsGameEngine {
         this.audio.ensureRunning();
         this.audio.playFootstepSound(isRunning);
       }
-      // Subtle proper G oscillation from astronaut stride impact around 0.38G
-      const strideG = 0.38 + Math.abs(Math.sin(this.walker.bobPhase)) * (isRunning ? 0.14 : 0.06);
+      // Subtle proper-G oscillation from astronaut stride impact.
+      const baseG = this.missionPhysics.planetId === 'earth' ? 1.0 : 0.38;
+      const strideG = baseG + Math.abs(Math.sin(this.walker.bobPhase)) * (isRunning ? 0.14 : 0.06);
       this.walker.gForce = strideG.toFixed(2);
     } else {
-      this.walker.gForce = '0.38';
+      this.walker.gForce = this.missionPhysics.planetId === 'earth' ? '1.00' : '0.38';
     }
   }
 
@@ -551,8 +738,9 @@ export class MarsGameEngine {
     if (++this.perfTick >= 35) {
       this.perfTick = 0;
       let next = this.dynPR;
-      if (this.avgDt > 0.021 && next > 0.5) next = Math.max(0.5, next - 0.12);
-      else if (this.avgDt < 0.0165 && next < this.pixelBase) next = Math.min(this.pixelBase, next + 0.05);
+      const floor = this.minDynPR ?? 0.9;
+      if (this.avgDt > 0.021 && next > floor) next = Math.max(floor, next - 0.08);
+      else if (this.avgDt < 0.0175 && next < this.pixelBase) next = Math.min(this.pixelBase, next + 0.04);
       if (Math.abs(next - this.dynPR) > 0.001) {
         this.dynPR = next;
         this.renderer.setPixelRatio(next);
@@ -569,10 +757,21 @@ export class MarsGameEngine {
     // 1. Update Input State
     this.input.update();
 
+    // Interplanetary cruise, celestial rotation and satellite relay networks
+    // animate in every camera mode.
+    this.journey.update(dt, this.timeScale);
+    this.roadster.update(dt, this.mode === 'starship' ? this.missionPhysics : null);
+    if (this.missionPhysics.phase !== FLIGHT_PHASES.INTERPLANETARY && this.journey.active) {
+      this.journey.active = false;
+      this.journey.transferTrail.material.opacity = 0;
+    }
+
     // =========================================================
     // MODE A: STARSHIP FLIGHT SIMULATION
     // =========================================================
     if (this.mode === 'starship') {
+      this.operations.update(dt);
+      this.ensureTransferStarted();
       if (this.input.consumeSinglePress('handbrake')) {
         this.handleFlightStageAction();
       }
@@ -583,11 +782,22 @@ export class MarsGameEngine {
         this.flightHud.notifyCameraMode(nextMode);
       }
 
-      const steps = this.timeScale || 1;
-      const scaledDt = Math.min(dt * steps, 0.25);
-      for (let s = 0; s < steps; s++) {
-        this.missionPhysics.update(dt, this.input.state);
+      // High warp is only physically integrated in orbit; atmospheric phases
+      // stay capped at 8 substeps to preserve guidance and contact stability.
+      const warp = this.timeScale || 1;
+      const inOrbit = this.missionPhysics.phase === FLIGHT_PHASES.ORBIT;
+      if (warp > 8 && inOrbit) {
+        this.missionPhysics.update(Math.min(dt * warp, 1.5), this.input.state);
+      } else {
+        const steps = Math.max(1, Math.min(warp, 8));
+        for (let s = 0; s < steps; s++) {
+          this.missionPhysics.update(dt, this.input.state);
+        }
       }
+      if (this.missionPhysics.phase === FLIGHT_PHASES.INTERPLANETARY) {
+        this.ensureTransferStarted();
+      }
+      const scaledDt = Math.min(dt * Math.min(warp, 8), 0.25);
 
       this.cameraController.updateFlight(scaledDt, this.missionPhysics);
       this.flightHud.update(this.missionPhysics);
@@ -601,9 +811,14 @@ export class MarsGameEngine {
       }
 
       this.atmosphere.setAltitude(camAltitude, this.missionPhysics.speed);
-      this.terrain.setCameraAltitude(camAltitude);
+      const onMars = this.missionPhysics.planetId === 'mars';
+      if (onMars) {
+        this.terrain.setCameraAltitude(camAltitude);
+      } else if (this.terrain?.group) {
+        this.terrain.group.visible = false;
+      }
       if (this.scatter?.group) {
-        this.scatter.group.visible = camAltitude < 900;
+        this.scatter.group.visible = onMars && camAltitude < 900;
       }
 
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
@@ -617,7 +832,7 @@ export class MarsGameEngine {
         speedKmh: this.missionPhysics.speed * 3.6
       });
 
-      if (camAltitude < 5000) {
+      if (onMars && camAltitude < 5000) {
         this.terrain.update(this.camera.position);
         if (camAltitude < 950) {
           this.scatter.update(this.camera.position);
@@ -669,11 +884,21 @@ export class MarsGameEngine {
       }
       // Keep rover parked where the player left it
       this.physics.update(dt, { throttle: 0, steer: 0, handbrake: true, nitro: false, assist: false });
+      if (this.astronaut) this.astronaut.update(dt, this.walker);
       this.cameraController.updateWalking(scaledDt, this.walker);
 
       const activePos = this.walker.position;
-      this.terrain.update(activePos);
-      this.scatter.update(activePos);
+      const onMars = this.missionPhysics.planetId === 'mars';
+      if (onMars) {
+        this.scatter.setVisible(true);
+        this.terrain.update(activePos);
+        this.scatter.update(activePos);
+      } else {
+        // The Earth Starbase uses its own ocean/grass ground disc. Never let
+        // Mars terrain chunks or scattered rocks poke through it.
+        if (this.terrain?.group) this.terrain.group.visible = false;
+        this.scatter?.setVisible(false);
+      }
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
       this.atmosphere.update(scaledDt, activePos, {
         speed: this.walker.speed,
@@ -683,7 +908,7 @@ export class MarsGameEngine {
         onGroundCount: 0
       });
 
-      const nearbyPOIs = this.scatter.getNearbyPOIs(activePos);
+      const nearbyPOIs = onMars ? this.scatter.getNearbyPOIs(activePos) : [];
       this.hud.update(this.walker, this.camera, nearbyPOIs, {
         isWalking: true,
         terminalPos: this.missionPhysics.terminalPosition,
@@ -713,14 +938,21 @@ export class MarsGameEngine {
       }
       this.lastOnGround = this.physics.onGroundCount;
 
-      this.terrain.update(this.physics.position);
-      this.scatter.update(this.physics.position);
+      const onMars = this.missionPhysics.planetId === 'mars';
+      if (onMars) {
+        this.scatter.setVisible(true);
+        this.terrain.update(this.physics.position);
+        this.scatter.update(this.physics.position);
+      } else {
+        if (this.terrain?.group) this.terrain.group.visible = false;
+        this.scatter?.setVisible(false);
+      }
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
       this.atmosphere.update(scaledDt, this.physics.position, this.physics);
       this.audio.update(this.physics);
       this.cameraController.update(scaledDt, this.physics);
 
-      const nearbyPOIs = this.scatter.getNearbyPOIs(this.physics.position);
+      const nearbyPOIs = onMars ? this.scatter.getNearbyPOIs(this.physics.position) : [];
       this.hud.update(this.physics, this.camera, nearbyPOIs, {
         isWalking: false,
         terminalPos: this.missionPhysics.terminalPosition,
@@ -758,6 +990,7 @@ export class MarsGameEngine {
     window.removeEventListener('keydown', this.startAudio);
     window.removeEventListener('touchstart', this.startAudio);
     window.removeEventListener('mousedown', this.startAudio);
+    if (window.__marsGame === this) window.__marsGame = null;
     if (this.renderer?.domElement) {
       this.renderer.domElement.removeEventListener('pointerdown', this.onCanvasPointerDown);
       this.renderer.domElement.removeEventListener('pointerup', this.onCanvasPointerUp);

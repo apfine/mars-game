@@ -172,6 +172,14 @@ export default function MarsCanvas() {
             >
               WALK [E]
             </button>
+            <button
+              id="rover-roadster-btn"
+              className="hud-pill-btn roadster-toggle-btn"
+              aria-label="Toggle Flying Roadster"
+              title="Toggle the flying Tesla Roadster"
+            >
+              ROADSTER
+            </button>
             <button id="map-btn" className="hud-pill-btn" aria-label="Map" title="Expedition Map (Key M)">
               MAP
             </button>
@@ -367,11 +375,16 @@ export default function MarsCanvas() {
           </div>
 
           <div className="spx-top-right">
+            <div className="spx-dest-switch" id="flight-dest-switch" title="Select interplanetary destination">
+              <span className="dest-lbl">DEST</span>
+              <button className="dest-btn" data-dest="MARS">MARS</button>
+              <button className="dest-btn active" data-dest="EARTH">EARTH</button>
+            </div>
             <div className="spx-traj-switch" id="flight-traj-switch" title="Flight Trajectory Profile">
               <button className="traj-opt-btn active" data-traj="ORBITAL">ORBITAL</button>
               <button className="traj-opt-btn" data-traj="SUBORBITAL">SUBORBITAL</button>
             </div>
-            <button id="flight-speed-btn" className="hud-pill-btn flight-speed-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x)">
+            <button id="flight-speed-btn" className="hud-pill-btn flight-speed-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x / 100x / 1000x)">
               1X
             </button>
             <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto or Manual Control">
@@ -384,6 +397,20 @@ export default function MarsCanvas() {
               EVA
             </button>
           </div>
+        </div>
+
+        {/* Interplanetary transfer, local deorbit, roadster and yard ops */}
+        <div className="flight-ops-bar">
+          <button id="flight-transfer-btn" className="flight-ops-btn" title="Transfer to the selected planet">
+            TRANSFER · EARTH
+          </button>
+          <button id="flight-deorbit-btn" className="flight-ops-btn" title="Deorbit and recover at the local Starbase">
+            DEORBIT
+          </button>
+          <button id="flight-roadster-btn" className="flight-ops-btn roadster-btn" title="Toggle the flying Tesla Roadster">
+            ROADSTER
+          </button>
+          <span id="flight-ops-status" className="flight-ops-status"></span>
         </div>
 
         {/* Pre-Space Trajectory Decision Prompt */}
@@ -700,6 +727,7 @@ export default function MarsCanvas() {
                 <option value="High">High (Optimized PC)</option>
                 <option value="Medium">Medium (Balanced Mobile/PC)</option>
                 <option value="Low">Low (Maximum Mobile FPS)</option>
+                <option value="Safe">Safe Render (Compatibility / No Black Screen)</option>
               </select>
             </div>
 

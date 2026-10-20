@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { getMarsHeight } from './terrain/noise.js';
 
-// Dynamic Multi-Mode Camera Controller with Full 360° Gimbal on All Cameras & First-Person Walking Simulation
+// Dynamic multi-mode controller with full 360° gimbal on all cameras and a
+// third-person EVA walking camera.
 export class MarsCameraController {
   constructor(camera, domElement) {
     this.camera = camera;
@@ -29,6 +30,7 @@ export class MarsCameraController {
     this.orbitTheta = 0.55;
     this.orbitPhi = 0.28;
     this.orbitRadius = 90.0;
+    this._walkTarget = new THREE.Vector3();
     this.roverOrbitRadius = 11.0;
 
     // 360-degree Gimbal angles for stationary Ground Cam & Tower Cam
@@ -159,48 +161,52 @@ export class MarsCameraController {
     this.shakeIntensity = Math.min(2.0, this.shakeIntensity + amount);
   }
 
-  // First-Person Astronaut Walking Camera (Strictly 1st-Person, 360° Gimbal + Realistic Stride Head-Bob & Sway)
+  // Third-person EVA camera. The astronaut is a real articulated mesh, so the
+  // camera orbits behind the suit instead of living inside its helmet. The
+  // universal gimbal still lets the player look around and inspect the base.
   updateWalking(dt, walker) {
     if (dt <= 0) return;
     this.activeSimMode = 'walking';
 
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 68.0, Math.min(1.0, dt * 8.0));
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 62.0, Math.min(1.0, dt * 8.0));
     this.camera.updateProjectionMatrix();
 
     const totalYaw = walker.yaw + this.gimbalYaw;
-    const totalPitch = THREE.MathUtils.clamp(this.gimbalPitch, -1.38, 1.38);
+    const orbitPitch = THREE.MathUtils.clamp(0.17 + this.gimbalPitch, -0.5, 0.95);
+    const lookPitch = THREE.MathUtils.clamp(this.gimbalPitch, -0.9, 0.9);
+    const distance = 5.4;
 
-    // Kinematic stride head-bobbing (vertical 2x frequency, lateral 1x frequency, subtle roll tilt)
-    const speedNorm = THREE.MathUtils.clamp(walker.speed / 5.5, 0.0, 1.35);
-    const bobVertical = Math.sin(walker.stridePhase * 2.0) * 0.065 * speedNorm;
-    const bobLateral = Math.cos(walker.stridePhase) * 0.038 * speedNorm;
-    const bobRoll = Math.sin(walker.stridePhase) * 0.012 * speedNorm;
-
-    // Breathing idle micro-motion when standing still
-    const idleBreath = Math.sin(performance.now() * 0.0022) * 0.008;
-
+    // Position the camera on a sphere behind the suit. The camera sits slightly
+    // over the shoulder so the boots and terrain are both visible.
+    const horizontal = Math.cos(orbitPitch) * distance;
     const rightX = Math.cos(totalYaw);
     const rightZ = -Math.sin(totalYaw);
+    const desiredX = walker.position.x - Math.sin(totalYaw) * horizontal + rightX * 0.55;
+    const desiredY = walker.position.y + 1.62 + Math.sin(orbitPitch) * distance;
+    const desiredZ = walker.position.z - Math.cos(totalYaw) * horizontal + rightZ * 0.55;
 
-    const eyeY = walker.position.y + 1.75 + bobVertical + idleBreath;
+    // Never allow the third-person camera to clip through the terrain.
+    const camGround = getMarsHeight(desiredX, desiredZ);
+    const clampedY = Math.max(desiredY, camGround + 0.65);
+    this._walkTarget.set(desiredX, clampedY, desiredZ);
+
+    const snap = this.camera.position.distanceToSquared(this._walkTarget) > 900;
+    const follow = snap ? 1.0 : Math.min(1.0, dt * 9.0);
     this.currentPos.set(
-      walker.position.x + rightX * bobLateral,
-      eyeY,
-      walker.position.z + rightZ * bobLateral
+      THREE.MathUtils.lerp(this.camera.position.x, desiredX, follow),
+      THREE.MathUtils.lerp(this.camera.position.y, clampedY, follow),
+      THREE.MathUtils.lerp(this.camera.position.z, desiredZ, follow)
     );
 
-    const cosP = Math.cos(totalPitch);
-    const lookDirX = cosP * Math.sin(totalYaw);
-    const lookDirY = Math.sin(totalPitch);
-    const lookDirZ = cosP * Math.cos(totalYaw);
-
+    // Aim ahead of the astronaut, with the gimbal pitch steering the view.
+    const cosP = Math.cos(lookPitch);
     this.currentLook.set(
-      this.currentPos.x + lookDirX * 50.0,
-      this.currentPos.y + lookDirY * 50.0,
-      this.currentPos.z + lookDirZ * 50.0
+      walker.position.x + Math.sin(totalYaw) * cosP * 9.0,
+      walker.position.y + 1.45 + Math.sin(lookPitch) * 9.0,
+      walker.position.z + Math.cos(totalYaw) * cosP * 9.0
     );
 
-    this.camera.up.set(Math.sin(bobRoll) * rightX, Math.cos(bobRoll), Math.sin(bobRoll) * rightZ);
+    this.camera.up.set(0, 1, 0);
     this.camera.position.copy(this.currentPos);
     this.camera.lookAt(this.currentLook);
   }
