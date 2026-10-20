@@ -28,6 +28,28 @@ export const BOOSTER_STATES = {
 const EARTH_G0 = 9.80665; // Standard Earth gravity for accelerometer G-Force readout (m/s²)
 const MARS_RADIUS = 3389500.0; // Mean Mars radius (m)
 
+// -------------------------------------------------------------
+// VEHICLE MASS & PROPULSION CONSTANTS
+// Acceleration is derived from F = thrust / instantaneous mass, so the
+// stack feels progressively lighter as propellant is consumed (Tsiolkovsky).
+// -------------------------------------------------------------
+const BOOSTER_DRY_MASS = 275000;            // kg
+const BOOSTER_PROP_MASS = 3400000;          // kg
+const BOOSTER_ENGINE_THRUST = 2.30e6;       // N per Raptor at Mars ambient
+const BOOSTER_ISP = 327;                    // s
+const BOOSTER_BROAD_REF_AREA = 9.0 * 72.0;  // m² (side-on)
+const BOOSTER_AXIAL_REF_AREA = Math.PI * 4.5 * 4.5;
+const BOOSTER_DRAG_AREA = 78.0;             // m² grid-fin / engine-section drag reference
+
+const SHIP_DRY_MASS = 120000;               // kg
+const SHIP_PROP_MASS = 1200000;             // kg
+const SHIP_ENGINE_THRUST = 2.45e6;          // N per Raptor in vacuum
+const SHIP_ISP = 378;                       // s
+const SHIP_BROAD_REF_AREA = 9.0 * 50.0 + 85.0;
+const SHIP_AXIAL_REF_AREA = Math.PI * 4.5 * 4.5;
+const SHIP_PLANFORM_AREA = 240.0;           // m² lifting-body reference
+const SHIP_NOSE_RADIUS = 1.2;               // m (Sutton-Graves stagnation radius)
+
 export class StarshipMissionPhysics {
   constructor(vehicleModel, startCoords = new THREE.Vector2(1400, 1150)) {
     this.vehicle = vehicleModel;
@@ -101,6 +123,30 @@ export class StarshipMissionPhysics {
     this.surfaceDensity = 0.020; // Surface atmospheric density (kg/m³)
     this.scaleHeight = 11100.0;  // Atmospheric scale height (m)
 
+    // Physical mass properties (kg) and derived engine state
+    this.boosterMass = BOOSTER_DRY_MASS + BOOSTER_PROP_MASS;
+    this.shipMass = SHIP_DRY_MASS + SHIP_PROP_MASS;
+    this.boosterEngineCount = 0;
+    this.shipEngineCount = 0;
+    this.heatFlux = 0;          // W/m² (Sutton-Graves convective flux)
+    this.tpsTempC = 220;        // Equilibrium TPS surface temperature
+
+    // Scratch objects: the physics runs up to 8 substeps per frame, so the
+    // hot path is allocation-free to avoid GC hitches at high time warp.
+    this._euler = new THREE.Euler(0, 0, 0, 'YXZ');
+    this._bodyNose = new THREE.Vector3();
+    this._bodyBelly = new THREE.Vector3();
+    this._thrustAccel = new THREE.Vector3();
+    this._aeroAccel = new THREE.Vector3();
+    this._velHat = new THREE.Vector3();
+    this._liftDir = new THREE.Vector3();
+    this._gravityVec = new THREE.Vector3();
+    this._shipOffset = new THREE.Vector3();
+    this._toPadDir = new THREE.Vector3();
+    this._thrustCmd = new THREE.Vector3();
+    this._tmpQ = new THREE.Quaternion();
+    this._upAxis = new THREE.Vector3(0, 1, 0);
+
     this.resetToPad();
   }
 
@@ -145,6 +191,12 @@ export class StarshipMissionPhysics {
     this.countdownTimer = 3.0;
     this.boosterFuel = 100.0;
     this.starshipFuel = 100.0;
+    this.boosterMass = BOOSTER_DRY_MASS + BOOSTER_PROP_MASS;
+    this.shipMass = SHIP_DRY_MASS + SHIP_PROP_MASS;
+    this.boosterEngineCount = 0;
+    this.shipEngineCount = 0;
+    this.heatFlux = 0;
+    this.tpsTempC = 220;
     this.boosterFlameout = false;
     this.starshipFlameout = false;
     this.boosterAltitude = 0.0;
@@ -154,7 +206,7 @@ export class StarshipMissionPhysics {
 
     this.vehicle.setMated(true);
     this.vehicle.boosterGroup.visible = true;
-    this.vehicle.setChopsticks(0.0, 75.0);
+    this.vehicle.setChopsticks(0.0, 85.0);
     this.vehicle.setCargoDoors(0.0);
     this.vehicle.setLandingLegs(0.0);
     this.vehicle.setBoosterThrottle(0);
@@ -175,6 +227,42 @@ export class StarshipMissionPhysics {
     this.vehicle.boosterGroup.quaternion.identity();
     this.vehicle.starshipGroup.position.set(this.position.x, this.position.y + 75.0, this.position.z);
     this.vehicle.starshipGroup.quaternion.identity();
+  }
+
+  // -------------------------------------------------------------
+  // MASS / ENGINE HELPERS
+  // -------------------------------------------------------------
+  getBoosterMass() {
+    return BOOSTER_DRY_MASS + BOOSTER_PROP_MASS * (Math.max(0, this.boosterFuel) / 100);
+  }
+
+  getShipMass() {
+    return SHIP_DRY_MASS + SHIP_PROP_MASS * (Math.max(0, this.starshipFuel) / 100);
+  }
+
+  getBoosterAvailAccel(engineCount = 13) {
+    return (engineCount * BOOSTER_ENGINE_THRUST) / Math.max(1, this.getBoosterMass());
+  }
+
+  getShipAvailAccel(engineCount = 6) {
+    return (engineCount * SHIP_ENGINE_THRUST) / Math.max(1, this.getShipMass());
+  }
+
+  // Burn propellant from the physical mass flow rate: mdot = F / (Isp * g0).
+  // Returns the thrust actually produced this step (N).
+  burnPropellant(isBooster, engineCount, throttle, dt) {
+    if (engineCount <= 0 || throttle <= 0.0001) return 0;
+    const thrust = engineCount * (isBooster ? BOOSTER_ENGINE_THRUST : SHIP_ENGINE_THRUST) * throttle;
+    const isp = isBooster ? BOOSTER_ISP : SHIP_ISP;
+    const mdot = thrust / (isp * EARTH_G0);
+    const propMass = isBooster ? BOOSTER_PROP_MASS : SHIP_PROP_MASS;
+    const burnPct = (mdot / propMass) * 100.0 * dt;
+    if (isBooster) {
+      this.boosterFuel = Math.max(0, this.boosterFuel - burnPct);
+    } else {
+      this.starshipFuel = Math.max(0, this.starshipFuel - burnPct);
+    }
+    return thrust;
   }
 
   toggleAutoMission() {
@@ -420,24 +508,31 @@ export class StarshipMissionPhysics {
     } else {
       this.missionTime += dt;
 
-      // Compute current vehicle orientation quaternion & body axes
-      const euler = new THREE.Euler(this.pitch, this.yaw, this.roll, 'YXZ');
-      this.quaternion.setFromEuler(euler);
+      // Compute current vehicle orientation quaternion & body axes (zero allocations)
+      this._euler.set(this.pitch, this.yaw, this.roll, 'YXZ');
+      this.quaternion.setFromEuler(this._euler);
       // Vehicle nose axis (+Y in local coordinates) and windward heatshield belly normal (+Z in local coordinates)
-      const bodyNose = new THREE.Vector3(0, 1, 0).applyQuaternion(this.quaternion).normalize();
-      const bodyBelly = new THREE.Vector3(0, 0, 1).applyQuaternion(this.quaternion).normalize();
+      this._bodyNose.set(0, 1, 0).applyQuaternion(this.quaternion).normalize();
+      this._bodyBelly.set(0, 0, 1).applyQuaternion(this.quaternion).normalize();
+      const bodyNose = this._bodyNose;
+      const bodyBelly = this._bodyBelly;
 
-      // A. PROPULSION THRUST & PROPELLANT MASS DEPLETION (Tsiolkovsky mass ratio effect)
+      // A. PROPULSION: F = N_engines * F_raptor * throttle, a = F / m(t).
+      //    mdot = F / (Isp * g0) drives the mass ratio, so acceleration climbs
+      //    as propellant is consumed exactly as Tsiolkovsky predicts.
       let thrustAccelMag = 0.0;
       if (this.vehicle.isMated) {
-        if (this.throttle > 0.005 && this.boosterFuel > 0) {
-          this.boosterFuel = Math.max(0.0, this.boosterFuel - this.throttle * 0.78 * dt);
-          // Full stack liftoff TWR ~ 1.5 Earth G (14.8 m/s²), rising to ~38 m/s² as Stage 1 propellant burns off
-          const massRatioBoost = 1.0 + ((100.0 - this.boosterFuel) / 100.0) * 1.55;
-          thrustAccelMag = 14.8 * massRatioBoost * this.throttle;
-          this.boosterRaptorMode = this.throttle > 0.5 ? 'ALL_33' : 'BOOSTBACK_13';
+        const engineCount = this.throttle > 0.55 ? 33 : 13;
+        this.shipEngineCount = 0;
+        this.boosterEngineCount = 0;
+        if (this.throttle > 0.005 && this.boosterFuel > 0.001) {
+          const thrust = this.burnPropellant(true, engineCount, this.throttle, dt);
+          const stackMass = this.getBoosterMass() + this.getShipMass();
+          thrustAccelMag = thrust / Math.max(1.0, stackMass);
+          this.boosterEngineCount = engineCount;
+          this.boosterRaptorMode = engineCount > 13 ? 'ALL_33' : 'BOOSTBACK_13';
         } else {
-          if (this.boosterFuel <= 0) this.boosterFlameout = true;
+          if (this.boosterFuel <= 0.001) this.boosterFlameout = true;
           this.throttle = 0.0;
           this.boosterRaptorMode = 'OFF';
         }
@@ -445,80 +540,99 @@ export class StarshipMissionPhysics {
         this.vehicle.setBoosterThrottle(this.throttle);
         this.vehicle.setStarshipThrottle(this.phase === FLIGHT_PHASES.HOT_STAGING ? 1.0 : 0.0, this.altitude > 25000);
       } else {
-        if (this.throttle > 0.005 && this.starshipFuel > 0) {
-          this.starshipFuel = Math.max(0.0, this.starshipFuel - this.throttle * 0.40 * dt);
-          // Starship 6 Raptors: 16.5 m/s² full -> 36.0 m/s² near empty
-          const massRatioShip = 1.0 + ((100.0 - this.starshipFuel) / 100.0) * 1.20;
-          thrustAccelMag = 16.5 * massRatioShip * this.throttle;
-          this.shipRaptorMode = (this.phase === FLIGHT_PHASES.LANDING_FLIP || this.phase === FLIGHT_PHASES.TOUCHDOWN || this.throttle < 0.55)
-            ? 'LANDING_3'
-            : 'ALL_6';
+        // 6 Raptors for ascent and the landing burn; the centre three are used
+        // only when the vehicle is light enough for a low-thrust final approach.
+        const landingBurn = this.phase === FLIGHT_PHASES.LANDING_FLIP || this.phase === FLIGHT_PHASES.TOUCHDOWN;
+        const engineCount = landingBurn ? 6 : (this.throttle < 0.55 ? 3 : 6);
+        this.boosterEngineCount = 0;
+        this.shipEngineCount = 0;
+        if (this.throttle > 0.005 && this.starshipFuel > 0.001) {
+          const thrust = this.burnPropellant(false, engineCount, this.throttle, dt);
+          thrustAccelMag = thrust / Math.max(1.0, this.getShipMass());
+          this.shipEngineCount = engineCount;
+          this.shipRaptorMode = engineCount > 3 ? 'ALL_6' : 'LANDING_3';
         } else {
-          if (this.starshipFuel <= 0) this.starshipFlameout = true;
+          if (this.starshipFuel <= 0.001) this.starshipFlameout = true;
           this.throttle = 0.0;
           this.shipRaptorMode = 'OFF';
         }
         this.vehicle.setStarshipThrottle(this.throttle, this.altitude > 26000);
       }
 
-      const thrustAccel = bodyNose.clone().multiplyScalar(thrustAccelMag);
+      const thrustAccel = this._thrustAccel.copy(bodyNose).multiplyScalar(thrustAccelMag);
 
-      // Add TVC lateral steering vector when descending in assisted landing/catch modes
+      // Add TVC lateral steering vector when descending in assisted landing/catch modes.
+      // Uses impact-point guidance: dtGo is the time to the catch plane, so the
+      // ship brakes before the tower instead of overshooting at high speed.
       if (this.autoMission && (this.phase === FLIGHT_PHASES.LANDING_FLIP || this.phase === FLIGHT_PHASES.TOUCHDOWN) && this.throttle > 0.05) {
         const dxPad = this.padCoords.x - this.position.x;
         const dzPad = this.padCoords.y - this.position.z;
-        const latAx = THREE.MathUtils.clamp(dxPad * 1.6 - this.velocity.x * 2.4, -9.5, 9.5);
-        const latAz = THREE.MathUtils.clamp(dzPad * 1.6 - this.velocity.z * 2.4, -9.5, 9.5);
+        const catchY = this.padElevation + 52.0;
+        const dtGo = Math.max(2.0, (this.position.y - catchY) / Math.max(8.0, -this.velocity.y));
+        const latDen = Math.max(4.0, dtGo * dtGo);
+        const latAx = THREE.MathUtils.clamp((2.0 * (dxPad - this.velocity.x * dtGo)) / latDen, -9.5, 9.5);
+        const latAz = THREE.MathUtils.clamp((2.0 * (dzPad - this.velocity.z * dtGo)) / latDen, -9.5, 9.5);
         thrustAccel.x = latAx;
         thrustAccel.z = latAz;
       }
 
-      // B. AERODYNAMIC DRAG & LIFTING-BODY FORCES (Angle-of-Attack alpha dependent)
-      const aeroAccel = new THREE.Vector3(0, 0, 0);
+      // B. AERODYNAMICS: quadratic drag on the instantaneous reference area,
+      //    plus the lifting-body crossforce that makes the belly-flop work.
+      const aeroAccel = this._aeroAccel.set(0, 0, 0);
       let angleOfAttack = 0.0;
+      const activeMass = this.vehicle.isMated
+        ? this.getBoosterMass() + this.getShipMass()
+        : this.getShipMass();
       if (this.speed > 0.5 && marsDensity > 1e-8) {
-        const velHat = this.velocity.clone().divideScalar(this.speed);
+        const velHat = this._velHat.copy(this.velocity).divideScalar(this.speed);
         const cosAlpha = THREE.MathUtils.clamp(bodyNose.dot(velHat), -1.0, 1.0);
         angleOfAttack = Math.acos(cosAlpha); // 0 = nose into wind, PI/2 = broadside belly-flop
         const sinAlpha = Math.sin(angleOfAttack);
+        const sin2 = sinAlpha * sinAlpha;
+        const cos2 = cosAlpha * cosAlpha;
 
-        // Axial Cd (streamlined nosecone = 0.22) vs Cross-flow belly-flop Cd (cylinder + flaps = 1.65)
-        const cdAxial = 0.22;
-        const cdCross = 1.65;
-        const effectiveCd = cdAxial * Math.cos(angleOfAttack) * Math.cos(angleOfAttack) + cdCross * sinAlpha * sinAlpha;
+        // Reference area grows from the nose-on disc to the full broadside silhouette.
+        const refArea = this.vehicle.isMated
+          ? BOOSTER_AXIAL_REF_AREA + (BOOSTER_BROAD_REF_AREA - BOOSTER_AXIAL_REF_AREA) * sin2
+          : SHIP_AXIAL_REF_AREA + (SHIP_BROAD_REF_AREA - SHIP_AXIAL_REF_AREA) * sin2;
+        const cd = 0.22 * cos2 + 1.75 * sin2;
+        const dragAccel = (this.dynamicPressure * cd * refArea) / activeMass;
+        aeroAccel.addScaledVector(velHat, -dragAccel);
 
-        // Effective reference area A(alpha) / mass m:
-        // Nose-first area = pi * 4.5^2 = 63.6 m²; Belly-flop broadside area = 9m * 50m + flaps = 520 m²
-        const ballisticCoeffInv = (0.00018 + 0.0038 * sinAlpha * sinAlpha);
-        const dragMag = this.dynamicPressure * effectiveCd * ballisticCoeffInv;
-        aeroAccel.addScaledVector(velHat, -dragMag);
-
-        // Lifting-body crossforce during hypersonic entry & skydiving belly-flop
+        // Lifting-body crossforce during hypersonic entry & skydiving belly-flop.
+        // Cl = 0.55*sin(2a) peaks at 45° AoA, exactly where Starship flies its entry.
         const liftCoeff = 0.55 * Math.sin(2.0 * angleOfAttack);
-        const liftDir = bodyBelly.clone().addScaledVector(velHat, -bodyBelly.dot(velHat));
+        const liftDir = this._liftDir.copy(bodyBelly).addScaledVector(velHat, -bodyBelly.dot(velHat));
         if (liftDir.lengthSq() > 1e-4) {
           liftDir.normalize();
-          const liftMag = this.dynamicPressure * liftCoeff * (0.0008 * sinAlpha);
-          aeroAccel.addScaledVector(liftDir, liftMag);
+          const liftAccel = (this.dynamicPressure * Math.abs(liftCoeff) * SHIP_PLANFORM_AREA) / activeMass;
+          aeroAccel.addScaledVector(liftDir, liftCoeff >= 0 ? liftAccel : -liftAccel);
         }
 
-        // Auto-guidance aerodynamic bank/trim steering back toward Starbase landing corridor
+        // Auto-guidance aerodynamic bank/trim steering: null the predicted
+        // impact point (not just the instantaneous velocity), so the ship
+        // arrives over Starbase with its horizontal velocity shrinking to zero.
         if (this.autoMission && (this.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY || this.phase === FLIGHT_PHASES.BELLYFLOP)) {
           const dxPad = this.padCoords.x - this.position.x;
           const dzPad = this.padCoords.y - this.position.z;
-          const timeToTarget = Math.max(3.5, Math.abs(this.altitude - 1100.0) / Math.max(40.0, Math.abs(this.velocity.y)));
-          const desiredVx = THREE.MathUtils.clamp(dxPad / timeToTarget, -1200.0, 1200.0);
-          const desiredVz = THREE.MathUtils.clamp(dzPad / timeToTarget, -1200.0, 1200.0);
-          const aeroSteerGain = THREE.MathUtils.clamp(marsDensity / 0.0025, 0.25, 2.4);
-          aeroAccel.x += THREE.MathUtils.clamp((desiredVx - this.velocity.x) * 1.1 * aeroSteerGain, -28.0, 28.0);
-          aeroAccel.z += THREE.MathUtils.clamp((desiredVz - this.velocity.z) * 1.1 * aeroSteerGain, -28.0, 28.0);
+          const tGo = Math.max(5.0, (this.altitude - 1200.0) / Math.max(40.0, -this.velocity.y));
+          const missX = dxPad - this.velocity.x * tGo;
+          const missZ = dzPad - this.velocity.z * tGo;
+          const aeroSteerMax = THREE.MathUtils.clamp(
+            (this.dynamicPressure * 1.8 * SHIP_PLANFORM_AREA) / activeMass,
+            1.8, 26.0
+          );
+          const gain = 2.0 / (tGo * tGo);
+          aeroAccel.x += THREE.MathUtils.clamp(missX * gain, -aeroSteerMax, aeroSteerMax);
+          aeroAccel.z += THREE.MathUtils.clamp(missZ * gain, -aeroSteerMax, aeroSteerMax);
         }
       }
+      this.angleOfAttack = angleOfAttack;
 
       // C. GRAVITATIONAL & SPHERICAL ORBITAL CENTRIFUGAL ACCELERATION (v_horiz^2 / r)
       // At Mars orbital velocity (~3,400 m/s horizontal), centrifugal lift v_horiz^2 / r balances localGravity!
       const centrifugalUp = (this.horizontalSpeed * this.horizontalSpeed) / rFromCenter;
-      const effectiveGravityVec = new THREE.Vector3(0, centrifugalUp - localGravity, 0);
+      const effectiveGravityVec = this._gravityVec.set(0, centrifugalUp - localGravity, 0);
 
       // D. SUM NON-GRAVITATIONAL (PROPER) & TOTAL KINEMATIC ACCELERATIONS
       this.properAcceleration.copy(thrustAccel).add(aeroAccel);
@@ -549,19 +663,29 @@ export class StarshipMissionPhysics {
         }
       }
 
-      // E. STRICT PHYSICS-BASED CONVECTIVE PLASMA HEATING (Sutton-Graves q_conv ~ sqrt(rho) * v^3)
-      // Only heats when in atmosphere (altitude < 55 km) at high Mach speeds (> 650 m/s)
-      if (!this.vehicle.isMated && this.altitude < 55000 && this.altitude > 10500 && this.speed > 520.0 && this.velocity.y < 50.0) {
-        // Sutton-Graves convective heating flux normalized to peak entry conditions
-        const rhoRatio = Math.sqrt(THREE.MathUtils.clamp(marsDensity / 0.0032, 0.0, 2.5));
-        const velCubed = Math.pow(THREE.MathUtils.clamp((this.speed - 520.0) / 1450.0, 0.0, 1.35), 2.2);
-        // Bell envelope across entry corridor (48 km -> 12.5 km) so plasma builds and fades sequentially
-        const altNorm = THREE.MathUtils.clamp((48000.0 - this.altitude) / (48000.0 - 12500.0), 0.0, 1.0);
-        const corridorBell = Math.sin(altNorm * Math.PI);
-        const targetHeat = THREE.MathUtils.clamp(rhoRatio * velCubed * (0.35 + 0.75 * corridorBell), 0.0, 1.0);
-        this.heat = THREE.MathUtils.lerp(this.heat, targetHeat, dt * 4.0);
+      // E. CONVECTIVE PLASMA HEATING: Sutton-Graves stagnation-point flux
+      //    q_conv = k * sqrt(rho / R_nose) * v^3  [W/m²]
+      //    The TPS surface temperature is the radiative-equilibrium solution
+      //    T = (q / (eps * sigma))^(1/4), so the glow is driven by real flux.
+      const inEntryCorridor = !this.vehicle.isMated && this.altitude < 62000 &&
+        this.altitude > 9000 && this.speed > 320.0 && this.velocity.y < 25.0;
+      if (inEntryCorridor && marsDensity > 1e-9) {
+        const v3 = this.speed * this.speed * this.speed;
+        this.heatFlux = 1.83e-4 * Math.sqrt(marsDensity / SHIP_NOSE_RADIUS) * v3;
+        const targetHeat = THREE.MathUtils.clamp(Math.pow(this.heatFlux / 145000.0, 0.62), 0.0, 1.0);
+        // Thermal inertia: the TPS heats and cools over seconds, not instantly.
+        const heatTau = targetHeat > this.heat ? 2.6 : 5.5;
+        this.heat += (targetHeat - this.heat) * (1.0 - Math.exp(-dt / heatTau));
       } else {
-        this.heat = Math.max(0.0, this.heat - dt * 3.2);
+        this.heatFlux = Math.max(0.0, this.heatFlux - dt * 45000.0);
+        this.heat += (0.0 - this.heat) * (1.0 - Math.exp(-dt / 4.5));
+      }
+      this.heat = THREE.MathUtils.clamp(this.heat, 0.0, 1.0);
+      if (this.heatFlux > 1500.0) {
+        const tEquilibrium = Math.pow(this.heatFlux / (0.85 * 5.670374419e-8), 0.25) - 273.15;
+        this.tpsTempC = THREE.MathUtils.clamp(tEquilibrium, 220.0, 1750.0);
+      } else {
+        this.tpsTempC = THREE.MathUtils.lerp(220.0, this.tpsTempC, Math.exp(-dt * 0.35));
       }
       this.vehicle.setReentryHeat(this.heat);
     }
@@ -602,22 +726,27 @@ export class StarshipMissionPhysics {
     this.qKPa = (this.dynamicPressure / 1000.0).toFixed(1);
     this.isMaxQ = this.dynamicPressure > 9500 && this.altitude > 5000 && this.altitude < 18000;
     const activeFuel = this.vehicle.isMated ? this.boosterFuel : this.starshipFuel;
-    this.deltaV = Math.round((activeFuel / 100.0) * (this.vehicle.isMated ? 2450 : 3820));
+    // Tsiolkovsky remaining delta-v from the instantaneous mass ratio.
+    const isp = this.vehicle.isMated ? BOOSTER_ISP : SHIP_ISP;
+    const dryMass = this.vehicle.isMated ? BOOSTER_DRY_MASS : SHIP_DRY_MASS;
+    const propMass = this.vehicle.isMated ? BOOSTER_PROP_MASS : SHIP_PROP_MASS;
+    const currentMass = dryMass + propMass * (Math.max(0.0, activeFuel) / 100.0);
+    this.deltaV = Math.round(isp * EARTH_G0 * Math.log(Math.max(1.0, currentMass) / dryMass));
     this.chamberPressure = Math.round(this.throttle * 350);
     this.pitchDeg = Math.round(this.pitch * (180 / Math.PI));
     this.yawDeg = Math.round(((this.yaw * (180 / Math.PI)) % 360 + 360) % 360);
     this.rollDeg = Math.round(this.roll * (180 / Math.PI));
 
-    // Apply 3D transforms to vehicle meshes
-    const finalEuler = new THREE.Euler(this.pitch, this.yaw, this.roll, 'YXZ');
-    this.quaternion.setFromEuler(finalEuler);
+    // Apply 3D transforms to vehicle meshes (scratch objects, no per-frame allocation)
+    this._euler.set(this.pitch, this.yaw, this.roll, 'YXZ');
+    this.quaternion.setFromEuler(this._euler);
 
     if (this.vehicle.isMated) {
       this.vehicle.boosterGroup.position.copy(this.position);
       this.vehicle.boosterGroup.quaternion.copy(this.quaternion);
 
-      const shipOffset = new THREE.Vector3(0, 75.0, 0).applyQuaternion(this.quaternion);
-      this.vehicle.starshipGroup.position.copy(this.position).add(shipOffset);
+      this._shipOffset.set(0, 75.0, 0).applyQuaternion(this.quaternion);
+      this.vehicle.starshipGroup.position.copy(this.position).add(this._shipOffset);
       this.vehicle.starshipGroup.quaternion.copy(this.quaternion);
     } else {
       this.vehicle.starshipGroup.position.copy(this.position);
@@ -677,7 +806,7 @@ export class StarshipMissionPhysics {
         const isSuborbital = this.trajectoryMode === 'SUBORBITAL';
         const targetAscentPitch = isSuborbital
           ? THREE.MathUtils.clamp(0.55 + (this.altitude / 60000.0) * 0.55, 0.55, 1.05)
-          : THREE.MathUtils.clamp(0.65 + ((this.altitude - 20000.0) / 55000.0) * 0.88, 0.65, 1.48);
+          : THREE.MathUtils.clamp(0.50 + ((this.altitude - 22000.0) / 62000.0) * 0.14, 0.50, 0.64);
         this.pitch = THREE.MathUtils.lerp(this.pitch, targetAscentPitch, dt * 0.75);
 
         if (isSuborbital && (this.altitude >= 48000 || this.speed >= 1650)) {
@@ -706,18 +835,63 @@ export class StarshipMissionPhysics {
       }
 
       case FLIGHT_PHASES.DEORBIT: {
-        // Point engines retrograde/upward to brake orbital speed and drop perigee into entry interface (<48 km)
-        const toPad = new THREE.Vector2(this.padCoords.x - this.position.x, this.padCoords.y - this.position.z);
-        const padAzimuth = Math.atan2(toPad.x, toPad.y);
-        this.yaw = THREE.MathUtils.lerp(this.yaw, padAzimuth, dt * 1.8);
+        // Guided return-to-launch-site burn. The upper stage is on a suborbital
+        // hop, so "deorbit" means removing the downrange velocity and dropping
+        // the impact point back onto Starbase before entry interface.
+        const deorbitAlt = Math.max(0.0, this.position.y - this.padElevation);
+        const vyNow = this.velocity.y;
+        const gNow = localGravity;
+        const apexRise = vyNow > 0 ? (vyNow * vyNow) / (2 * gNow) : 0;
+        // Aim the ballistic arc at the *entry-interface* point, not the ground:
+        // the entry aero and landing burn handle the last 30 km.
+        const tFall = (vyNow > 0 ? vyNow / gNow : 0) +
+          Math.sqrt((2 * Math.max(1000.0, deorbitAlt - 30000.0 + apexRise)) / gNow);
 
-        // Pitch > PI/2 (+135 deg) points nose downward/retrograde so thrust accelerates downward & brakes horizontal speed
-        this.pitch = THREE.MathUtils.lerp(this.pitch, 2.25, dt * 2.2);
-        this.throttle = 0.92;
+        const dxPad = this.padCoords.x - this.position.x;
+        const dzPad = this.padCoords.y - this.position.z;
+        const horizDist = Math.hypot(dxPad, dzPad);
+        const desiredHorizontal = THREE.MathUtils.clamp(horizDist / Math.max(20.0, tFall), 0.0, 420.0);
+        const toPadX = horizDist > 0.001 ? dxPad / horizDist : 0;
+        const toPadZ = horizDist > 0.001 ? dzPad / horizDist : 0;
+        const desiredVx = toPadX * desiredHorizontal;
+        const desiredVz = toPadZ * desiredHorizontal;
+        const desiredVy = -35.0;
 
-        if (this.altitude <= 47500 && this.velocity.y < -180.0) {
+        const deorbitAvail = Math.max(0.5, this.getShipAvailAccel(6));
+        const tau = 2.4;
+        let ax = (desiredVx - this.velocity.x) / tau;
+        let az = (desiredVz - this.velocity.z) / tau;
+        let ay = (desiredVy - this.velocity.y) / tau + gNow;
+        const aMag = Math.hypot(ax, ay, az);
+        const aMax = deorbitAvail * 0.92;
+        if (aMag > aMax) {
+          const s = aMax / aMag;
+          ax *= s;
+          ay *= s;
+          az *= s;
+        }
+
+        // Aim the vehicle along the commanded thrust vector.
+        if (aMag > 0.5) {
+          const invA = 1.0 / Math.hypot(ax, ay, az);
+          const dirX = ax * invA;
+          const dirY = ay * invA;
+          const dirZ = az * invA;
+          const targetYaw = Math.atan2(dirX, dirZ);
+          const yawError = Math.atan2(Math.sin(targetYaw - this.yaw), Math.cos(targetYaw - this.yaw));
+          this.yaw += yawError * Math.min(1.0, dt * 3.0);
+          const targetPitch = Math.PI * 0.5 - Math.asin(THREE.MathUtils.clamp(dirY, -1.0, 1.0));
+          this.pitch += (targetPitch - this.pitch) * Math.min(1.0, dt * 3.0);
+          this.throttle = THREE.MathUtils.clamp(Math.hypot(ax, ay, az) / deorbitAvail, 0.20, 1.0);
+        } else {
+          this.throttle = 0.0;
+        }
+
+        const horizError = Math.hypot(desiredVx - this.velocity.x, desiredVz - this.velocity.z);
+        const converged = horizError < 5.0 && this.velocity.y <= 0.0;
+        if (converged || this.altitude <= 60000.0) {
           this.phase = FLIGHT_PHASES.HYPERSONIC_ENTRY;
-          this.entryStartAlt = Math.max(36000, this.altitude);
+          this.entryStartAlt = Math.max(60000, this.altitude);
           this.throttle = 0.0;
         }
         break;
@@ -725,12 +899,15 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.HYPERSONIC_ENTRY: {
         this.throttle = 0.0;
-        // High angle-of-attack (+68 deg = 1.18 rad): places +Z black ceramic heatshield belly directly into the hypersonic shockwave
-        this.pitch = THREE.MathUtils.lerp(this.pitch, 1.18, dt * 2.4);
+        // Fly a physical 65° angle of attack: pitch the nose above the current
+        // flight-path angle so the +Z heatshield takes the shockwave.
+        const flightPath = Math.atan2(this.velocity.y, Math.max(20.0, this.horizontalSpeed));
+        const entryPitch = THREE.MathUtils.clamp(Math.PI * 0.5 - (flightPath + 1.13), 0.15, 1.50);
+        this.pitch = THREE.MathUtils.lerp(this.pitch, entryPitch, Math.min(1.0, dt * 2.4));
         this.roll = THREE.MathUtils.lerp(this.roll, 0.0, dt * 2.5);
         this.vehicle.setFlapDeflection(Math.sin(this.missionTime * 1.6) * 0.22, Math.cos(this.missionTime * 1.3) * 0.14);
 
-        if (this.altitude <= 12500) {
+        if (this.altitude <= 30000.0) {
           this.phase = FLIGHT_PHASES.BELLYFLOP;
         }
         break;
@@ -738,8 +915,10 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.BELLYFLOP: {
         this.throttle = 0.0;
-        // Horizontal skydiving attitude (+90 deg): black heatshield belly faces down into airflow
-        this.pitch = THREE.MathUtils.lerp(this.pitch, Math.PI * 0.5, dt * 2.5);
+        // Skydiving attitude: broadside to the relative wind, still lifting.
+        const flightPath = Math.atan2(this.velocity.y, Math.max(20.0, this.horizontalSpeed));
+        const bellyPitch = THREE.MathUtils.clamp(Math.PI * 0.5 - (flightPath + 1.13), 0.30, 1.48);
+        this.pitch = THREE.MathUtils.lerp(this.pitch, bellyPitch, Math.min(1.0, dt * 2.5));
         this.roll = THREE.MathUtils.lerp(this.roll, 0.0, dt * 2.5);
         this.vehicle.setChopsticks(0.0, 83.8);
 
@@ -750,7 +929,13 @@ export class StarshipMissionPhysics {
           Math.cos(this.missionTime * 2.4) * 0.14 + THREE.MathUtils.clamp(dzPad * 0.002, -0.25, 0.25)
         );
 
-        if (this.altitude <= 1350) {
+        // Flip when the 6-Raptor landing burn can still arrest the descent.
+        // Stop distance uses thrust minus gravity plus current drag decel.
+        const avail = this.getShipAvailAccel(6);
+        const dragDecel = (this.dynamicPressure * 1.47 * 440.0) / Math.max(1.0, this.getShipMass());
+        const decel = Math.max(2.0, avail * 0.70 - localGravity + dragDecel);
+        const stopAltitude = (this.speed * this.speed) / (2.0 * decel) + this.speed * 1.2;
+        if (this.altitude <= Math.max(1800.0, stopAltitude)) {
           this.phase = FLIGHT_PHASES.LANDING_FLIP;
           this.pitchVel = -2.2;
           this.throttle = 1.0;
@@ -772,11 +957,17 @@ export class StarshipMissionPhysics {
         const flipProgress = THREE.MathUtils.clamp(1.0 - this.pitch / (Math.PI * 0.5), 0.0, 1.0);
         this.vehicle.setFlapDeflection(-0.55 * (1.0 - flipProgress), 0.0);
 
-        // Physics kinematic suicide-burn guidance law: v_target = -sqrt(2 * a_design * h)
-        const desiredVy = -Math.sqrt(2.0 * 7.2 * heightAboveCatch) - 1.2;
+        // Physics kinematic suicide-burn guidance law: v_target = -sqrt(2 * a_eff * h).
+        // a_eff is the thrust actually available minus gravity, so the profile
+        // stays flyable as the tanks drain and acceleration climbs.
+        const engineCount = 6;
+        const shipAvailAccel = this.getShipAvailAccel(engineCount);
+        const usableDecel = Math.max(2.2, shipAvailAccel * 0.70 - localGravity);
+        const desiredVy = -Math.sqrt(2.0 * usableDecel * heightAboveCatch) - 1.2;
         const vyError = desiredVy - this.velocity.y;
-        const neededAccelY = localGravity + THREE.MathUtils.clamp(vyError * 2.2, 0.0, 26.0);
-        const shipAvailAccel = 16.5 * (1.0 + ((100.0 - this.starshipFuel) / 100.0) * 1.20);
+        // Feedforward the profile decel, then close the velocity loop.
+        const profileDecel = (desiredVy * desiredVy) / (2.0 * Math.max(1.0, heightAboveCatch));
+        const neededAccelY = localGravity + profileDecel + THREE.MathUtils.clamp(vyError * 2.4, -shipAvailAccel * 0.5, 30.0);
         this.throttle = THREE.MathUtils.clamp(neededAccelY / Math.max(0.35, Math.cos(this.pitch) * shipAvailAccel), 0.20, 1.0);
 
         if (heightAboveCatch <= 90.0) {
@@ -784,7 +975,7 @@ export class StarshipMissionPhysics {
           this.vehicle.setChopsticks(preClose, 83.8);
         }
 
-        if (heightAboveCatch <= 28.0) {
+        if (heightAboveCatch <= 12.0 && this.velocity.y > -12.0) {
           this.phase = FLIGHT_PHASES.TOUCHDOWN;
         }
         break;
@@ -801,7 +992,7 @@ export class StarshipMissionPhysics {
         const targetVy = -THREE.MathUtils.clamp(0.35 + hAbovePins * 0.16, 0.35, 5.5);
         const vyErr = targetVy - this.velocity.y;
         const neededAy = localGravity + THREE.MathUtils.clamp(vyErr * 3.8, -2.5, 22.0);
-        const shipAvailAccel = 16.5 * (1.0 + ((100.0 - this.starshipFuel) / 100.0) * 1.20);
+        const shipAvailAccel = this.getShipAvailAccel(6);
         this.throttle = THREE.MathUtils.clamp(neededAy / shipAvailAccel, 0.15, 0.90);
 
         const clampProgress = THREE.MathUtils.clamp(1.0 - (hAbovePins / 28.0), 0.45, 1.0);
@@ -852,66 +1043,131 @@ export class StarshipMissionPhysics {
     if (this.boosterState === BOOSTER_STATES.ATTACHED) return;
 
     this.boosterTimer += dt;
-    const targetCatchElevation = this.padElevation + 75.0;
+    // Catch pins sit 65.5 m above the booster base, so the base must stop
+    // 19.5 m above the pad for the carriage at 85 m to take the load.
+    const targetCatchElevation = this.padElevation + 19.5;
+    const carriageHeight = 85.0;
+
+    const toPadX = this.padCoords.x - this.boosterPosition.x;
+    const toPadZ = this.padCoords.y - this.boosterPosition.z;
+    const horizDist = Math.hypot(toPadX, toPadZ);
+    const toPadDir = this._toPadDir.set(
+      horizDist > 0.001 ? toPadX / horizDist : 0,
+      0,
+      horizDist > 0.001 ? toPadZ / horizDist : 0
+    );
+    const towardPadVel = this.boosterVelocity.x * toPadDir.x + this.boosterVelocity.z * toPadDir.z;
+    const altitudeAboveCatch = Math.max(0.0, this.boosterPosition.y - targetCatchElevation);
+    const boosterAlt = Math.max(0.0, this.boosterPosition.y - this.padElevation);
+    const localG = this.marsGravity * Math.pow(MARS_RADIUS / (MARS_RADIUS + boosterAlt), 2);
+
+    // Time remaining before free-fall brings the booster back to catch height.
+    // Includes the coast up to apogee so the lateral prediction is honest.
+    const vy0 = this.boosterVelocity.y;
+    const apexRise = vy0 > 0 ? (vy0 * vy0) / (2 * localG) : 0;
+    const tFall = (vy0 > 0 ? vy0 / localG : 0) + Math.sqrt((2 * (altitudeAboveCatch + apexRise)) / localG);
 
     switch (this.boosterState) {
       case BOOSTER_STATES.BOOSTBACK: {
         this.boosterRaptorMode = 'BOOSTBACK_13';
-        this.boosterFuel = Math.max(8.0, this.boosterFuel - 1.2 * dt);
-        const toPadHoriz = new THREE.Vector2(
-          this.padCoords.x - this.boosterPosition.x,
-          this.padCoords.y - this.boosterPosition.z
+        // Keep 13 Raptors burning until the free-fall impact prediction lands
+        // on the pad; thrust is horizontal-only, exactly like a real boostback.
+        const desiredTowards = THREE.MathUtils.clamp(horizDist / Math.max(20.0, tFall * 0.92), 0.0, 300.0);
+        const boostAvail = Math.max(0.5, this.getBoosterAvailAccel(13));
+        const tau = 2.6;
+        let ax = ((toPadDir.x * desiredTowards) - this.boosterVelocity.x) / tau;
+        let az = ((toPadDir.z * desiredTowards) - this.boosterVelocity.z) / tau;
+        const aCmd = Math.hypot(ax, az);
+        const aMax = boostAvail * 0.94;
+        if (aCmd > aMax) {
+          ax *= aMax / aCmd;
+          az *= aMax / aCmd;
+        }
+
+        let throttle = 0.0;
+        if (this.boosterFuel > 0.35) {
+          const aMag = Math.hypot(ax, az);
+          throttle = THREE.MathUtils.clamp(aMag / Math.max(0.05, boostAvail), 0.0, 1.0);
+          if (throttle > 0.02) {
+            const thrust = this.burnPropellant(true, 13, throttle, dt);
+            const applied = thrust / Math.max(1.0, this.getBoosterMass());
+            if (aMag > 1e-4) {
+              ax = (ax / aMag) * applied;
+              az = (az / aMag) * applied;
+            }
+            this.boosterEngineCount = 13;
+          } else {
+            throttle = 0.0;
+            this.boosterEngineCount = 0;
+            ax = 0;
+            az = 0;
+          }
+        } else {
+          this.boosterEngineCount = 0;
+          ax = 0;
+          az = 0;
+        }
+
+        this.boosterVelocity.x += ax * dt;
+        this.boosterVelocity.z += az * dt;
+        this.boosterVelocity.y -= localG * dt;
+
+        // Point the vehicle along the thrust vector while the Raptors are lit.
+        if (throttle > 0.02) {
+          this._thrustCmd.set(ax, 0, az).normalize();
+          this._tmpQ.setFromUnitVectors(this._upAxis, this._thrustCmd);
+          this.boosterQuaternion.slerp(this._tmpQ, 1.0 - Math.exp(-dt * 2.8));
+        }
+        this.vehicle.setBoosterThrottle(throttle);
+        this.vehicle.setGridFinSteering(
+          THREE.MathUtils.clamp(toPadDir.x * 0.4, -0.35, 0.35),
+          THREE.MathUtils.clamp(toPadDir.z * 0.4, -0.35, 0.35)
         );
-        if (toPadHoriz.lengthSq() > 1.0) toPadHoriz.normalize();
 
-        const boostbackAccel = 26.0;
-        this.boosterVelocity.x += (toPadHoriz.x * 75.0 - this.boosterVelocity.x) * 1.4 * dt;
-        this.boosterVelocity.z += (toPadHoriz.y * 75.0 - this.boosterVelocity.z) * 1.4 * dt;
-        this.boosterVelocity.y -= this.marsGravity * dt;
-
-        const boostbackQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * 0.82);
-        this.boosterQuaternion.slerp(boostbackQuat, dt * 2.5);
-
-        this.vehicle.setBoosterThrottle(0.85);
-        this.vehicle.setGridFinSteering(Math.sin(this.boosterTimer * 2) * 0.3, 0.2);
-
-        if (this.boosterTimer > 5.5) {
+        // Predicted downrange miss if we stopped burning now.
+        const predictedMiss = horizDist - towardPadVel * tFall * 0.92;
+        const finished = Math.abs(predictedMiss) < 700.0 || this.boosterTimer > 90.0 || this.boosterFuel < 12.0;
+        if (finished) {
           this.boosterState = BOOSTER_STATES.DESCENT;
+          this.boosterTimer = 0.0;
           this.boosterRaptorMode = 'OFF';
+          this.boosterEngineCount = 0;
           this.vehicle.setBoosterThrottle(0.0);
-          this.vehicle.setChopsticks(0.0, 75.0);
+          this.vehicle.setChopsticks(0.0, carriageHeight);
         }
         break;
       }
 
       case BOOSTER_STATES.DESCENT: {
         this.boosterRaptorMode = 'OFF';
-        const toPadDir = new THREE.Vector2(
-          this.padCoords.x - this.boosterPosition.x,
-          this.padCoords.y - this.boosterPosition.z
+        this.boosterEngineCount = 0;
+        this.vehicle.setBoosterThrottle(0.0);
+
+        // Aerodynamic drag on the engine section and deployed grid fins.
+        const rho = this.surfaceDensity * Math.exp(-boosterAlt / this.scaleHeight);
+        const boosterMass = Math.max(1.0, this.getBoosterMass());
+        const v = this.boosterVelocity.length();
+        if (v > 0.5 && rho > 1e-9) {
+          const dragAccel = (0.5 * rho * v * v * 1.15 * BOOSTER_DRAG_AREA) / boosterMass;
+          this.boosterVelocity.addScaledVector(this.boosterVelocity, -dragAccel * (dt / v));
+        }
+        this.boosterVelocity.y -= localG * dt;
+
+        // Cold-gas RCS / grid-fin trim keeps the free-fall impact point on the pad.
+        const miss = horizDist - towardPadVel * Math.max(5.0, tFall);
+        const lateralCmd = THREE.MathUtils.clamp(miss * 0.012, -2.6, 2.6);
+        this.boosterVelocity.x += toPadDir.x * lateralCmd * dt;
+        this.boosterVelocity.z += toPadDir.z * lateralCmd * dt;
+
+        // Belly-to-wind attitude: booster descends engines-first, nose up.
+        this._tmpQ.identity();
+        this.boosterQuaternion.slerp(this._tmpQ, 1.0 - Math.exp(-dt * 1.8));
+        this.vehicle.setGridFinSteering(
+          THREE.MathUtils.clamp(toPadDir.x * 0.6, -0.7, 0.7),
+          THREE.MathUtils.clamp(toPadDir.z * 0.6, -0.7, 0.7)
         );
-        const currentHorizDist = toPadDir.length();
-        if (currentHorizDist > 0.1) toPadDir.normalize();
 
-        const uprightQuat = new THREE.Quaternion().identity();
-        this.boosterQuaternion.slerp(uprightQuat, dt * 2.8);
-
-        const finSteerYaw = THREE.MathUtils.clamp(toPadDir.x * 0.6, -0.6, 0.6);
-        const finSteerPitch = THREE.MathUtils.clamp(toPadDir.y * 0.6, -0.6, 0.6);
-        this.vehicle.setGridFinSteering(finSteerYaw, finSteerPitch);
-
-        const timeToApproach = Math.max(2.5, (this.boosterPosition.y - (this.padElevation + 1400.0)) / Math.max(40.0, -this.boosterVelocity.y));
-        const desiredBx = toPadDir.x * Math.min(120.0, currentHorizDist / timeToApproach);
-        const desiredBz = toPadDir.y * Math.min(120.0, currentHorizDist / timeToApproach);
-
-        this.boosterVelocity.x += (desiredBx - this.boosterVelocity.x) * 1.5 * dt;
-        this.boosterVelocity.z += (desiredBz - this.boosterVelocity.z) * 1.5 * dt;
-        // Gravity + grid fin aerodynamic drag terminal velocity (-92 m/s)
-        const boosterDragAy = (-92.0 - this.boosterVelocity.y) * 0.85;
-        this.boosterVelocity.y += (boosterDragAy - this.marsGravity * 0.4) * dt;
-
-        const boosterAltAbovePad = this.boosterPosition.y - this.padElevation;
-        if (boosterAltAbovePad <= 1400.0) {
+        if (altitudeAboveCatch <= 20000.0) {
           this.boosterState = BOOSTER_STATES.APPROACH;
           this.boosterTimer = 0.0;
         }
@@ -919,37 +1175,90 @@ export class StarshipMissionPhysics {
       }
 
       case BOOSTER_STATES.APPROACH: {
-        const boosterAlt = Math.max(0.0, this.boosterPosition.y - targetCatchElevation);
-        this.boosterRaptorMode = boosterAlt > 350 ? 'BOOSTBACK_13' : 'LANDING_3';
-        this.boosterFuel = Math.max(1.5, this.boosterFuel - 0.8 * dt);
+        // Mars has almost no terminal-velocity relief, so the landing burn has
+        // to start high and use the full 33-engine thrust section. Throttle is
+        // solved from the required acceleration, not scripted.
+        this.boosterRaptorMode = 'ALL_33';
+        const approachAvail = Math.max(0.5, this.getBoosterAvailAccel(33));
+        const decelCap = Math.max(1.5, approachAvail * 0.72 - localG);
 
-        const dxB = this.padCoords.x - this.boosterPosition.x;
-        const dzB = this.padCoords.y - this.boosterPosition.z;
-        this.boosterVelocity.x += (dxB * 2.4 - this.boosterVelocity.x * 3.0) * dt;
-        this.boosterVelocity.z += (dzB * 2.4 - this.boosterVelocity.z * 3.0) * dt;
+        // Suicide-burn profile v = -sqrt(2*a*h), capped near the pad so the
+        // final metres are a gentle 2.5 m/s instead of the profile's 8 m/s.
+        const profileSpeed = Math.sqrt(2.0 * decelCap * Math.max(0.0, altitudeAboveCatch));
+        const terminalSpeed = 2.5 + 0.12 * altitudeAboveCatch;
+        const targetVy = -THREE.MathUtils.clamp(
+          Math.min(profileSpeed, terminalSpeed),
+          2.5, 420.0
+        );
+        const vyError = targetVy - this.boosterVelocity.y;
+        // Feedforward the profile's instantaneous decel + gravity, then close
+        // the velocity loop. Without this the last metres arrive too hot.
+        const profileDecel = (targetVy * targetVy) / (2.0 * Math.max(0.5, altitudeAboveCatch));
+        let ay = localG + profileDecel + THREE.MathUtils.clamp(vyError * 3.2, -approachAvail * 0.92, approachAvail * 0.92);
 
-        const targetVy = -THREE.MathUtils.clamp(Math.sqrt(2.0 * 3.2 * Math.max(0.05, boosterAlt)), 0.8, 85.0);
-        this.boosterVelocity.y += (targetVy - this.boosterVelocity.y) * 4.2 * dt;
+        // Lateral TVC: null the miss and arrive over the pad.
+        const latitude = Math.max(2.0, tFall);
+        const desiredVx = toPadDir.x * THREE.MathUtils.clamp(horizDist / latitude, 0.0, 110.0);
+        const desiredVz = toPadDir.z * THREE.MathUtils.clamp(horizDist / latitude, 0.0, 110.0);
+        let ax = THREE.MathUtils.clamp((desiredVx - this.boosterVelocity.x) * 0.9, -approachAvail * 0.42, approachAvail * 0.42);
+        let az = THREE.MathUtils.clamp((desiredVz - this.boosterVelocity.z) * 0.9, -approachAvail * 0.42, approachAvail * 0.42);
 
-        const tiltX = THREE.MathUtils.clamp(-this.boosterVelocity.z * 0.004, -0.12, 0.12);
-        const tiltZ = THREE.MathUtils.clamp(this.boosterVelocity.x * 0.004, -0.12, 0.12);
-        this.boosterQuaternion.setFromEuler(new THREE.Euler(tiltX, 0, tiltZ));
-
-        this.vehicle.setBoosterThrottle(0.92);
-
-        if (boosterAlt <= 30.0) {
-          const clampProgress = THREE.MathUtils.clamp((30.0 - boosterAlt) / 30.0, 0.0, 0.98);
-          this.vehicle.setChopsticks(clampProgress, 75.0);
+        const aMag = Math.hypot(ax, ay, az);
+        const aLimit = approachAvail * 0.94;
+        if (aMag > aLimit) {
+          const s = aLimit / aMag;
+          ax *= s;
+          ay *= s;
+          az *= s;
         }
 
-        if (boosterAlt <= 0.8 || this.boosterPosition.y <= targetCatchElevation + 0.8) {
+        let throttle = THREE.MathUtils.clamp(Math.hypot(ax, ay, az) / Math.max(0.05, approachAvail), 0.0, 1.0);
+        if (this.boosterFuel <= 0.25 || throttle <= 0.01) {
+          throttle = 0.0;
+          this.boosterEngineCount = 0;
+          this.boosterRaptorMode = 'OFF';
+        } else {
+          const thrust = this.burnPropellant(true, 33, throttle, dt);
+          const applied = thrust / Math.max(1.0, this.getBoosterMass());
+          const cmdMag = Math.hypot(ax, ay, az);
+          if (cmdMag > 1e-4) {
+            ax = (ax / cmdMag) * applied;
+            ay = (ay / cmdMag) * applied;
+            az = (az / cmdMag) * applied;
+          }
+          this.boosterEngineCount = 33;
+        }
+
+        this.boosterVelocity.x += ax * dt;
+        this.boosterVelocity.y += (ay - localG) * dt;
+        this.boosterVelocity.z += az * dt;
+
+        this._thrustCmd.set(ax, ay, az);
+        if (this._thrustCmd.lengthSq() > 1e-6) {
+          this._thrustCmd.normalize();
+          this._tmpQ.setFromUnitVectors(this._upAxis, this._thrustCmd);
+          this.boosterQuaternion.slerp(this._tmpQ, 1.0 - Math.exp(-dt * 4.5));
+        }
+        this.vehicle.setBoosterThrottle(throttle);
+        this.vehicle.setGridFinSteering(
+          THREE.MathUtils.clamp(toPadDir.x * 0.25, -0.25, 0.25),
+          THREE.MathUtils.clamp(toPadDir.z * 0.25, -0.25, 0.25)
+        );
+
+        if (altitudeAboveCatch <= 42.0) {
+          const clampProgress = THREE.MathUtils.clamp(1.0 - altitudeAboveCatch / 42.0, 0.0, 1.0);
+          this.vehicle.setChopsticks(clampProgress, carriageHeight);
+        }
+
+        if (altitudeAboveCatch <= 1.2 || this.boosterPosition.y <= targetCatchElevation + 1.2) {
           this.boosterPosition.set(this.padCoords.x, targetCatchElevation, this.padCoords.y);
           this.boosterVelocity.set(0, 0, 0);
           this.boosterState = BOOSTER_STATES.CAUGHT;
           this.boosterTimer = 0.0;
           this.boosterRaptorMode = 'OFF';
+          this.boosterEngineCount = 0;
           this.vehicle.setBoosterThrottle(0.0);
-          this.vehicle.setChopsticks(1.0, 75.0);
+          this.vehicle.setChopsticks(1.0, carriageHeight);
           this.vehicle.setGridFinSteering(0, 0);
         }
         break;
@@ -957,6 +1266,7 @@ export class StarshipMissionPhysics {
 
       case BOOSTER_STATES.CAUGHT: {
         this.boosterRaptorMode = 'OFF';
+        this.boosterEngineCount = 0;
         this.boosterVelocity.set(0, 0, 0);
         this.vehicle.setBoosterThrottle(0.0);
         this.boosterQuaternion.identity();
@@ -972,7 +1282,7 @@ export class StarshipMissionPhysics {
         } else {
           this.vehicle.boosterGroup.visible = true;
           this.boosterPosition.set(this.padCoords.x, targetCatchElevation, this.padCoords.y);
-          this.vehicle.setChopsticks(1.0, 75.0);
+          this.vehicle.setChopsticks(1.0, carriageHeight);
         }
         break;
       }

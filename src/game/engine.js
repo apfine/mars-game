@@ -624,6 +624,7 @@ export class MarsGameEngine {
         }
       }
 
+      this.starship.updateLOD(this.camera.position);
       this.renderer.render(this.scene, this.camera);
       this.notifyFirstFrame();
       return;
@@ -732,6 +733,7 @@ export class MarsGameEngine {
     const sbDx = activeActorPos.x - 1400;
     const sbDz = activeActorPos.z - 1150;
     this.starship.group.visible = (sbDx * sbDx + sbDz * sbDz) <= 1200 * 1200;
+    this.starship.updateLOD(this.camera.position);
 
     this.renderer.render(this.scene, this.camera);
     this.notifyFirstFrame();

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // -------------------------------------------------------------
 // SpaceX Starship + Super Heavy Stack & Expanded Mars Starbase
@@ -11,127 +12,245 @@ import * as THREE from 'three';
 // -------------------------------------------------------------
 
 let _cachedSteelMaps = null;
-function createSteelMaps() {
-  if (_cachedSteelMaps) return _cachedSteelMaps;
-  const c = document.createElement('canvas');
-  const b = document.createElement('canvas');
-  c.width = c.height = 512;
-  b.width = b.height = 512;
-  const g = c.getContext('2d');
-  const bg = b.getContext('2d');
 
-  // Base 304L cold-rolled stainless steel reflectance
-  g.fillStyle = '#d8d7d3';
-  g.fillRect(0, 0, 512, 512);
-  bg.fillStyle = '#808080';
-  bg.fillRect(0, 0, 512, 512);
+function canvasTexture(canvas, { repeatX = 1, repeatY = 1, srgb = false, anisotropy = 8 } = {}) {
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX, repeatY);
+  tex.anisotropy = anisotropy;
+  tex.needsUpdate = true;
+  return tex;
+}
 
-  // Subtle barrel ring-by-ring reflectance variation (8 rings across 512px)
-  const ringH = 64;
-  for (let r = 0; r < 8; r++) {
-    const shade = 210 + ((r * 17) % 18) - 8;
-    g.fillStyle = `rgb(${shade}, ${shade + 1}, ${shade + 3})`;
-    g.fillRect(0, r * ringH, 512, ringH);
+// Convert a grayscale height canvas into a tangent-space normal map once at load time.
+// This is far cheaper than re-deriving surface normals from a bump map every frame.
+function heightToNormalCanvas(heightCanvas, strength = 2.4) {
+  const w = heightCanvas.width;
+  const h = heightCanvas.height;
+  const src = heightCanvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = w;
+  outCanvas.height = h;
+  const outCtx = outCanvas.getContext('2d');
+  const out = outCtx.createImageData(w, h);
+  const d = out.data;
 
-    // Staggered vertical barrel panel weld seams
-    const numPanels = 4;
-    const offset = (r % 2) * 64;
-    for (let p = 0; p < numPanels; p++) {
-      const px = (p * (512 / numPanels) + offset) % 512;
-      g.fillStyle = 'rgba(70, 74, 82, 0.55)';
-      g.fillRect(px, r * ringH, 2, ringH);
-      bg.fillStyle = '#404040';
-      bg.fillRect(px, r * ringH, 2, ringH);
+  for (let y = 0; y < h; y++) {
+    const yRow = y * w;
+    const yUp = ((y - 1 + h) % h) * w;
+    const yDn = ((y + 1) % h) * w;
+    for (let x = 0; x < w; x++) {
+      const hL = src[(yRow + ((x - 1 + w) % w)) * 4];
+      const hR = src[(yRow + ((x + 1) % w)) * 4];
+      const hU = src[(yUp + x) * 4];
+      const hD = src[(yDn + x) * 4];
+
+      let nx = (hL - hR) * (strength / 255);
+      let ny = (hD - hU) * (strength / 255);
+      let nz = 1.0;
+      const inv = 1.0 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+      nx *= inv; ny *= inv; nz *= inv;
+
+      const i = (yRow + x) * 4;
+      d[i] = (nx * 0.5 + 0.5) * 255;
+      d[i + 1] = (ny * 0.5 + 0.5) * 255;
+      d[i + 2] = (nz * 0.5 + 0.5) * 255;
+      d[i + 3] = 255;
     }
   }
 
-  // Fine anisotropic circumferential & vertical brushed grain
-  for (let i = 0; i < 1400; i++) {
-    const x = Math.random() * 512;
-    const y = Math.random() * 512;
-    const w = 1 + Math.random() * 2.5;
-    const h = 18 + Math.random() * 60;
-    g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.065)' : 'rgba(85,90,100,0.065)';
-    g.fillRect(x, y, w, h);
-    bg.fillStyle = Math.random() > 0.5 ? 'rgba(205,205,205,0.12)' : 'rgba(60,60,60,0.12)';
-    bg.fillRect(x, y, w, h);
+  outCtx.putImageData(out, 0, 0);
+  return outCanvas;
+}
+
+function createSteelMaps() {
+  if (_cachedSteelMaps) return _cachedSteelMaps;
+  const S = 512;
+  const colorCanvas = document.createElement('canvas');
+  const heightCanvas = document.createElement('canvas');
+  const ormCanvas = document.createElement('canvas');
+  colorCanvas.width = colorCanvas.height = S;
+  heightCanvas.width = heightCanvas.height = S;
+  ormCanvas.width = ormCanvas.height = S;
+
+  const g = colorCanvas.getContext('2d');
+  const hg = heightCanvas.getContext('2d');
+  const og = ormCanvas.getContext('2d');
+
+  // 304L cold-rolled stainless steel base. ORM = R:AO, G:roughness, B:metalness.
+  const base = 216;
+  g.fillStyle = `rgb(${base}, ${base + 1}, ${base + 3})`;
+  g.fillRect(0, 0, S, S);
+  hg.fillStyle = '#808080';
+  hg.fillRect(0, 0, S, S);
+  og.fillStyle = 'rgb(255, 58, 246)';
+  og.fillRect(0, 0, S, S);
+
+  // Barrel ring-by-ring reflectance variation & staggered vertical panel seams
+  const ringH = 64;
+  for (let r = 0; r < S / ringH; r++) {
+    const shade = base + ((r * 29) % 14) - 7;
+    g.fillStyle = `rgb(${shade}, ${shade + 1}, ${shade + 3})`;
+    g.fillRect(0, r * ringH, S, ringH);
+
+    // Faint horizontal mill finish banding within each ring
+    for (let band = 0; band < 3; band++) {
+      const by = r * ringH + 8 + band * 18;
+      g.fillStyle = band % 2 ? 'rgba(255,255,255,0.025)' : 'rgba(60,64,72,0.025)';
+      g.fillRect(0, by, S, 9);
+    }
+
+    const numPanels = 4;
+    const offset = (r % 2) * 64;
+    for (let p = 0; p < numPanels; p++) {
+      const px = (p * (S / numPanels) + offset) % S;
+      g.fillStyle = 'rgba(64, 68, 76, 0.55)';
+      g.fillRect(px, r * ringH, 2, ringH);
+      hg.fillStyle = '#4a4a4a';
+      hg.fillRect(px, r * ringH, 2, ringH);
+      og.fillStyle = 'rgb(255, 150, 208)';
+      og.fillRect(px, r * ringH, 2, ringH);
+    }
   }
 
-  // Circumferential ring weld seams with heat-affected zone (HAZ) gold/blue tint
-  for (let y = 0; y <= 512; y += ringH) {
+  // Fine anisotropic brushed grain (vertical polish marks)
+  for (let i = 0; i < 1700; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const w = 1 + Math.random() * 2.5;
+    const h = 20 + Math.random() * 75;
+    g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.07)' : 'rgba(85,90,100,0.07)';
+    g.fillRect(x, y, w, h);
+    hg.fillStyle = Math.random() > 0.5 ? 'rgba(215,215,215,0.10)' : 'rgba(55,55,55,0.10)';
+    hg.fillRect(x, y, w, h);
+  }
+
+  // Large faint oxidation / handling smudges for varied roughness under the sun
+  for (let i = 0; i < 16; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const rad = 35 + Math.random() * 110;
+    const cg = g.createRadialGradient(x, y, 0, x, y, rad);
+    cg.addColorStop(0, 'rgba(122, 118, 106, 0.055)');
+    cg.addColorStop(1, 'rgba(122, 118, 106, 0)');
+    g.fillStyle = cg;
+    g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+
+    const org = og.createRadialGradient(x, y, 0, x, y, rad);
+    org.addColorStop(0, 'rgba(255, 112, 228, 0.10)');
+    org.addColorStop(1, 'rgba(255, 58, 246, 0)');
+    og.fillStyle = org;
+    og.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+
+  // Circumferential weld seams with heat-affected zone (HAZ) gold/blue tint
+  for (let y = 0; y <= S; y += ringH) {
     const hazGrad = g.createLinearGradient(0, y - 5, 0, y + 5);
     hazGrad.addColorStop(0, 'rgba(180, 165, 140, 0.0)');
-    hazGrad.addColorStop(0.35, 'rgba(165, 145, 115, 0.28)');
-    hazGrad.addColorStop(0.5, 'rgba(55, 60, 68, 0.78)');
-    hazGrad.addColorStop(0.65, 'rgba(135, 150, 175, 0.25)');
+    hazGrad.addColorStop(0.35, 'rgba(165, 145, 115, 0.30)');
+    hazGrad.addColorStop(0.5, 'rgba(55, 60, 68, 0.80)');
+    hazGrad.addColorStop(0.65, 'rgba(135, 150, 175, 0.26)');
     hazGrad.addColorStop(1, 'rgba(180, 165, 140, 0.0)');
     g.fillStyle = hazGrad;
-    g.fillRect(0, y - 5, 512, 10);
+    g.fillRect(0, y - 5, S, 10);
 
-    // Raised weld bead on bump map
-    bg.fillStyle = '#d8d8d8';
-    bg.fillRect(0, y - 1, 512, 2);
-    bg.fillStyle = '#383838';
-    bg.fillRect(0, y + 1, 512, 1);
+    hg.fillStyle = '#e2e2e2';
+    hg.fillRect(0, y - 1, S, 2);
+    hg.fillStyle = '#565656';
+    hg.fillRect(0, y + 1, S, 1);
+    og.fillStyle = 'rgba(255, 138, 214, 0.75)';
+    og.fillRect(0, y - 1, S, 3);
   }
 
-  const map = new THREE.CanvasTexture(c);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.wrapS = map.wrapT = THREE.RepeatWrapping;
-  map.repeat.set(3, 7);
+  // A few deep handling scratches (break up the perfect cylinder highlight)
+  for (let i = 0; i < 70; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const len = 8 + Math.random() * 46;
+    g.strokeStyle = `rgba(255,255,255,${0.035 + Math.random() * 0.05})`;
+    g.lineWidth = 0.7;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + (Math.random() - 0.5) * 3, y + len);
+    g.stroke();
+  }
 
-  const bumpMap = new THREE.CanvasTexture(b);
-  bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
-  bumpMap.repeat.set(3, 7);
+  const map = canvasTexture(colorCanvas, { repeatX: 3, repeatY: 7, srgb: true });
+  const normalMap = canvasTexture(heightToNormalCanvas(heightCanvas, 2.6), { repeatX: 3, repeatY: 7 });
+  const ormMap = canvasTexture(ormCanvas, { repeatX: 3, repeatY: 7 });
 
-  _cachedSteelMaps = { map, bumpMap };
+  _cachedSteelMaps = { map, normalMap, ormMap };
   return _cachedSteelMaps;
 }
 
 let _cachedHeatshieldMaps = null;
 function createHeatshieldMaps() {
   if (_cachedHeatshieldMaps) return _cachedHeatshieldMaps;
-  const c = document.createElement('canvas');
-  const b = document.createElement('canvas');
-  c.width = c.height = 256;
-  b.width = b.height = 256;
-  const g = c.getContext('2d');
-  const bg = b.getContext('2d');
+  const S = 256;
+  const colorCanvas = document.createElement('canvas');
+  const heightCanvas = document.createElement('canvas');
+  const ormCanvas = document.createElement('canvas');
+  colorCanvas.width = colorCanvas.height = S;
+  heightCanvas.width = heightCanvas.height = S;
+  ormCanvas.width = ormCanvas.height = S;
 
-  g.fillStyle = '#121317';
-  g.fillRect(0, 0, 256, 256);
-  bg.fillStyle = '#202020';
-  bg.fillRect(0, 0, 256, 256);
+  const g = colorCanvas.getContext('2d');
+  const hg = heightCanvas.getContext('2d');
+  const og = ormCanvas.getContext('2d');
+
+  g.fillStyle = '#121318';
+  g.fillRect(0, 0, S, S);
+  hg.fillStyle = '#303030';
+  hg.fillRect(0, 0, S, S);
+  og.fillStyle = 'rgb(255, 205, 28)';
+  og.fillRect(0, 0, S, S);
 
   // Interlocking hexagonal TUFROC ceramic tiles with individual tile variation
   const r = 10;
   const h = r * Math.sqrt(3);
   let idx = 0;
-  for (let y = -h; y < 256 + h; y += h) {
-    for (let x = -r * 3; x < 256 + r * 3; x += r * 3) {
-      drawHexTile(g, bg, x, y, r, idx++);
-      drawHexTile(g, bg, x + r * 1.5, y + h / 2, r, idx++);
+  for (let y = -h; y < S + h; y += h) {
+    for (let x = -r * 3; x < S + r * 3; x += r * 3) {
+      drawHexTile(g, hg, og, x, y, r, idx++);
+      drawHexTile(g, hg, og, x + r * 1.5, y + h / 2, r, idx++);
     }
   }
 
-  const map = new THREE.CanvasTexture(c);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.wrapS = map.wrapT = THREE.RepeatWrapping;
-  map.repeat.set(5, 14);
+  // Soot wash and re-entry streaks baked into the albedo
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const rad = 12 + Math.random() * 42;
+    const soot = g.createRadialGradient(x, y, 0, x, y, rad);
+    soot.addColorStop(0, `rgba(8, 8, 10, ${0.08 + Math.random() * 0.14})`);
+    soot.addColorStop(1, 'rgba(8, 8, 10, 0)');
+    g.fillStyle = soot;
+    g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  for (let i = 0; i < 26; i++) {
+    const x = Math.random() * S;
+    g.strokeStyle = `rgba(10, 9, 8, ${0.06 + Math.random() * 0.12})`;
+    g.lineWidth = 1 + Math.random() * 5;
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x + (Math.random() - 0.5) * 18, S);
+    g.stroke();
+  }
 
-  const bumpMap = new THREE.CanvasTexture(b);
-  bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
-  bumpMap.repeat.set(5, 14);
+  const map = canvasTexture(colorCanvas, { repeatX: 5, repeatY: 14, srgb: true });
+  const normalMap = canvasTexture(heightToNormalCanvas(heightCanvas, 2.2), { repeatX: 5, repeatY: 14 });
+  const ormMap = canvasTexture(ormCanvas, { repeatX: 5, repeatY: 14 });
 
-  _cachedHeatshieldMaps = { map, bumpMap };
+  _cachedHeatshieldMaps = { map, normalMap, ormMap };
   return _cachedHeatshieldMaps;
 }
 
-function drawHexTile(g, bg, x, y, r, seed) {
+function drawHexTile(g, hg, og, x, y, r, seed) {
   const shade = 18 + ((seed * 29) % 14);
   g.fillStyle = `rgb(${shade}, ${shade + 1}, ${shade + 3})`;
-  g.strokeStyle = '#07080a';
-  g.lineWidth = 1.4;
+  g.strokeStyle = '#05060a';
+  g.lineWidth = 1.5;
 
   g.beginPath();
   for (let i = 0; i < 6; i++) {
@@ -145,77 +264,340 @@ function drawHexTile(g, bg, x, y, r, seed) {
   g.fill();
   g.stroke();
 
-  // Raised ceramic pillow center in bump map with recessed expansion gap
-  const bShade = 175 + ((seed * 13) % 35);
-  bg.fillStyle = `rgb(${bShade}, ${bShade}, ${bShade})`;
-  bg.strokeStyle = '#151515';
-  bg.lineWidth = 1.8;
-  bg.beginPath();
+  // Occasional chipped / oxidized tile face catches the light differently
+  if (seed % 17 === 0) {
+    g.fillStyle = 'rgba(78, 65, 54, 0.18)';
+    g.beginPath();
+    g.arc(x + 1.5, y - 1, r * 0.45, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // Raised ceramic pillow in height map with recessed expansion gap
+  const bShade = 182 + ((seed * 13) % 32);
+  hg.fillStyle = `rgb(${bShade}, ${bShade}, ${bShade})`;
+  hg.strokeStyle = '#161616';
+  hg.lineWidth = 1.9;
+  hg.beginPath();
   for (let i = 0; i < 6; i++) {
     const a = (i * Math.PI) / 3;
-    const px = x + (r - 0.8) * Math.cos(a);
-    const py = y + (r - 0.8) * Math.sin(a);
-    if (i === 0) bg.moveTo(px, py);
-    else bg.lineTo(px, py);
+    const px = x + (r - 0.9) * Math.cos(a);
+    const py = y + (r - 0.9) * Math.sin(a);
+    if (i === 0) hg.moveTo(px, py);
+    else hg.lineTo(px, py);
   }
-  bg.closePath();
-  bg.fill();
-  bg.stroke();
+  hg.closePath();
+  hg.fill();
+  hg.stroke();
+
+  // Ceramic roughness / metalness per tile
+  const rough = 192 + ((seed * 23) % 34);
+  og.fillStyle = `rgb(255, ${rough}, ${22 + ((seed * 7) % 12)})`;
+  og.strokeStyle = 'rgb(255, 244, 44)';
+  og.lineWidth = 1.8;
+  og.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i * Math.PI) / 3;
+    const px = x + (r - 1.0) * Math.cos(a);
+    const py = y + (r - 1.0) * Math.sin(a);
+    if (i === 0) og.moveTo(px, py);
+    else og.lineTo(px, py);
+  }
+  og.closePath();
+  og.fill();
+  og.stroke();
+}
+
+let _cachedFrostMap = null;
+function createFrostMap() {
+  if (_cachedFrostMap) return _cachedFrostMap;
+  const S = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = S;
+  const g = canvas.getContext('2d');
+  g.clearRect(0, 0, S, S);
+
+  // Cryogenic condensation patches
+  for (let i = 0; i < 46; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const rad = 9 + Math.random() * 46;
+    const grad = g.createRadialGradient(x, y, 0, x, y, rad);
+    grad.addColorStop(0, `rgba(228, 242, 255, ${0.10 + Math.random() * 0.22})`);
+    grad.addColorStop(0.55, 'rgba(210, 232, 252, 0.07)');
+    grad.addColorStop(1, 'rgba(210, 232, 252, 0)');
+    g.fillStyle = grad;
+    g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+
+  // Vertical run-off streaks of condensed moisture
+  for (let i = 0; i < 150; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const w = 0.8 + Math.random() * 3.2;
+    const h = 8 + Math.random() * 70;
+    g.fillStyle = `rgba(236, 246, 255, ${0.035 + Math.random() * 0.11})`;
+    g.fillRect(x, y, w, h);
+  }
+
+  _cachedFrostMap = canvasTexture(canvas, { repeatX: 2, repeatY: 3, srgb: true });
+  return _cachedFrostMap;
+}
+
+// -------------------------------------------------------------
+// Draw-call optimiser: bakes every eligible static mesh in a group into a
+// single mesh per material. This funds the extra surface detail with fewer
+// draw calls than before, so the added realism does not cost frame time.
+// -------------------------------------------------------------
+function mergeStaticGroup(root, skipRoots = []) {
+  if (!root) return [];
+  root.updateMatrixWorld(true);
+  const invRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
+
+  const isSkipped = (obj) => {
+    let p = obj;
+    while (p) {
+      if (p.userData && p.userData.noMerge) return true;
+      if (skipRoots.indexOf(p) !== -1) return true;
+      if (p === root) break;
+      p = p.parent;
+    }
+    return false;
+  };
+
+  const collect = [];
+  root.traverse((obj) => {
+    if (!obj.isMesh || obj.isInstancedMesh || obj.isSkinnedMesh) return;
+    if (!obj.geometry || !obj.material || Array.isArray(obj.material)) return;
+    if (isSkipped(obj)) return;
+    collect.push(obj);
+  });
+
+  const buckets = new Map();
+  const toLocal = new THREE.Matrix4();
+  for (const mesh of collect) {
+    let bucket = buckets.get(mesh.material.uuid);
+    if (!bucket) {
+      bucket = { material: mesh.material, meshes: [], geometries: [], castShadow: false, receiveShadow: false };
+      buckets.set(mesh.material.uuid, bucket);
+    }
+    toLocal.multiplyMatrices(invRoot, mesh.matrixWorld);
+    const geo = mesh.geometry.clone();
+    geo.applyMatrix4(toLocal);
+    bucket.meshes.push(mesh);
+    bucket.geometries.push(geo);
+    bucket.castShadow = bucket.castShadow || mesh.castShadow;
+    bucket.receiveShadow = bucket.receiveShadow || mesh.receiveShadow;
+  }
+
+  const mergedOriginals = new Set();
+  for (const bucket of buckets.values()) {
+    if (bucket.geometries.length < 2) {
+      bucket.geometries.forEach((geo) => geo.dispose());
+      continue;
+    }
+
+    // mergeGeometries requires a consistent index/attribute layout.
+    const indexedCount = bucket.geometries.filter((geo) => geo.index).length;
+    if (indexedCount > 0 && indexedCount < bucket.geometries.length) {
+      for (let i = 0; i < bucket.geometries.length; i++) {
+        if (bucket.geometries[i].index) {
+          const nonIndexed = bucket.geometries[i].toNonIndexed();
+          bucket.geometries[i].dispose();
+          bucket.geometries[i] = nonIndexed;
+        }
+      }
+    }
+
+    const mergedGeo = mergeGeometries(bucket.geometries, false);
+    bucket.geometries.forEach((geo) => geo.dispose());
+    if (!mergedGeo) continue;
+
+    const mergedMesh = new THREE.Mesh(mergedGeo, bucket.material);
+    mergedMesh.castShadow = bucket.castShadow;
+    mergedMesh.receiveShadow = bucket.receiveShadow;
+    mergedMesh.name = `merged_${bucket.material.name || bucket.material.uuid.slice(0, 6)}`;
+    root.add(mergedMesh);
+    bucket.meshes.forEach((mesh) => mergedOriginals.add(mesh));
+  }
+
+  for (const mesh of mergedOriginals) {
+    if (mesh.parent) mesh.parent.remove(mesh);
+  }
+  return mergedOriginals;
+}
+
+// Tangent-ogive nose profile (true Starship silhouette, not a cosine cone)
+function makeOgiveProfile(radius, length, steps = 22) {
+  const rho = (radius * radius + length * length) / (2 * radius);
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const axial = t * length;
+    const r = Math.sqrt(Math.max(0, rho * rho - axial * axial)) + radius - rho;
+    pts.push(new THREE.Vector2(Math.max(0, r), axial));
+  }
+  return pts;
+}
+
+// Slightly chamfered flap so its edge catches a real specular highlight
+function makeBeveledFlapGeometry(width, height, depth) {
+  const shape = new THREE.Shape();
+  const w = width / 2;
+  const h = height / 2;
+  const rad = Math.min(width * 0.28, 0.12);
+  shape.moveTo(-w + rad, -h);
+  shape.lineTo(w - rad, -h);
+  shape.quadraticCurveTo(w, -h, w, -h + rad);
+  shape.lineTo(w, h - rad);
+  shape.quadraticCurveTo(w, h, w - rad, h);
+  shape.lineTo(-w + rad, h);
+  shape.quadraticCurveTo(-w, h, -w, h - rad);
+  shape.lineTo(-w, -h + rad);
+  shape.quadraticCurveTo(-w, -h, -w + rad, -h);
+
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: true,
+    bevelSize: Math.min(0.05, width * 0.2),
+    bevelThickness: Math.min(0.05, width * 0.2),
+    bevelSegments: 1,
+    curveSegments: 3,
+    steps: 1
+  });
+  geo.translate(0, 0, -depth / 2);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// Volumetric-looking engine plume shader (replaces flat additive cylinders).
+function createPlumeMaterial({ core = 0xffffff, mid = 0xffaa33, outer = 0xff4411, vacuum = false } = {}) {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    uniforms: {
+      uTime: { value: 0 },
+      uThrottle: { value: 0 },
+      uCore: { value: new THREE.Color(core) },
+      uMid: { value: new THREE.Color(mid) },
+      uOuter: { value: new THREE.Color(outer) },
+      uVacuum: { value: vacuum ? 1 : 0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        vUv = uv;
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uThrottle;
+      uniform vec3 uCore;
+      uniform vec3 uMid;
+      uniform vec3 uOuter;
+      uniform float uVacuum;
+      varying vec2 vUv;
+      varying vec3 vN;
+      varying vec3 vV;
+
+      void main() {
+        if (uThrottle <= 0.004) discard;
+        float t = 1.0 - vUv.y;
+        float ang = vUv.x * 6.2831853;
+        float turb = sin(ang * 3.0 + uTime * 47.0) * sin(ang * 5.0 - uTime * 31.0 + 1.7);
+        float flicker = 0.82 + 0.18 * turb;
+        float diamonds = pow(max(0.0, sin(t * 34.0 - uTime * 20.0)), 8.0) * smoothstep(0.0, 0.10, t) * (1.0 - t);
+        float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.4);
+        float body = smoothstep(0.0, 0.055, t) * pow(1.0 - t, 1.22);
+        vec3 col = mix(uCore, uMid, smoothstep(0.0, 0.45, t));
+        col = mix(col, uOuter, smoothstep(0.45, 1.0, t));
+        col += uCore * diamonds * 1.5;
+        col *= (1.0 + uVacuum * 0.35) * (1.25 + fres * 0.9);
+        float alpha = (body * (0.42 + fres * 0.95) * flicker + diamonds * 0.85) * uThrottle;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
+      }
+    `
+  });
 }
 
 export class StarshipMissionVehicle {
   constructor() {
     this.group = new THREE.Group();
 
-    // High-Resolution Procedural PBR Textures & Bump Maps
+    // High-Resolution Procedural PBR textures: albedo + normal + packed ORM.
+    // The normal/ORM pair gives the steel believable weld relief and roughness
+    // breakup, while the environment map supplies real sky reflections.
     const steelMaps = createSteelMaps();
     const heatshieldMaps = createHeatshieldMaps();
+    const frostMap = createFrostMap();
 
     this.matSteel = new THREE.MeshStandardMaterial({
       map: steelMaps.map,
-      bumpMap: steelMaps.bumpMap,
-      bumpScale: 0.045,
-      metalness: 0.94,
-      roughness: 0.24,
-      color: 0xf2f0ec
+      normalMap: steelMaps.normalMap,
+      normalScale: new THREE.Vector2(0.85, 0.85),
+      roughnessMap: steelMaps.ormMap,
+      metalnessMap: steelMaps.ormMap,
+      roughness: 1.0,
+      metalness: 1.0,
+      envMapIntensity: 1.35,
+      dithering: true
     });
 
     this.matHeatshield = new THREE.MeshStandardMaterial({
       map: heatshieldMaps.map,
-      bumpMap: heatshieldMaps.bumpMap,
-      bumpScale: 0.055,
-      metalness: 0.16,
-      roughness: 0.84,
-      color: 0x16181c
+      normalMap: heatshieldMaps.normalMap,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      roughnessMap: heatshieldMaps.ormMap,
+      metalnessMap: heatshieldMaps.ormMap,
+      roughness: 1.0,
+      metalness: 1.0,
+      envMapIntensity: 0.55,
+      dithering: true
     });
 
     this.matCryoFrost = new THREE.MeshStandardMaterial({
-      map: steelMaps.map,
-      bumpMap: steelMaps.bumpMap,
-      bumpScale: 0.03,
-      color: 0xeef5fc,
-      metalness: 0.25,
-      roughness: 0.72,
+      map: frostMap,
+      color: 0xf2f8ff,
+      metalness: 0.08,
+      roughness: 0.55,
+      envMapIntensity: 0.45,
       transparent: true,
-      opacity: 0.78
+      opacity: 0.6,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      dithering: true
     });
 
     this.matDarkMetal = new THREE.MeshStandardMaterial({
       color: 0x24262c,
-      metalness: 0.85,
-      roughness: 0.4
+      metalness: 0.82,
+      roughness: 0.42,
+      envMapIntensity: 0.9,
+      dithering: true
     });
 
     this.matRaptorBell = new THREE.MeshStandardMaterial({
       color: 0x3d424b,
       metalness: 0.9,
-      roughness: 0.35
+      roughness: 0.38,
+      envMapIntensity: 1.0,
+      side: THREE.DoubleSide,
+      dithering: true
     });
 
     this.matTower = new THREE.MeshStandardMaterial({
       color: 0x32353b,
-      metalness: 0.75,
-      roughness: 0.55
+      metalness: 0.72,
+      roughness: 0.56,
+      envMapIntensity: 0.8
     });
 
     this.matGridFin = new THREE.MeshStandardMaterial({
@@ -227,14 +609,16 @@ export class StarshipMissionVehicle {
 
     this.matConcrete = new THREE.MeshStandardMaterial({
       color: 0x48423c,
-      roughness: 0.92,
-      metalness: 0.1
+      roughness: 0.95,
+      metalness: 0.02,
+      envMapIntensity: 0.4
     });
 
     this.matWhiteTank = new THREE.MeshStandardMaterial({
       color: 0xe6e4e0,
-      roughness: 0.35,
-      metalness: 0.65
+      roughness: 0.38,
+      metalness: 0.55,
+      envMapIntensity: 1.0
     });
 
     this.matEmissiveLamp = new THREE.MeshBasicMaterial({ color: 0xfff0dd });
@@ -261,6 +645,13 @@ export class StarshipMissionVehicle {
     this.starshipEnginesActive = false;
     this.plasmaActive = false;
     this.jellyfishActive = false;
+
+    this._fxTime = 0;
+    this._padWorldPos = new THREE.Vector3();
+    this._cryoMeshes = [];
+    this.group.traverse((obj) => {
+      if (obj.isMesh && obj.material === this.matCryoFrost) this._cryoMeshes.push(obj);
+    });
   }
 
   // -------------------------------------------------------------
@@ -381,6 +772,10 @@ export class StarshipMissionVehicle {
 
     // Build the broader Mars Starbase complex (Ref Images 2 & 3)
     this.buildExpandedMarsStarbase(pad);
+
+    // Bake the static pad, tower and outbuildings into a handful of meshes.
+    // The animated chopsticks carriage is deliberately excluded.
+    mergeStaticGroup(pad, [this.chopsticksCarriage]);
   }
 
   // -------------------------------------------------------------
@@ -520,14 +915,8 @@ export class StarshipMissionVehicle {
     shieldBelly.position.y = barrelH / 2;
     ship.add(shieldBelly);
 
-    // Ogive Nosecone
-    const ogivePoints = [];
-    for (let i = 0; i <= 12; i++) {
-      const t = i / 12;
-      const y = t * noseH;
-      const rad = r * Math.cos(t * Math.PI * 0.5);
-      ogivePoints.push(new THREE.Vector2(rad, y));
-    }
+    // Tangent-ogive nosecone (true Starship silhouette)
+    const ogivePoints = makeOgiveProfile(r, noseH, 18);
     const nose = new THREE.Mesh(new THREE.LatheGeometry(ogivePoints, 24), this.matSteel);
     nose.position.y = barrelH;
     nose.castShadow = true;
@@ -541,9 +930,9 @@ export class StarshipMissionVehicle {
     noseShield.position.y = barrelH;
     ship.add(noseShield);
 
-    // Flaps
-    const ffGeo = new THREE.BoxGeometry(0.3, 3.8, 3.2);
-    const afGeo = new THREE.BoxGeometry(0.4, 11.0, 5.2);
+    // Flaps (chamfered edges catch the sun like real TUFROC panels)
+    const ffGeo = makeBeveledFlapGeometry(0.3, 3.8, 3.2);
+    const afGeo = makeBeveledFlapGeometry(0.4, 11.0, 5.2);
     for (const sx of [-1, 1]) {
       const ff = new THREE.Mesh(ffGeo, this.matHeatshield);
       ff.position.set(sx * (r + 1.2), barrelH + noseH * 0.45, 0);
@@ -718,6 +1107,9 @@ export class StarshipMissionVehicle {
     );
     beaconLamp.position.set(0, 3.65, -0.22);
     T.add(beaconLamp);
+
+    // Merge everything except the physically animated push-button.
+    mergeStaticGroup(T, [this.launchButtonMesh]);
   }
 
   placeLaunchTerminal(x, y, z, rotationY = -Math.PI * 0.75) {
@@ -788,6 +1180,28 @@ export class StarshipMissionVehicle {
       B.add(pin);
     }
 
+    // RCS thruster pods and avionics raceways (merged into existing draw calls)
+    const rcsGeo = new THREE.BoxGeometry(0.9, 1.1, 0.75);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const pod = new THREE.Mesh(rcsGeo, this.matDarkMetal);
+      pod.position.set(Math.cos(a) * (radius + 0.32), boosterHeight - 13.0, Math.sin(a) * (radius + 0.32));
+      pod.rotation.y = -a;
+      B.add(pod);
+    }
+    const racewayGeo = new THREE.CylinderGeometry(0.11, 0.11, boosterHeight * 0.82, 6);
+    for (const a of [0.42, Math.PI - 0.42, Math.PI + 0.42, -0.42]) {
+      const raceway = new THREE.Mesh(racewayGeo, this.matDarkMetal);
+      raceway.position.set(Math.cos(a) * (radius + 0.1), boosterHeight * 0.46, Math.sin(a) * (radius + 0.1));
+      B.add(raceway);
+    }
+
+    // Engine bay heat shield / skirt
+    const skirtGeo = new THREE.CylinderGeometry(radius + 0.18, radius + 0.05, 1.4, 32, 1, true);
+    const skirt = new THREE.Mesh(skirtGeo, this.matDarkMetal);
+    skirt.position.y = 1.1;
+    B.add(skirt);
+
     // 4 Hexagonal Grid Fins at the top
     this.gridFins = [];
     const finHeight = boosterHeight - 2.0;
@@ -824,67 +1238,62 @@ export class StarshipMissionVehicle {
     }
 
     // 33 Raptor Engine Cluster at Booster Base using a single InstancedMesh (1 draw call instead of 33)
-    const raptorGeo = new THREE.CylinderGeometry(0.4, 0.75, 1.8, 10);
+    // Bell profile is a real throat-to-exit curve rather than a straight cone.
+    const bellProfile = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      bellProfile.push(new THREE.Vector2(0.36 + 1.06 * Math.pow(t, 1.7), -2.5 * t));
+    }
+    const raptorGeo = new THREE.LatheGeometry(bellProfile, 12);
     const raptorsInst = new THREE.InstancedMesh(raptorGeo, this.matRaptorBell, 33);
     const dummy = new THREE.Object3D();
     let idx = 0;
     for (let i = 0; i < 20; i++) {
       const a = (i / 20) * Math.PI * 2;
       const r = radius * 0.82;
-      dummy.position.set(Math.cos(a) * r, -0.6, Math.sin(a) * r);
+      dummy.position.set(Math.cos(a) * r, -0.9, Math.sin(a) * r);
       dummy.updateMatrix();
       raptorsInst.setMatrixAt(idx++, dummy.matrix);
     }
     for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2;
       const r = radius * 0.52;
-      dummy.position.set(Math.cos(a) * r, -0.6, Math.sin(a) * r);
+      dummy.position.set(Math.cos(a) * r, -0.9, Math.sin(a) * r);
       dummy.updateMatrix();
       raptorsInst.setMatrixAt(idx++, dummy.matrix);
     }
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2;
       const r = radius * 0.22;
-      dummy.position.set(Math.cos(a) * r, -0.6, Math.sin(a) * r);
+      dummy.position.set(Math.cos(a) * r, -0.9, Math.sin(a) * r);
       dummy.updateMatrix();
       raptorsInst.setMatrixAt(idx++, dummy.matrix);
     }
     raptorsInst.instanceMatrix.needsUpdate = true;
     B.add(raptorsInst);
 
-    // Unified Booster Engine Fire Plume
-    const boosterFlameGeo = new THREE.CylinderGeometry(3.8, 8.5, 38, 16, 1, true);
+    // Unified Booster Engine Fire Plume (animated shader: turbulent edges + Mach diamonds)
+    const boosterFlameGeo = new THREE.CylinderGeometry(3.8, 8.5, 38, 20, 8, true);
     boosterFlameGeo.translate(0, -19, 0);
     this.boosterFlame = new THREE.Mesh(
       boosterFlameGeo,
-      new THREE.MeshBasicMaterial({
-        color: 0xffaa33,
-        transparent: true,
-        opacity: 0.0,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
+      createPlumeMaterial({ core: 0xfff4d6, mid: 0xffa432, outer: 0xff3d0a })
     );
     this.boosterFlame.visible = false;
     B.add(this.boosterFlame);
 
     // Inner bright white shock core
-    const shockCoreGeo = new THREE.CylinderGeometry(1.8, 3.2, 22, 12, 1, true);
+    const shockCoreGeo = new THREE.CylinderGeometry(1.8, 3.2, 22, 14, 4, true);
     shockCoreGeo.translate(0, -11, 0);
     this.boosterShockCore = new THREE.Mesh(
       shockCoreGeo,
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.0,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
+      createPlumeMaterial({ core: 0xffffff, mid: 0xffe6b0, outer: 0xff9a30 })
     );
     this.boosterShockCore.visible = false;
     B.add(this.boosterShockCore);
+
+    // Merge all static booster geometry into one mesh per material.
+    mergeStaticGroup(B, [this.boosterFlame, this.boosterShockCore, ...this.gridFins]);
   }
 
   // -------------------------------------------------------------
@@ -918,15 +1327,8 @@ export class StarshipMissionVehicle {
     shieldBelly.position.y = barrelH / 2;
     S.add(shieldBelly);
 
-    // Authentic Gothic Ogive Nosecone
-    const ogivePoints = [];
-    const ogiveSteps = 16;
-    for (let i = 0; i <= ogiveSteps; i++) {
-      const t = i / ogiveSteps;
-      const y = t * noseH;
-      const rad = r * Math.cos(t * Math.PI * 0.5);
-      ogivePoints.push(new THREE.Vector2(rad, y));
-    }
+    // Tangent-ogive nosecone with the correct tangent-to-barrel transition
+    const ogivePoints = makeOgiveProfile(r, noseH, 22);
     const noseSteelGeo = new THREE.LatheGeometry(ogivePoints, 32);
     const nose = new THREE.Mesh(noseSteelGeo, this.matSteel);
     nose.position.y = barrelH;
@@ -960,11 +1362,28 @@ export class StarshipMissionVehicle {
       S.add(shipPin);
     }
 
+    // Cold-gas RCS pods and umbilical plates (merged into the dark-metal draw call)
+    const rcsPodGeo = new THREE.BoxGeometry(0.8, 0.95, 0.7);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const pod = new THREE.Mesh(rcsPodGeo, this.matDarkMetal);
+      pod.position.set(Math.cos(a) * (r + 0.3), barrelH + 2.2, Math.sin(a) * (r + 0.3));
+      pod.rotation.y = -a;
+      S.add(pod);
+    }
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.35, 0.55), this.matDarkMetal);
+      plate.position.set(Math.cos(a) * (r + 0.18), 3.2, Math.sin(a) * (r + 0.18));
+      plate.rotation.y = -a;
+      S.add(plate);
+    }
+
     // 4 Articulating Aerodynamic Flaps with Aerodynamic Hinge Root Fairings
     this.forwardFlaps = [];
     this.aftFlaps = [];
 
-    const ffGeo = new THREE.BoxGeometry(0.32, 3.8, 3.2);
+    const ffGeo = makeBeveledFlapGeometry(0.32, 3.8, 3.2);
     const ffFairingGeo = new THREE.CylinderGeometry(0.45, 0.55, 4.1, 12);
     for (const sx of [-1, 1]) {
       const fairing = new THREE.Mesh(ffFairingGeo, this.matHeatshield);
@@ -982,7 +1401,7 @@ export class StarshipMissionVehicle {
       this.forwardFlaps.push({ hinge, side: sx });
     }
 
-    const afGeo = new THREE.BoxGeometry(0.42, 11.0, 5.2);
+    const afGeo = makeBeveledFlapGeometry(0.42, 11.0, 5.2);
     const afFairingGeo = new THREE.CylinderGeometry(0.62, 0.72, 11.4, 12);
     for (const sx of [-1, 1]) {
       const fairing = new THREE.Mesh(afFairingGeo, this.matHeatshield);
@@ -1052,38 +1471,52 @@ export class StarshipMissionVehicle {
 
     S.add(this.cargoBayGroup);
 
-    // 6 Starship Raptor Engines: 3 Vacuum (large bell) + 3 Sea-level
-    const vacBellGeo = new THREE.CylinderGeometry(0.5, 1.4, 2.6, 12);
+    // 6 Starship Raptors: 3 vacuum + 3 sea-level, one instanced draw call.
+    const shipBellProfile = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      shipBellProfile.push(new THREE.Vector2(0.30 + 1.08 * Math.pow(t, 1.75), -2.7 * t));
+    }
+    const shipBellGeo = new THREE.LatheGeometry(shipBellProfile, 12);
+    const shipEnginesInst = new THREE.InstancedMesh(shipBellGeo, this.matRaptorBell, 6);
+    const shipEngineDummy = new THREE.Object3D();
+    let shipEngineIdx = 0;
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2;
-      const vacBell = new THREE.Mesh(vacBellGeo, this.matRaptorBell);
-      vacBell.position.set(Math.cos(a) * 2.5, -1.0, Math.sin(a) * 2.5);
-      S.add(vacBell);
+      shipEngineDummy.position.set(Math.cos(a) * 2.5, -1.1, Math.sin(a) * 2.5);
+      shipEngineDummy.scale.set(1.06, 1.06, 1.06);
+      shipEngineDummy.updateMatrix();
+      shipEnginesInst.setMatrixAt(shipEngineIdx++, shipEngineDummy.matrix);
     }
-    const slBellGeo = new THREE.CylinderGeometry(0.3, 0.7, 1.6, 10);
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2 + Math.PI / 3;
-      const slBell = new THREE.Mesh(slBellGeo, this.matRaptorBell);
-      slBell.position.set(Math.cos(a) * 1.1, -0.6, Math.sin(a) * 1.1);
-      S.add(slBell);
+      shipEngineDummy.position.set(Math.cos(a) * 1.1, -0.65, Math.sin(a) * 1.1);
+      shipEngineDummy.scale.set(0.62, 0.66, 0.62);
+      shipEngineDummy.updateMatrix();
+      shipEnginesInst.setMatrixAt(shipEngineIdx++, shipEngineDummy.matrix);
     }
+    shipEnginesInst.instanceMatrix.needsUpdate = true;
+    S.add(shipEnginesInst);
 
     // Starship Atmospheric Plume
-    const shipFlameGeo = new THREE.CylinderGeometry(2.4, 4.6, 24, 16, 1, true);
+    const shipFlameGeo = new THREE.CylinderGeometry(2.4, 4.6, 24, 18, 6, true);
     shipFlameGeo.translate(0, -12, 0);
     this.starshipFlame = new THREE.Mesh(
       shipFlameGeo,
-      new THREE.MeshBasicMaterial({
-        color: 0x44aaff,
-        transparent: true,
-        opacity: 0.0,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
+      createPlumeMaterial({ core: 0xbde6ff, mid: 0x4db6ff, outer: 0x1f5cff })
     );
     this.starshipFlame.visible = false;
     S.add(this.starshipFlame);
+
+    // Bake static ship structure into one mesh per material. Animated flaps,
+    // legs, doors, plumes and the instanced engines stay independent.
+    mergeStaticGroup(S, [
+      this.starshipFlame,
+      this.cargoBayGroup,
+      ...this.forwardFlaps.map((f) => f.hinge),
+      ...this.aftFlaps.map((f) => f.hinge),
+      ...this.landingLegs
+    ]);
   }
 
   // -------------------------------------------------------------
@@ -1258,19 +1691,37 @@ export class StarshipMissionVehicle {
     const active = throttle > 0.01;
     this.boosterFlame.visible = active;
     this.boosterShockCore.visible = active;
-    if (active) {
-      this.boosterFlame.material.opacity = 0.85 + Math.random() * 0.15;
-      this.boosterFlame.scale.set(1.0 + throttle * 0.2, throttle * (1.0 + Math.random() * 0.2), 1.0 + throttle * 0.2);
-      this.boosterShockCore.material.opacity = 0.95;
+    if (!active) {
+      if (this.boosterFlame.material.uniforms) this.boosterFlame.material.uniforms.uThrottle.value = 0;
+      if (this.boosterShockCore.material.uniforms) this.boosterShockCore.material.uniforms.uThrottle.value = 0;
+      return;
     }
+    if (this.boosterFlame.material.uniforms) {
+      this.boosterFlame.material.uniforms.uThrottle.value = 0.35 + throttle * 0.65;
+    }
+    if (this.boosterShockCore.material.uniforms) {
+      this.boosterShockCore.material.uniforms.uThrottle.value = 0.55 + throttle * 0.45;
+    }
+    this.boosterFlame.scale.set(
+      1.0 + throttle * 0.18,
+      throttle * (1.0 + Math.random() * 0.16),
+      1.0 + throttle * 0.18
+    );
   }
 
   setStarshipThrottle(throttle, isVacuum = false) {
     const active = throttle > 0.01;
     this.starshipFlame.visible = active;
+    if (this.starshipFlame.material.uniforms) {
+      this.starshipFlame.material.uniforms.uThrottle.value = active ? (0.4 + throttle * 0.6) : 0;
+      this.starshipFlame.material.uniforms.uVacuum.value = isVacuum ? 1 : 0;
+    }
     if (active) {
-      this.starshipFlame.material.opacity = 0.88 + Math.random() * 0.12;
-      this.starshipFlame.scale.set(1.0 + throttle * 0.3, throttle * (1.0 + Math.random() * 0.2), 1.0 + throttle * 0.3);
+      this.starshipFlame.scale.set(
+        1.0 + throttle * 0.26,
+        throttle * (1.0 + Math.random() * 0.16),
+        1.0 + throttle * 0.26
+      );
     }
 
     const jellyVis = active && isVacuum;
@@ -1290,11 +1741,36 @@ export class StarshipMissionVehicle {
     }
     if (this.matHeatshield) {
       if (active) {
-        this.matHeatshield.emissive = this.matHeatshield.emissive || new THREE.Color(0x000000);
-        this.matHeatshield.emissive.setRGB(h * 0.55, h * 0.14, h * 0.03);
-      } else if (this.matHeatshield.emissive) {
+        if (!this.matHeatshield.emissive) this.matHeatshield.emissive = new THREE.Color(0x000000);
+        // Incandescent ramp: dull red -> orange -> white-hot stagnation
+        const r = 0.30 + h * 0.70;
+        const g = 0.025 + h * h * 0.62;
+        const b = h * h * h * 0.38;
+        this.matHeatshield.emissive.setRGB(r, g, b);
+        this.matHeatshield.emissiveIntensity = 0.55 + h * 2.6;
+      } else {
         this.matHeatshield.emissive.setRGB(0, 0, 0);
+        this.matHeatshield.emissiveIntensity = 1.0;
       }
+    }
+  }
+
+  // Distance-based visibility so the huge starbase and thin frost shells cost
+  // nothing while the ship is in space or high above the pad.
+  updateLOD(cameraPos) {
+    if (!cameraPos) return;
+    this.launchPadGroup.getWorldPosition(this._padWorldPos);
+    const padDist = cameraPos.distanceTo(this._padWorldPos);
+    const padVisible = padDist < 4800;
+    if (this.launchPadGroup.visible !== padVisible) this.launchPadGroup.visible = padVisible;
+    const terminalVisible = padDist < 800;
+    if (this.launchTerminalGroup.visible !== terminalVisible) this.launchTerminalGroup.visible = terminalVisible;
+
+    const shipDist = cameraPos.distanceTo(this.starshipGroup.position);
+    const frostVisible = shipDist < 450;
+    for (let i = 0; i < this._cryoMeshes.length; i++) {
+      const m = this._cryoMeshes[i];
+      if (m.visible !== frostVisible) m.visible = frostVisible;
     }
   }
 
@@ -1317,11 +1793,21 @@ export class StarshipMissionVehicle {
   }
 
   update(dt) {
+    this._fxTime += dt;
     if (this.jellyfishMesh?.visible && this.jellyfishMat) {
-      this.jellyfishMat.uniforms.uTime.value += dt;
+      this.jellyfishMat.uniforms.uTime.value = this._fxTime;
     }
     if (this.plasmaMesh?.visible && this.plasmaMat) {
-      this.plasmaMat.uniforms.uTime.value += dt;
+      this.plasmaMat.uniforms.uTime.value = this._fxTime;
+    }
+    if (this.boosterFlame?.visible && this.boosterFlame.material.uniforms) {
+      this.boosterFlame.material.uniforms.uTime.value = this._fxTime;
+    }
+    if (this.boosterShockCore?.visible && this.boosterShockCore.material.uniforms) {
+      this.boosterShockCore.material.uniforms.uTime.value = this._fxTime;
+    }
+    if (this.starshipFlame?.visible && this.starshipFlame.material.uniforms) {
+      this.starshipFlame.material.uniforms.uTime.value = this._fxTime;
     }
   }
 }
