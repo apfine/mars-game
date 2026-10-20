@@ -207,8 +207,12 @@ export function getMarsHeightFast(x, z) {
 
 // Landmark sites are levelled so pads and monuments sit flat (coordinates match scatter.js catalog)
 // [x, z, fullFlatRadius, fadeRadius]
+// The Starbase entry grades a large industrial apron around the launch complex:
+// this is what lets the three towers, factory, conveyor, inspection yard and
+// crawler roads all share a single surveyed datum.
 const SITES = [[380, 520, 15, 28], [-650, 420, 15, 28], [-420, -780, 15, 28], [850, -420, 15, 28], [-950, -320, 15, 28],
-  [1200, 1100, 48, 70], [-1350, 950, 32, 48], [-250, -1150, 15, 28]]
+  [1200, 1100, 48, 70], [-1350, 950, 32, 48], [-250, -1150, 15, 28],
+  [1400, 1150, 380, 540]]
   .map(([sx, sz, r0, r1]) => ({ x: sx, z: sz, r0, r1, h: rawHeight(sx, sz) }));
 
 export function getMarsHeight(x, z) {

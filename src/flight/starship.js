@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
 
 // -------------------------------------------------------------
 // SpaceX Starship + Super Heavy Stack & Expanded Mars Starbase
@@ -19,6 +20,38 @@ function canvasTexture(canvas, { repeatX = 1, repeatY = 1, srgb = false, anisotr
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeatX, repeatY);
   tex.anisotropy = anisotropy;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Crisp industrial signage texture shared by towers, the factory and the
+// inspection yard. Canvas text is rasterised once at load time.
+function createLabelTexture(title, subtitle = '', accent = '#38e8ff') {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 256;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#090d12';
+  g.fillRect(0, 0, canvas.width, canvas.height);
+  g.fillStyle = 'rgba(255,255,255,0.06)';
+  for (let x = 0; x < canvas.width; x += 32) g.fillRect(x, 0, 1, canvas.height);
+  g.strokeStyle = accent;
+  g.lineWidth = 8;
+  g.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+  g.fillStyle = accent;
+  g.fillRect(28, 34, 10, canvas.height - 68);
+  g.font = 'bold 76px "Arial Narrow", Arial, sans-serif';
+  g.fillStyle = '#f5f9ff';
+  g.textBaseline = 'middle';
+  g.fillText(title, 62, subtitle ? 104 : 128);
+  if (subtitle) {
+    g.font = '600 34px "Arial Narrow", Arial, sans-serif';
+    g.fillStyle = 'rgba(190,225,255,0.82)';
+    g.fillText(subtitle, 64, 180);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
 }
@@ -692,90 +725,745 @@ export class StarshipMissionVehicle {
       pad.add(leg);
     }
 
-    // 145m Mechazilla Tower (offset 18m from rocket center along +X)
-    const towerX = 18.0;
-    const towerZ = 0.0;
-    const towerHeight = 145.0;
-    const towerWidth = 9.0;
-    this.towerPosition = new THREE.Vector3(towerX, 0, towerZ);
+    // ---------------------------------------------------------
+    // THREE-TOWER MECHAZILLA ARCHITECTURE
+    //   1. LAUNCH TOWER  - holds the stack, carries the stacking crane
+    //   2. BOOSTER TOWER - dedicated Super Heavy catch tower
+    //   3. SHIP TOWER    - dedicated Starship catch tower
+    //
+    // Catch arms are always exactly at the vehicle's forward-pin height, and
+    // each catch point sits on the arm centreline 18 m from the tower, so a
+    // captured vehicle is physically centred between the arms.
+    // ---------------------------------------------------------
+    this.towers = {};
+    this.towerPosition = new THREE.Vector3(L.launchTower.x, 0, L.launchTower.z);
 
-    // 4 Main Tower Column Legs
-    const columnGeo = new THREE.BoxGeometry(1.2, towerHeight, 1.2);
-    for (let dx of [-towerWidth / 2, towerWidth / 2]) {
-      for (let dz of [-towerWidth / 2, towerWidth / 2]) {
+    this.buildMechazillaTower('launch', {
+      x: L.launchTower.x,
+      z: L.launchTower.z,
+      height: L.launchTower.height,
+      armY: L.launchTower.armY,
+      title: 'LAUNCH',
+      withCrane: true,
+      withQD: true
+    });
+    this.buildMechazillaTower('booster', {
+      x: L.boosterTower.x,
+      z: L.boosterTower.z,
+      height: L.boosterTower.height,
+      armY: L.boosterTower.armY,
+      title: 'BOOSTER CATCH',
+      withCrane: true,
+      withQD: false
+    });
+    this.buildMechazillaTower('ship', {
+      x: L.shipTower.x,
+      z: L.shipTower.z,
+      height: L.shipTower.height,
+      armY: L.shipTower.armY,
+      title: 'SHIP CATCH',
+      withCrane: true,
+      withQD: false
+    });
+
+    // Compatibility aliases for older UI/camera code.
+    this.chopsticksCarriage = this.towers.launch.carriage;
+    this.leftChopstickHinge = this.towers.launch.leftHinge;
+    this.rightChopstickHinge = this.towers.launch.rightHinge;
+
+    // Automated stacking crane mounted on the launch tower.
+    this.buildStackerCrane(pad);
+
+    // Build the broader Mars Starbase complex (Ref Images 2 & 3)
+    this.buildExpandedMarsStarbase(pad);
+
+    // Build the fully automated factory, conveyor, erector and inspection yard.
+    this.buildProductionComplex(pad);
+
+    // Bake the static pad, towers and outbuildings into a handful of meshes.
+    // Every animated carriage, crane, crawler and scanner is excluded.
+    const dynamicRoots = [];
+    for (const t of Object.values(this.towers)) dynamicRoots.push(t.carriage);
+    mergeStaticGroup(pad, dynamicRoots);
+  }
+
+  // -------------------------------------------------------------
+  // MECHAZILLA TOWER BUILDER (used by all three towers)
+  // -------------------------------------------------------------
+  buildMechazillaTower(key, { x, z, height, armY, title, withCrane = false, withQD = false }) {
+    const pad = this.launchPadGroup;
+    const towerWidth = 9.0;
+
+    // Heavy foundation / flame-hardened base plinth
+    const baseGeo = new THREE.CylinderGeometry(15.5, 17.0, 3.0, 20);
+    const base = new THREE.Mesh(baseGeo, this.matConcrete);
+    base.position.set(x, 1.5, z);
+    base.receiveShadow = true;
+    pad.add(base);
+
+    const columnGeo = new THREE.BoxGeometry(1.2, height, 1.2);
+    for (const dx of [-towerWidth / 2, towerWidth / 2]) {
+      for (const dz of [-towerWidth / 2, towerWidth / 2]) {
         const col = new THREE.Mesh(columnGeo, this.matTower);
-        col.position.set(towerX + dx, towerHeight / 2, towerZ + dz);
+        col.position.set(x + dx, height / 2, z + dz);
         col.castShadow = true;
         pad.add(col);
       }
     }
 
-    // Horizontal Lattice Bracing (shared geometries)
+    // Horizontal lattice bracing and X-bracing on every second bay
     const beamXGeo = new THREE.BoxGeometry(towerWidth, 0.7, 0.7);
     const beamZGeo = new THREE.BoxGeometry(0.7, 0.7, towerWidth);
-    for (let y = 12; y < towerHeight; y += 16) {
+    const diagonalGeo = new THREE.BoxGeometry(0.32, 0.32, Math.hypot(towerWidth, 16.0));
+    for (let y = 12; y < height; y += 16) {
       const beamX = new THREE.Mesh(beamXGeo, this.matTower);
-      beamX.position.set(towerX, y, towerZ - towerWidth / 2);
+      beamX.position.set(x, y, z - towerWidth / 2);
       pad.add(beamX);
-
       const beamX2 = new THREE.Mesh(beamXGeo, this.matTower);
-      beamX2.position.set(towerX, y, towerZ + towerWidth / 2);
+      beamX2.position.set(x, y, z + towerWidth / 2);
       pad.add(beamX2);
-
       const beamZ = new THREE.Mesh(beamZGeo, this.matTower);
-      beamZ.position.set(towerX - towerWidth / 2, y, towerZ);
+      beamZ.position.set(x - towerWidth / 2, y, z);
       pad.add(beamZ);
-
       const beamZ2 = new THREE.Mesh(beamZGeo, this.matTower);
-      beamZ2.position.set(towerX + towerWidth / 2, y, towerZ);
+      beamZ2.position.set(x + towerWidth / 2, y, z);
       pad.add(beamZ2);
+
+      if ((y / 16) % 2 === 0 && y + 16 < height) {
+        for (const side of [-1, 1]) {
+          const diag = new THREE.Mesh(diagonalGeo, this.matTower);
+          diag.position.set(x + side * towerWidth / 2, y + 8, z);
+          diag.rotation.x = side * Math.atan2(towerWidth, 16.0);
+          pad.add(diag);
+        }
+      }
     }
 
-    // Top Tower Crane Boom
-    const craneBoom = new THREE.Mesh(new THREE.BoxGeometry(24, 1.8, 1.8), this.matTower);
-    craneBoom.position.set(towerX - 6, towerHeight + 2, towerZ);
-    pad.add(craneBoom);
+    // Top machinery deck
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(towerWidth + 4, 1.2, towerWidth + 4), this.matTower);
+    deck.position.set(x, height + 0.6, z);
+    pad.add(deck);
 
-    // Functional Articulated Chopsticks Carriage (Ref Image 1: The Mechazilla Catch Arms!)
-    this.chopsticksCarriage = new THREE.Group();
-    this.chopsticksCarriage.position.set(towerX - towerWidth / 2, 85, towerZ);
+    if (withCrane) {
+      const craneBoom = new THREE.Mesh(new THREE.BoxGeometry(24, 1.8, 1.8), this.matTower);
+      craneBoom.position.set(x - 6, height + 3.2, z);
+      pad.add(craneBoom);
+      const craneCounter = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 3.2), this.matDarkMetal);
+      craneCounter.position.set(x + 9, height + 3.2, z);
+      pad.add(craneCounter);
+    }
 
-    const carriageFrame = new THREE.Mesh(new THREE.BoxGeometry(4.0, 8.0, 11.0), this.matDarkMetal);
+    if (withQD) {
+      const qdArm = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 1.8), this.matTower);
+      qdArm.position.set(x - 8.5, 58, z);
+      pad.add(qdArm);
+      const qdPlate = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.2, 2.6), this.matDarkMetal);
+      qdPlate.position.set(x - 13.6, 58, z);
+      pad.add(qdPlate);
+    }
+
+    // Signage so the three towers are instantly readable from the ground
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(9.5, 2.35),
+      new THREE.MeshBasicMaterial({
+        map: createLabelTexture(title, `${height.toFixed(0)} m MECHAZILLA`, title.includes('CATCH') ? '#ffb547' : '#38e8ff'),
+        transparent: true,
+        side: THREE.DoubleSide
+      })
+    );
+    sign.position.set(x, height - 10.0, z + towerWidth / 2 + 0.12);
+    pad.add(sign);
+
+    // Articulated chopstick carriage. Arms are deliberately longer than the
+    // 18 m catch radius so the tips surround the vehicle's forward pins.
+    const carriage = new THREE.Group();
+    carriage.position.set(x - towerWidth / 2, armY, z);
+    carriage.userData.noMerge = true;
+    pad.add(carriage);
+
+    const carriageFrame = new THREE.Mesh(new THREE.BoxGeometry(4.2, 8.0, 11.0), this.matDarkMetal);
     carriageFrame.position.set(1.5, 0, 0);
-    this.chopsticksCarriage.add(carriageFrame);
+    carriageFrame.castShadow = true;
+    carriage.add(carriageFrame);
 
-    const armGeo = new THREE.BoxGeometry(20, 1.6, 1.4);
-    armGeo.translate(-10, 0, 0); // pivot at root
+    const armGeo = new THREE.BoxGeometry(22, 1.6, 1.4);
+    armGeo.translate(-11, 0, 0); // pivot at root
 
-    // Left Chopstick Arm with Hinge
-    this.leftChopstickHinge = new THREE.Group();
-    this.leftChopstickHinge.position.set(0, 0, -4.6);
+    const leftHinge = new THREE.Group();
+    leftHinge.position.set(0, 0, -5.9);
     const leftArm = new THREE.Mesh(armGeo, this.matDarkMetal);
-    this.leftChopstickHinge.add(leftArm);
-    this.leftChopstickHinge.rotation.y = 0.22;
-    this.chopsticksCarriage.add(this.leftChopstickHinge);
+    leftArm.castShadow = true;
+    leftHinge.add(leftArm);
+    leftHinge.rotation.y = -0.42;
+    carriage.add(leftHinge);
 
-    // Right Chopstick Arm with Hinge
-    this.rightChopstickHinge = new THREE.Group();
-    this.rightChopstickHinge.position.set(0, 0, 4.6);
+    const rightHinge = new THREE.Group();
+    rightHinge.position.set(0, 0, 5.9);
     const rightArm = new THREE.Mesh(armGeo, this.matDarkMetal);
-    this.rightChopstickHinge.add(rightArm);
-    this.rightChopstickHinge.rotation.y = -0.22;
-    this.chopsticksCarriage.add(this.rightChopstickHinge);
+    rightArm.castShadow = true;
+    rightHinge.add(rightArm);
+    rightHinge.rotation.y = 0.42;
+    carriage.add(rightHinge);
 
-    pad.add(this.chopsticksCarriage);
+    // High-visibility catch pads at the arm tips. They line up with the pins
+    // when the carriage is at the vehicle's forward-pin height.
+    const catchPadMat = new THREE.MeshBasicMaterial({
+      color: key === 'launch' ? 0x38e8ff : 0xffb547
+    });
+    const padGeo = new THREE.BoxGeometry(2.4, 0.35, 0.35);
+    for (const hinge of [leftHinge, rightHinge]) {
+      const catchPad = new THREE.Mesh(padGeo, catchPadMat);
+      catchPad.position.set(-20.4, 0.0, hinge === leftHinge ? 0.72 : -0.72);
+      hinge.add(catchPad);
+    }
 
-    // Quick Disconnect (QD) Umbilical Arm connecting tower to rocket
-    const qdArm = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 1.8), this.matTower);
-    qdArm.position.set(towerX - 8.5, 36, towerZ);
-    pad.add(qdArm);
+    // Hydraulic actuators that visibly drive the arm closure
+    const ramGeo = new THREE.CylinderGeometry(0.22, 0.22, 6.0, 8);
+    for (const [hinge, side] of [[leftHinge, -1], [rightHinge, 1]]) {
+      const ram = new THREE.Mesh(ramGeo, this.matSteel);
+      ram.position.set(-4.0, 0, side * 1.1);
+      ram.rotation.z = Math.PI / 2;
+      hinge.add(ram);
+    }
 
-    // Build the broader Mars Starbase complex (Ref Images 2 & 3)
-    this.buildExpandedMarsStarbase(pad);
+    this.towers[key] = {
+      key,
+      x,
+      z,
+      height,
+      armY,
+      carriage,
+      leftHinge,
+      rightHinge,
+      catchPadMat,
+      sign
+    };
+    return this.towers[key];
+  }
 
-    // Bake the static pad, tower and outbuildings into a handful of meshes.
-    // The animated chopsticks carriage is deliberately excluded.
-    mergeStaticGroup(pad, [this.chopsticksCarriage]);
+  // -------------------------------------------------------------
+  // AUTONOMOUS STACKING CRANE ON THE LAUNCH TOWER
+  // -------------------------------------------------------------
+  buildStackerCrane(pad) {
+    const pivotY = L.launchTower.height + 4.2;
+    const yaw = new THREE.Group();
+    yaw.position.set(L.launchTower.x, pivotY, L.launchTower.z);
+    yaw.userData.noMerge = true;
+    pad.add(yaw);
+
+    const kingpost = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 7, 12), this.matTower);
+    kingpost.position.y = 2.5;
+    yaw.add(kingpost);
+
+    const boomLength = 82.0;
+    const boom = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.8, boomLength), this.matTower);
+    boom.position.set(0, 3.4, boomLength / 2);
+    boom.castShadow = true;
+    yaw.add(boom);
+
+    // Counter-jib and counterweight
+    const counterJib = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.4, 18), this.matTower);
+    counterJib.position.set(0, 3.4, -9);
+    yaw.add(counterJib);
+    const counterweight = new THREE.Mesh(new THREE.BoxGeometry(6, 3.2, 4), this.matDarkMetal);
+    counterweight.position.set(0, 2.2, -17);
+    yaw.add(counterweight);
+
+    // Trolley, variable-length cable and capture clamp
+    const trolley = new THREE.Group();
+    trolley.position.set(0, 3.2, 40);
+    yaw.add(trolley);
+    const trolleyBody = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.4, 3.2), this.matDarkMetal);
+    trolley.add(trolleyBody);
+
+    const cableGeo = new THREE.CylinderGeometry(0.12, 0.12, 1, 6);
+    cableGeo.translate(0, -0.5, 0);
+    const cable = new THREE.Mesh(cableGeo, this.matSteel);
+    cable.position.y = -0.4;
+    cable.scale.y = 40;
+    trolley.add(cable);
+
+    const clamp = new THREE.Group();
+    clamp.position.y = -40;
+    trolley.add(clamp);
+
+    const clampHead = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.4, 6.2), this.matDarkMetal);
+    clamp.add(clampHead);
+    const fingerGeo = new THREE.BoxGeometry(1.0, 7.0, 1.2);
+    for (const sx of [-1, 1]) {
+      const finger = new THREE.Mesh(fingerGeo, this.matDarkMetal);
+      finger.position.set(sx * 4.4, -3.0, 0);
+      clamp.add(finger);
+    }
+    const clampLampMat = new THREE.MeshBasicMaterial({ color: 0x34d399 });
+    for (const sx of [-1, 1]) {
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 3.6), clampLampMat);
+      lamp.position.set(sx * 3.4, -6.0, 0);
+      clamp.add(lamp);
+    }
+
+    this.stacker = {
+      yaw,
+      trolley,
+      cable,
+      clamp,
+      pivotY,
+      boomLength,
+      clampLampMat,
+      // Start stowed pointing at the pad centre.
+      targetYaw: -Math.PI / 2,
+      currentYaw: -Math.PI / 2
+    };
+    yaw.rotation.y = this.stacker.currentYaw;
+  }
+
+  // -------------------------------------------------------------
+  // STARSHIP FACTORY, CONVEYOR, ERECTOR & INSPECTION YARD
+  // -------------------------------------------------------------
+  buildProductionComplex(pad) {
+    this.buildFactory(pad);
+    this.buildConveyor(pad);
+    this.buildErector(pad);
+    this.buildInspectionYard(pad);
+    this.buildRecoveryCrawlers(pad);
+    this.buildYardRoads(pad);
+  }
+
+  buildFactory(pad) {
+    const f = L.factory;
+    const group = new THREE.Group();
+    group.position.set(f.x, 0, f.z);
+
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(f.width + 16, 1.2, f.depth + 16), this.matConcrete);
+    slab.position.y = 0.6;
+    slab.receiveShadow = true;
+    group.add(slab);
+
+    const hallMat = new THREE.MeshStandardMaterial({
+      color: 0xa9b2bd,
+      metalness: 0.62,
+      roughness: 0.46,
+      envMapIntensity: 0.8
+    });
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(f.width, 34, f.depth), hallMat);
+    hall.position.y = 17.6;
+    hall.castShadow = hall.receiveShadow = true;
+    group.add(hall);
+
+    // Corrugated wall ribs
+    const ribGeo = new THREE.BoxGeometry(0.5, 32, 0.5);
+    for (let x = -f.width / 2 + 4; x <= f.width / 2 - 4; x += 8) {
+      for (const side of [-1, 1]) {
+        const rib = new THREE.Mesh(ribGeo, this.matTower);
+        rib.position.set(x, 17.6, side * (f.depth / 2 + 0.2));
+        group.add(rib);
+      }
+    }
+
+    // Sawtooth roof with north-light glazing
+    const sawMat = new THREE.MeshStandardMaterial({
+      color: 0x2c3540,
+      metalness: 0.7,
+      roughness: 0.5
+    });
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: 0x1b2b33,
+      emissive: new THREE.Color(0x7fd6ff),
+      emissiveIntensity: 0.55,
+      roughness: 0.35,
+      metalness: 0.2
+    });
+    for (let i = 0; i < 8; i++) {
+      const z = -f.depth / 2 + 6 + i * 10;
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(f.width - 2, 1.0, 11.5), sawMat);
+      roof.position.set(0, 36.4, z);
+      roof.rotation.x = -0.28;
+      group.add(roof);
+      const glazing = new THREE.Mesh(new THREE.BoxGeometry(f.width - 3, 0.7, 3.2), glowMat);
+      glazing.position.set(0, 34.6, z + 5.0);
+      group.add(glazing);
+    }
+
+    // Main conveyor door on the west face
+    const doorGlow = new THREE.Mesh(
+      new THREE.BoxGeometry(0.4, 15, 18),
+      new THREE.MeshStandardMaterial({
+        color: 0x0b1016,
+        emissive: new THREE.Color(0x6ad8ff),
+        emissiveIntensity: 0.7,
+        metalness: 0.4,
+        roughness: 0.4
+      })
+    );
+    doorGlow.position.set(-f.width / 2 + 0.1, 10.5, f.conveyorDoorZ - f.z);
+    group.add(doorGlow);
+    this.factoryDoorGlowMat = doorGlow.material;
+
+    const doorFrameGeo = new THREE.BoxGeometry(1.2, 17, 1.6);
+    for (const dz of [-9.6, 9.6]) {
+      const frame = new THREE.Mesh(doorFrameGeo, this.matTower);
+      frame.position.set(-f.width / 2 - 0.2, 10.5, f.conveyorDoorZ - f.z + dz);
+      group.add(frame);
+    }
+    const doorLintel = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.8, 21), this.matTower);
+    doorLintel.position.set(-f.width / 2 - 0.2, 19.5, f.conveyorDoorZ - f.z);
+    group.add(doorLintel);
+
+    // Recovery door on the south face
+    const recoveryGlow = new THREE.Mesh(
+      new THREE.BoxGeometry(20, 18, 0.4),
+      new THREE.MeshStandardMaterial({
+        color: 0x0b1016,
+        emissive: new THREE.Color(0xff9d3c),
+        emissiveIntensity: 0.55,
+        roughness: 0.5,
+        metalness: 0.3
+      })
+    );
+    recoveryGlow.position.set(f.recoveryDoorX - f.x, 10.2, f.depth / 2 + 0.05);
+    group.add(recoveryGlow);
+
+    // Factory signage
+    const signMat = new THREE.MeshBasicMaterial({
+      map: createLabelTexture('STARSHIP FABRICATION', 'AUTONOMOUS PRODUCTION LINE // BAYS 01-04', '#38e8ff'),
+      transparent: true,
+      side: THREE.DoubleSide
+    });
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(46, 11.5), signMat);
+    sign.position.set(-f.width / 2 - 0.3, 28, f.conveyorDoorZ - f.z);
+    sign.rotation.y = -Math.PI / 2;
+    group.add(sign);
+
+    // Roof vents and aviation beacons
+    const ventGeo = new THREE.CylinderGeometry(2.4, 3.0, 7, 12);
+    for (const [vx, vz] of [[-32, -20], [0, 12], [34, -6], [18, 28]]) {
+      const vent = new THREE.Mesh(ventGeo, this.matDarkMetal);
+      vent.position.set(vx, 40, vz);
+      group.add(vent);
+    }
+    this.factoryBeaconMat = new THREE.MeshBasicMaterial({ color: 0xff4b2e });
+    const beaconGeo = new THREE.SphereGeometry(0.8, 8, 6);
+    for (const [bx, bz] of [[-f.width / 2, -f.depth / 2], [f.width / 2, -f.depth / 2], [f.width / 2, f.depth / 2], [-f.width / 2, f.depth / 2]]) {
+      const beacon = new THREE.Mesh(beaconGeo, this.factoryBeaconMat);
+      beacon.position.set(bx, 35.8, bz);
+      group.add(beacon);
+    }
+
+    // Internal gantry visible through the open door
+    const gantryMat = this.matDarkMetal;
+    for (let gx = -40; gx <= 40; gx += 20) {
+      const mast = new THREE.Mesh(new THREE.BoxGeometry(1.6, 30, 1.6), gantryMat);
+      mast.position.set(gx, 15.6, 34);
+      group.add(mast);
+    }
+    const gantryRail = new THREE.Mesh(new THREE.BoxGeometry(84, 2.2, 2.2), gantryMat);
+    gantryRail.position.set(0, 31, 34);
+    group.add(gantryRail);
+
+    pad.add(group);
+    this.factoryGroup = group;
+  }
+
+  buildConveyor(pad) {
+    const beltY = L.conveyor.beltY;
+    const path = L.conveyor.path;
+    const beltMat = new THREE.MeshStandardMaterial({
+      color: 0x232a32,
+      metalness: 0.45,
+      roughness: 0.72
+    });
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0xffb547,
+      metalness: 0.5,
+      roughness: 0.4,
+      emissive: new THREE.Color(0x5a3400),
+      emissiveIntensity: 0.35
+    });
+
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i];
+      const b = path[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = Math.hypot(dx, dz);
+      const midX = (a.x + b.x) / 2;
+      const midZ = (a.z + b.z) / 2;
+      const yaw = Math.atan2(dx, dz);
+
+      const belt = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.5, len), beltMat);
+      belt.position.set(midX, beltY, midZ);
+      belt.rotation.y = yaw;
+      belt.receiveShadow = true;
+      pad.add(belt);
+
+      const truss = new THREE.Mesh(new THREE.BoxGeometry(6.0, 1.8, len), this.matTower);
+      truss.position.set(midX, beltY - 1.25, midZ);
+      truss.rotation.y = yaw;
+      pad.add(truss);
+
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, len), railMat);
+        rail.position.set(midX + Math.cos(yaw) * side * 2.8, beltY + 0.55, midZ - Math.sin(yaw) * side * 2.8);
+        rail.rotation.y = yaw;
+        pad.add(rail);
+      }
+
+      // Support towers every ~20 m
+      const supports = Math.max(2, Math.floor(len / 22));
+      for (let s = 0; s <= supports; s++) {
+        const t = s / supports;
+        const px = a.x + dx * t;
+        const pz = a.z + dz * t;
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(1.1, beltY - 0.8, 1.1), this.matTower);
+        leg.position.set(px, (beltY - 0.8) / 2, pz);
+        pad.add(leg);
+      }
+    }
+
+    // Transfer turntables at the two corners
+    const turntableGeo = new THREE.CylinderGeometry(6.2, 6.6, 1.2, 20);
+    const turntableMat = new THREE.MeshStandardMaterial({
+      color: 0x3a414a,
+      metalness: 0.8,
+      roughness: 0.4
+    });
+    for (let i = 1; i < path.length - 1; i++) {
+      const turn = new THREE.Mesh(turntableGeo, turntableMat);
+      turn.position.set(path[i].x, beltY + 0.15, path[i].z);
+      pad.add(turn);
+    }
+    this.conveyor = { beltY, path };
+  }
+
+  buildErector(pad) {
+    const e = L.erector;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(10, 11, 1.6, 18), this.matConcrete);
+    base.position.set(e.x, 0.8, e.z);
+    pad.add(base);
+
+    const pivot = new THREE.Group();
+    pivot.position.set(e.x, e.baseY, e.z);
+    pivot.userData.noMerge = true;
+    pad.add(pivot);
+
+    const cradleMat = new THREE.MeshStandardMaterial({
+      color: 0x46505c,
+      metalness: 0.85,
+      roughness: 0.34
+    });
+    const spine = new THREE.Mesh(new THREE.BoxGeometry(4.2, 46, 1.6), cradleMat);
+    spine.position.set(21, 23, 0);
+    pivot.add(spine);
+    for (const dz of [-6.0, 6.0]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(3.4, 44, 1.0), cradleMat);
+      rail.position.set(22, 22, dz);
+      pivot.add(rail);
+    }
+
+    // Hydraulic erector rams anchored to the ground
+    const ramMat = new THREE.MeshStandardMaterial({ color: 0xd7a94b, metalness: 0.7, roughness: 0.4 });
+    const ramGeo = new THREE.CylinderGeometry(0.9, 1.2, 34, 10);
+    for (const dz of [-7.5, 7.5]) {
+      const ram = new THREE.Mesh(ramGeo, ramMat);
+      ram.position.set(31, 9, dz);
+      ram.rotation.z = 0.8;
+      pad.add(ram);
+    }
+
+    this.erector = { pivot, baseY: e.baseY, x: e.x, z: e.z, cradleLength: 46 };
+  }
+
+  buildInspectionYard(pad) {
+    this.reviewScanners = {};
+    for (const kind of ['booster', 'ship']) {
+      const point = L.review[kind];
+      const group = new THREE.Group();
+      group.position.set(point.x, 0, point.z);
+
+      const slab = new THREE.Mesh(new THREE.CylinderGeometry(15, 16, 1.2, 20), this.matConcrete);
+      slab.position.y = 0.6;
+      group.add(slab);
+
+      // Tall scanning gantry with a vertically travelling beam
+      const gantryMat = this.matTower;
+      for (const sx of [-1, 1]) {
+        const upright = new THREE.Mesh(new THREE.BoxGeometry(1.8, 62, 1.8), gantryMat);
+        upright.position.set(sx * 8.0, 31, 0);
+        group.add(upright);
+      }
+      const topBeam = new THREE.Mesh(new THREE.BoxGeometry(18, 2.0, 2.4), gantryMat);
+      topBeam.position.set(0, 62, 0);
+      group.add(topBeam);
+
+      const scannerMat = new THREE.MeshBasicMaterial({ color: 0x38e8ff, transparent: true, opacity: 0.9 });
+      const scannerBar = new THREE.Mesh(new THREE.BoxGeometry(14, 0.5, 1.4), scannerMat);
+      scannerBar.position.set(0, 2, 0);
+      group.add(scannerBar);
+
+      const scannerBeam = new THREE.Mesh(
+        new THREE.PlaneGeometry(14, 6),
+        new THREE.MeshBasicMaterial({
+          color: 0x38e8ff,
+          transparent: true,
+          opacity: 0.16,
+          side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        })
+      );
+      scannerBeam.rotation.x = -Math.PI / 2;
+      scannerBeam.position.set(0, -2.6, 0);
+      scannerBar.add(scannerBeam);
+
+      const sign = new THREE.Mesh(
+        new THREE.PlaneGeometry(14, 3.5),
+        new THREE.MeshBasicMaterial({
+          map: createLabelTexture(
+            kind === 'booster' ? 'BOOSTER REVIEW' : 'STARSHIP REVIEW',
+            'AUTOMATED INSPECTION / REFURBISHMENT',
+            kind === 'booster' ? '#ffb547' : '#38e8ff'
+          ),
+          transparent: true,
+          side: THREE.DoubleSide
+        })
+      );
+      sign.position.set(0, 52, -9.0);
+      sign.rotation.y = Math.PI;
+      group.add(sign);
+
+      const lampMat = new THREE.MeshBasicMaterial({ color: 0xffb547 });
+      for (const sx of [-1, 1]) {
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), lampMat);
+        lamp.position.set(sx * 10, 64, 0);
+        group.add(lamp);
+      }
+
+      pad.add(group);
+      this.reviewScanners[kind] = {
+        bar: scannerBar,
+        beam: scannerBeam,
+        mat: scannerMat,
+        baseY: 2
+      };
+    }
+
+    // Yard control room between the two inspection bays
+    const control = new THREE.Group();
+    control.position.set(0, 0, 205);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(26, 9, 14), this.matWhiteTank);
+    body.position.y = 4.5;
+    control.add(body);
+    const glass = new THREE.Mesh(
+      new THREE.BoxGeometry(20, 3.2, 0.3),
+      new THREE.MeshStandardMaterial({
+        color: 0x0a1b24,
+        emissive: new THREE.Color(0x58cfff),
+        emissiveIntensity: 0.55,
+        metalness: 0.5,
+        roughness: 0.2
+      })
+    );
+    glass.position.set(0, 6.0, 7.1);
+    control.add(glass);
+    this.reviewBeaconMat = new THREE.MeshBasicMaterial({ color: 0x34d399 });
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), this.reviewBeaconMat);
+    beacon.position.set(0, 9.8, 0);
+    control.add(beacon);
+    pad.add(control);
+  }
+
+  buildRecoveryCrawlers(pad) {
+    this.crawlers = {};
+    for (const kind of ['booster', 'ship']) {
+      const crawler = new THREE.Group();
+      crawler.userData.noMerge = true;
+      crawler.position.set(L.factory.recoveryDoorX, 0, L.factory.recoveryDoorZ + (kind === 'booster' ? 8 : -8));
+
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(16, 1.8, 12), this.matDarkMetal);
+      deck.position.y = 2.1;
+      crawler.add(deck);
+
+      const cradleMat = new THREE.MeshStandardMaterial({
+        color: kind === 'booster' ? 0xd7a94b : 0x7fd6ff,
+        metalness: 0.8,
+        roughness: 0.35
+      });
+      const cradle = new THREE.Mesh(
+        new THREE.TorusGeometry(kind === 'booster' ? 6.0 : 5.4, 0.45, 8, 24),
+        cradleMat
+      );
+      cradle.rotation.x = Math.PI / 2;
+      cradle.position.y = 4.2;
+      crawler.add(cradle);
+
+      const wheelGeo = new THREE.CylinderGeometry(1.7, 1.7, 1.4, 12);
+      wheelGeo.rotateZ(Math.PI / 2);
+      for (const wx of [-6.2, 0, 6.2]) {
+        for (const wz of [-5.2, 5.2]) {
+          const wheel = new THREE.Mesh(wheelGeo, this.matDarkMetal);
+          wheel.position.set(wx, 1.7, wz);
+          crawler.add(wheel);
+        }
+      }
+
+      const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffb547 });
+      for (const sx of [-1, 1]) {
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), beaconMat);
+        lamp.position.set(sx * 8.0, 4.6, 0);
+        crawler.add(lamp);
+      }
+
+      pad.add(crawler);
+      this.crawlers[kind] = { group: crawler, baseY: 3.0, loadY: 3.0 };
+    }
+  }
+
+  buildYardRoads(pad) {
+    const roadMat = new THREE.MeshStandardMaterial({
+      color: 0x2b2b2e,
+      metalness: 0.15,
+      roughness: 0.92
+    });
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf0b429 });
+    // Unique segment set (routes overlap around the factory)
+    const seen = new Set();
+    const addSegment = (a, b) => {
+      const key = `${a.x},${a.z}-${b.x},${b.z}`;
+      const rev = `${b.x},${b.z}-${a.x},${a.z}`;
+      if (seen.has(key) || seen.has(rev)) return;
+      seen.add(key);
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = Math.hypot(dx, dz);
+      if (len < 1) return;
+      const midX = (a.x + b.x) / 2;
+      const midZ = (a.z + b.z) / 2;
+      const yaw = Math.atan2(dx, dz);
+      const road = new THREE.Mesh(new THREE.BoxGeometry(13, 0.12, len), roadMat);
+      road.position.set(midX, 0.08, midZ);
+      road.rotation.y = yaw;
+      road.receiveShadow = true;
+      pad.add(road);
+
+      const dashes = Math.max(1, Math.floor(len / 18));
+      for (let i = 0; i < dashes; i++) {
+        const t = (i + 0.5) / dashes;
+        const dash = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.03, 5), lineMat);
+        dash.position.set(a.x + dx * t, 0.16, a.z + dz * t);
+        dash.rotation.y = yaw;
+        pad.add(dash);
+      }
+    };
+    const routeSets = [
+      L.routes.boosterToReview,
+      L.routes.boosterToFactory,
+      L.routes.boosterRollout,
+      L.routes.shipToReview,
+      L.routes.shipToFactory
+    ];
+    for (const route of routeSets) {
+      for (let i = 0; i < route.length - 1; i++) addSegment(route[i], route[i + 1]);
+    }
   }
 
   // -------------------------------------------------------------
@@ -1172,11 +1860,13 @@ export class StarshipMissionVehicle {
       B.add(chine);
     }
 
-    // Forward Catch Pins / Lifting Strakes
-    const pinGeo = new THREE.BoxGeometry(2.4, 0.9, 1.4);
-    for (const sx of [-1, 1]) {
+    // Forward Catch Pins / Lifting Strakes.
+    // They protrude on the ±Z axis so the two chopstick beams (which close on
+    // ±Z) land squarely on the pin saddles at 65.5 m above the booster base.
+    const pinGeo = new THREE.BoxGeometry(1.4, 0.9, 1.7);
+    for (const sz of [-1, 1]) {
       const pin = new THREE.Mesh(pinGeo, this.matDarkMetal);
-      pin.position.set(sx * (radius + 0.8), boosterHeight - 4.5, 0);
+      pin.position.set(0, boosterHeight - 4.5, sz * (radius + 0.35));
       B.add(pin);
     }
 
@@ -1355,10 +2045,12 @@ export class StarshipMissionVehicle {
     raceway.position.set(0, (barrelH + noseH * 0.6) / 2, -(r + 0.1));
     S.add(raceway);
 
-    // Starship Forward Structural Load-Bearing Catch Pins (for Mechazilla Tower Catch)
-    for (const sx of [-1, 1]) {
-      const shipPin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.85), this.matDarkMetal);
-      shipPin.position.set(sx * (r + 0.65), barrelH - 2.2, 0);
+    // Starship Forward Structural Load-Bearing Catch Pins (for Mechazilla Tower Catch).
+    // The dedicated ship tower closes its arms from ±Z, so the pins are aligned
+    // to that axis and centred exactly at 31.8 m above the ship's base.
+    for (const sz of [-1, 1]) {
+      const shipPin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.55, 1.7), this.matDarkMetal);
+      shipPin.position.set(0, barrelH - 2.2, sz * (r + 0.35));
       S.add(shipPin);
     }
 
@@ -1656,13 +2348,37 @@ export class StarshipMissionVehicle {
     }
   }
 
-  setChopsticks(catchFactor0to1, carriageHeight = 85.0) {
-    if (!this.chopsticksCarriage || !this.leftChopstickHinge || !this.rightChopstickHinge) return;
-    this.chopsticksCarriage.position.y = carriageHeight;
+  setTowerArms(key, catchFactor0to1, carriageHeight = null) {
+    const tower = this.towers?.[key];
+    if (!tower) return;
+    if (Number.isFinite(carriageHeight)) tower.carriage.position.y = carriageHeight;
+    const t = THREE.MathUtils.clamp(catchFactor0to1, 0.0, 1.0);
+    // 0 = arms splayed wide (25 m tip-to-tip), 1 = they meet the pin saddles.
+    const openAngle = 0.42 * (1.0 - t);
+    tower.leftHinge.rotation.y = -openAngle;
+    tower.rightHinge.rotation.y = openAngle;
+    tower.catchPadMat.color.setHex(
+      t > 0.92 ? 0x34d399 : (key === 'launch' ? 0x38e8ff : 0xffb547)
+    );
+  }
 
-    const angle = THREE.MathUtils.lerp(0.42, 0.06, catchFactor0to1);
-    this.leftChopstickHinge.rotation.y = angle;
-    this.rightChopstickHinge.rotation.y = -angle;
+  // Legacy entry point used by the old launch-tower catch logic. It now targets
+  // the dedicated tower for the active vehicle instead of the launch tower.
+  setChopsticks(catchFactor0to1, carriageHeight = null) {
+    this.setTowerArms('launch', catchFactor0to1, carriageHeight);
+  }
+
+  setBoosterChopsticks(catchFactor0to1, carriageHeight = null) {
+    this.setTowerArms('booster', catchFactor0to1, carriageHeight);
+  }
+
+  setShipChopsticks(catchFactor0to1, carriageHeight = null) {
+    this.setTowerArms('ship', catchFactor0to1, carriageHeight);
+  }
+
+  // Launch tower arms hold the ship at its 128.8 m pin plane during stacking.
+  setLaunchChopsticks(catchFactor0to1, carriageHeight = null) {
+    this.setTowerArms('launch', catchFactor0to1, carriageHeight);
   }
 
   setCargoDoors(openFactor0to1) {
@@ -1792,8 +2508,61 @@ export class StarshipMissionVehicle {
     }
   }
 
+  // -------------------------------------------------------------
+  // AUTOMATED YARD RIGGING INTERFACE (used by StarbaseOperations)
+  // -------------------------------------------------------------
+  setStackerPose(yaw, trolleyDistance, cableLength, clampClosed = false) {
+    const s = this.stacker;
+    if (!s) return;
+    s.yaw.rotation.y = yaw;
+    s.currentYaw = yaw;
+    s.trolley.position.z = THREE.MathUtils.clamp(trolleyDistance, 8.0, s.boomLength - 4.0);
+    const length = Math.max(4.0, cableLength);
+    s.cable.scale.y = length;
+    s.clamp.position.y = -length;
+    s.clampLampMat.color.setHex(clampClosed ? 0x34d399 : 0xffb547);
+    for (const child of s.clamp.children) {
+      if (child.geometry && child.geometry.type === 'BoxGeometry' && child.geometry.parameters.height === 7.0) {
+        child.position.x = clampClosed ? (child.position.x > 0 ? 3.1 : -3.1) : (child.position.x > 0 ? 4.4 : -4.4);
+      }
+    }
+  }
+
+  setErectorAngle(angle) {
+    if (this.erector?.pivot) {
+      this.erector.pivot.rotation.z = THREE.MathUtils.clamp(angle, 0, Math.PI * 0.5);
+    }
+  }
+
+  setReviewScan(kind, active, progress = 0) {
+    const scanner = this.reviewScanners?.[kind];
+    if (!scanner) return;
+    scanner.bar.visible = active;
+    if (!active) return;
+    // Scan from the base to the nose and back, driven by the lane timer.
+    const sweep = (Math.sin(progress * Math.PI * 2 - Math.PI / 2) + 1) * 0.5;
+    const top = kind === 'booster' ? 56.0 : 44.0;
+    scanner.bar.position.y = 3.0 + sweep * top;
+    scanner.mat.opacity = 0.55 + 0.35 * Math.sin(progress * 40.0);
+    scanner.beam.material.opacity = 0.10 + 0.12 * Math.sin(progress * 27.0 + 1.2);
+  }
+
+  updateFactoryAmbience(dt) {
+    this._yardTime = (this._yardTime || 0) + dt;
+    const t = this._yardTime;
+    if (this.factoryBeaconMat) {
+      const on = (Math.sin(t * 3.1) + 1) * 0.5;
+      this.factoryBeaconMat.color.setRGB(0.35 + on * 0.8, 0.06 + on * 0.18, 0.02);
+    }
+    if (this.reviewBeaconMat) {
+      const on = (Math.sin(t * 1.7 + 1.0) + 1) * 0.5;
+      this.reviewBeaconMat.color.setRGB(0.05 + on * 0.2, 0.35 + on * 0.65, 0.25 + on * 0.4);
+    }
+  }
+
   update(dt) {
     this._fxTime += dt;
+    this.updateFactoryAmbience(dt);
     if (this.jellyfishMesh?.visible && this.jellyfishMat) {
       this.jellyfishMat.uniforms.uTime.value = this._fxTime;
     }

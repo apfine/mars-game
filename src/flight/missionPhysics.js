@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getMarsHeight } from '../terrain/noise.js';
+import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
 
 export const FLIGHT_PHASES = {
   ON_PAD: 'ON_PAD',
@@ -27,6 +28,31 @@ export const BOOSTER_STATES = {
 
 const EARTH_G0 = 9.80665; // Standard Earth gravity for accelerometer G-Force readout (m/s²)
 const MARS_RADIUS = 3389500.0; // Mean Mars radius (m)
+
+// -------------------------------------------------------------
+// LAYERED MARTIAN ATMOSPHERE (0 - 120 km)
+// Each layer has its own scale height and temperature lapse, matching the
+// strong near-surface density gradient, the cold middle atmosphere and the
+// extremely thin upper atmosphere where the plasma sheath forms.
+// -------------------------------------------------------------
+const MARS_R_GAS = 188.92; // Specific gas constant J/(kg K)
+const MARS_GAMMA = 1.33;
+const MARS_SURFACE_DENSITY = 0.020; // kg/m³
+const MARS_ATM_LAYERS = [
+  { bottom: 0, top: 7000, scaleHeight: 11100, tempBottom: 214, tempTop: 206 },
+  { bottom: 7000, top: 18000, scaleHeight: 9600, tempBottom: 206, tempTop: 188 },
+  { bottom: 18000, top: 40000, scaleHeight: 6900, tempBottom: 188, tempTop: 168 },
+  { bottom: 40000, top: 75000, scaleHeight: 4600, tempBottom: 168, tempTop: 150 },
+  { bottom: 75000, top: 120000, scaleHeight: 3100, tempBottom: 150, tempTop: 138 }
+];
+(function buildAtmosphereProfile() {
+  let density = MARS_SURFACE_DENSITY;
+  for (const layer of MARS_ATM_LAYERS) {
+    layer.densityBottom = density;
+    density *= Math.exp(-(layer.top - layer.bottom) / layer.scaleHeight);
+    layer.densityTop = density;
+  }
+})();
 
 // -------------------------------------------------------------
 // VEHICLE MASS & PROPULSION CONSTANTS
@@ -58,6 +84,25 @@ export class StarshipMissionPhysics {
     // Pad ground & OLM table elevation (22m above ground)
     this.padGroundY = getMarsHeight(this.padCoords.x, this.padCoords.y);
     this.padElevation = this.padGroundY + 22.0;
+
+    // Dedicated catch points. Both are world-space and sit exactly on the
+    // centreline of their tower's chopsticks.
+    this.boosterCatchCoords = new THREE.Vector2(
+      this.padCoords.x + L.boosterCatch.x,
+      this.padCoords.y + L.boosterCatch.z
+    );
+    this.shipCatchCoords = new THREE.Vector2(
+      this.padCoords.x + L.shipCatch.x,
+      this.padCoords.y + L.shipCatch.z
+    );
+    this.boosterCatchBaseY = this.padGroundY + L.boosterCatch.baseY;
+    this.shipCatchBaseY = this.padGroundY + L.shipCatch.baseY;
+    // The carriage sits exactly at the forward-pin plane, which is the catch
+    // base plus the vehicle's pin height. This is the invariant that keeps the
+    // arms visually locked to the pins on every catch.
+    this.boosterArmY = L.boosterTower.armY;
+    this.shipArmY = L.shipTower.armY;
+    this.yardControl = false;
 
     // Physical Launch Control Pedestal coordinates (SW perimeter of Launch Pad 1, facing approach)
     const termX = this.padCoords.x - 38.0;
@@ -120,8 +165,30 @@ export class StarshipMissionPhysics {
 
     // Mars atmospheric & gravitational constants
     this.marsGravity = 3.721;    // Surface gravity (m/s²)
-    this.surfaceDensity = 0.020; // Surface atmospheric density (kg/m³)
-    this.scaleHeight = 11100.0;  // Atmospheric scale height (m)
+    this.surfaceDensity = MARS_SURFACE_DENSITY;
+    this.scaleHeight = MARS_ATM_LAYERS[0].scaleHeight;
+    this.atmoDensity = MARS_SURFACE_DENSITY;
+    this.atmoPressurePa = 610;
+    this.atmoTempK = 214;
+    this.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * 214);
+    this.windSpeed = 0;
+    this._atmoSample = {
+      density: MARS_SURFACE_DENSITY,
+      pressure: 610,
+      temperature: 214,
+      soundSpeed: 240,
+      layer: 0,
+      wind: new THREE.Vector3()
+    };
+    this._boosterAtmo = {
+      density: MARS_SURFACE_DENSITY,
+      pressure: 610,
+      temperature: 214,
+      soundSpeed: 240,
+      layer: 0,
+      wind: new THREE.Vector3()
+    };
+    this._relBoosterVel = new THREE.Vector3();
 
     // Physical mass properties (kg) and derived engine state
     this.boosterMass = BOOSTER_DRY_MASS + BOOSTER_PROP_MASS;
@@ -146,8 +213,56 @@ export class StarshipMissionPhysics {
     this._thrustCmd = new THREE.Vector3();
     this._tmpQ = new THREE.Quaternion();
     this._upAxis = new THREE.Vector3(0, 1, 0);
+    this._relVel = new THREE.Vector3();
+    this._wind = new THREE.Vector3();
+    this._capturePoint = new THREE.Vector3();
 
     this.resetToPad();
+  }
+
+  // Piecewise-exponential Martian atmosphere. Returns the exact density,
+  // pressure, temperature, local speed of sound and wind at the current
+  // altitude. This feeds drag, Mach, dynamic pressure and Sutton-Graves heat.
+  sampleAtmosphere(altitude, out = this._atmoSample) {
+    const h = Math.max(0.0, altitude);
+    let temperature;
+    let density;
+    let layerIndex = MARS_ATM_LAYERS.length - 1;
+    let layer = MARS_ATM_LAYERS[layerIndex];
+
+    for (let i = 0; i < MARS_ATM_LAYERS.length; i++) {
+      if (h <= MARS_ATM_LAYERS[i].top) {
+        layer = MARS_ATM_LAYERS[i];
+        layerIndex = i;
+        break;
+      }
+    }
+
+    if (h > MARS_ATM_LAYERS[MARS_ATM_LAYERS.length - 1].top) {
+      const top = MARS_ATM_LAYERS[MARS_ATM_LAYERS.length - 1];
+      density = top.densityTop * Math.exp(-(h - top.top) / 2600.0);
+      temperature = top.tempTop;
+    } else {
+      const span = Math.max(1.0, layer.top - layer.bottom);
+      const f = THREE.MathUtils.clamp((h - layer.bottom) / span, 0.0, 1.0);
+      temperature = THREE.MathUtils.lerp(layer.tempBottom, layer.tempTop, f);
+      density = layer.densityBottom * Math.exp(-(h - layer.bottom) / layer.scaleHeight);
+    }
+
+    const windMagnitude = 6.2 * Math.exp(-h / 9000.0);
+    const windDirection = 0.62 + h * 0.000012;
+    out.wind.set(
+      Math.cos(windDirection) * windMagnitude,
+      0,
+      Math.sin(windDirection) * windMagnitude
+    );
+
+    out.density = density;
+    out.temperature = temperature;
+    out.pressure = density * MARS_R_GAS * temperature;
+    out.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * temperature);
+    out.layer = layerIndex;
+    return out;
   }
 
   resetToPad() {
@@ -206,7 +321,10 @@ export class StarshipMissionPhysics {
 
     this.vehicle.setMated(true);
     this.vehicle.boosterGroup.visible = true;
-    this.vehicle.setChopsticks(0.0, 85.0);
+    this.vehicle.starshipGroup.visible = true;
+    this.vehicle.setLaunchChopsticks(0.0, L.launchTower.armY);
+    this.vehicle.setBoosterChopsticks(0.0, this.boosterArmY);
+    this.vehicle.setShipChopsticks(0.0, this.shipArmY);
     this.vehicle.setCargoDoors(0.0);
     this.vehicle.setLandingLegs(0.0);
     this.vehicle.setBoosterThrottle(0);
@@ -229,9 +347,39 @@ export class StarshipMissionPhysics {
     this.vehicle.starshipGroup.quaternion.identity();
   }
 
-  // -------------------------------------------------------------
-  // MASS / ENGINE HELPERS
-  // -------------------------------------------------------------
+  // Applies yard-owned transforms without running orbital dynamics. Starbase
+  // Operations writes position/quaternion and boosterPosition/quaternion while
+  // this flag is set, so the same hero meshes are reused for recovery,
+  // inspection, refurbishment and the next stack.
+  updateYardVisuals(dt) {
+    this.vehicle.starshipGroup.position.copy(this.position);
+    this.vehicle.starshipGroup.quaternion.copy(this.quaternion);
+    this.vehicle.boosterGroup.position.copy(this.boosterPosition);
+    this.vehicle.boosterGroup.quaternion.copy(this.boosterQuaternion);
+    this.vehicle.setBoosterThrottle(0);
+    this.vehicle.setStarshipThrottle(0, false);
+    this.vehicle.update(dt);
+  }
+
+  // Called once both vehicles are secured in their arms. Hands control of the
+  // vehicles to the yard state machine.
+  beginYardControl() {
+    this.yardControl = true;
+    this.throttle = 0;
+    this.velocity.set(0, 0, 0);
+    this.boosterVelocity.set(0, 0, 0);
+  }
+
+  // Ends yard custody and produces a fresh, fully fuelled, mated stack on the
+  // launch mount with the launch tower arms closed around the ship.
+  prepareNextMission() {
+    this.yardControl = false;
+    this.resetToPad();
+    this.vehicle.setLaunchChopsticks(1.0, L.launchTower.armY);
+    this.boosterState = BOOSTER_STATES.ATTACHED;
+    this.phase = FLIGHT_PHASES.ON_PAD;
+  }
+
   getBoosterMass() {
     return BOOSTER_DRY_MASS + BOOSTER_PROP_MASS * (Math.max(0, this.boosterFuel) / 100);
   }
@@ -369,6 +517,14 @@ export class StarshipMissionPhysics {
     if (dt <= 0) return;
     if (dt > 0.05) dt = 0.05;
 
+    // Automated Starbase recovery/production owns both vehicle transforms while
+    // a catch is being unloaded, inspected, rebuilt and re-stacked. Flight
+    // dynamics resume only after a fresh stack has been armed on the pad.
+    if (this.yardControl) {
+      this.updateYardVisuals(dt);
+      return;
+    }
+
     this.prevVelocity.copy(this.velocity);
 
     // Smoothly animate deployable Landing Legs & Cargo Bay Doors
@@ -384,7 +540,7 @@ export class StarshipMissionPhysics {
     const localTerrainY = getMarsHeight(this.position.x, this.position.z);
     const supportFloorY = (this.vehicle.isMated && Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y) < 30.0)
       ? this.padElevation
-      : (this.shipCaughtByTower ? this.padElevation + 52.0 : localTerrainY);
+      : (this.shipCaughtByTower ? this.shipCatchBaseY : localTerrainY);
 
     this.altitude = Math.max(0.0, this.position.y - this.padElevation);
     const agl = Math.max(0.0, this.position.y - supportFloorY);
@@ -393,15 +549,29 @@ export class StarshipMissionPhysics {
     const rFromCenter = MARS_RADIUS + Math.max(0.0, this.altitude);
     const localGravity = this.marsGravity * Math.pow(MARS_RADIUS / rFromCenter, 2);
 
-    // Mars atmospheric density rho(h) & speed of sound a(h)
-    const marsDensity = this.surfaceDensity * Math.exp(-Math.max(0.0, this.altitude) / this.scaleHeight);
-    const speedOfSound = Math.max(195.0, 240.0 - Math.min(45.0, (this.altitude / 60000.0) * 45.0));
+    // Layered Martian atmosphere: density, pressure, temperature, speed of
+    // sound and the local wind vector (all altitude dependent).
+    const atmo = this.sampleAtmosphere(this.altitude, this._atmoSample);
+    const marsDensity = atmo.density;
+    const speedOfSound = atmo.soundSpeed;
+    const wind = atmo.wind;
+    this.atmoDensity = marsDensity;
+    this.atmoPressurePa = atmo.pressure;
+    this.atmoTempK = atmo.temperature;
+    this.soundSpeed = speedOfSound;
+    this.windSpeed = wind.length();
+    this.atmoLayer = atmo.layer + 1;
+
+    // Air-relative velocity: drag and dynamic pressure use the wind vector, not
+    // the ground speed. At the surface this is a 6 m/s easterly shear layer.
+    const relativeVelocity = this._relVel.copy(this.velocity).sub(wind);
+    const relativeSpeed = relativeVelocity.length();
 
     this.speed = this.velocity.length();
     this.verticalSpeed = this.velocity.y;
     this.horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     this.mach = (this.speed / speedOfSound).toFixed(2);
-    this.dynamicPressure = 0.5 * marsDensity * this.speed * this.speed;
+    this.dynamicPressure = 0.5 * marsDensity * relativeSpeed * relativeSpeed;
 
     // Show Orbital / Suborbital trajectory decision prompt during upper stage ascent before space insertion
     this.showTrajectoryPrompt = (
@@ -565,13 +735,15 @@ export class StarshipMissionPhysics {
       // Uses impact-point guidance: dtGo is the time to the catch plane, so the
       // ship brakes before the tower instead of overshooting at high speed.
       if (this.autoMission && (this.phase === FLIGHT_PHASES.LANDING_FLIP || this.phase === FLIGHT_PHASES.TOUCHDOWN) && this.throttle > 0.05) {
-        const dxPad = this.padCoords.x - this.position.x;
-        const dzPad = this.padCoords.y - this.position.z;
-        const catchY = this.padElevation + 52.0;
-        const dtGo = Math.max(2.0, (this.position.y - catchY) / Math.max(8.0, -this.velocity.y));
-        const latDen = Math.max(4.0, dtGo * dtGo);
-        const latAx = THREE.MathUtils.clamp((2.0 * (dxPad - this.velocity.x * dtGo)) / latDen, -9.5, 9.5);
-        const latAz = THREE.MathUtils.clamp((2.0 * (dzPad - this.velocity.z * dtGo)) / latDen, -9.5, 9.5);
+        const dxPad = this.shipCatchCoords.x - this.position.x;
+        const dzPad = this.shipCatchCoords.y - this.position.z;
+        const catchY = this.shipCatchBaseY;
+        const dtGo = Math.max(1.6, (this.position.y - catchY) / Math.max(6.0, -this.velocity.y));
+        const latDen = Math.max(3.0, dtGo * dtGo);
+        // Impact-point guidance: aim the predicted arrival point at the centre
+        // of the ship tower's arms, not merely at the geometric pad centre.
+        const latAx = THREE.MathUtils.clamp((2.0 * (dxPad - this.velocity.x * dtGo)) / latDen, -12.0, 12.0);
+        const latAz = THREE.MathUtils.clamp((2.0 * (dzPad - this.velocity.z * dtGo)) / latDen, -12.0, 12.0);
         thrustAccel.x = latAx;
         thrustAccel.z = latAz;
       }
@@ -583,8 +755,8 @@ export class StarshipMissionPhysics {
       const activeMass = this.vehicle.isMated
         ? this.getBoosterMass() + this.getShipMass()
         : this.getShipMass();
-      if (this.speed > 0.5 && marsDensity > 1e-8) {
-        const velHat = this._velHat.copy(this.velocity).divideScalar(this.speed);
+      if (relativeSpeed > 0.5 && marsDensity > 1e-8) {
+        const velHat = this._velHat.copy(relativeVelocity).divideScalar(relativeSpeed);
         const cosAlpha = THREE.MathUtils.clamp(bodyNose.dot(velHat), -1.0, 1.0);
         angleOfAttack = Math.acos(cosAlpha); // 0 = nose into wind, PI/2 = broadside belly-flop
         const sinAlpha = Math.sin(angleOfAttack);
@@ -613,8 +785,8 @@ export class StarshipMissionPhysics {
         // impact point (not just the instantaneous velocity), so the ship
         // arrives over Starbase with its horizontal velocity shrinking to zero.
         if (this.autoMission && (this.phase === FLIGHT_PHASES.HYPERSONIC_ENTRY || this.phase === FLIGHT_PHASES.BELLYFLOP)) {
-          const dxPad = this.padCoords.x - this.position.x;
-          const dzPad = this.padCoords.y - this.position.z;
+          const dxPad = this.shipCatchCoords.x - this.position.x;
+          const dzPad = this.shipCatchCoords.y - this.position.z;
           const tGo = Math.max(5.0, (this.altitude - 1200.0) / Math.max(40.0, -this.velocity.y));
           const missX = dxPad - this.velocity.x * tGo;
           const missZ = dzPad - this.velocity.z * tGo;
@@ -703,7 +875,8 @@ export class StarshipMissionPhysics {
     this.horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     this.altitude = Math.max(0.0, this.position.y - this.padElevation);
     this.mach = (this.speed / speedOfSound).toFixed(2);
-    this.dynamicPressure = 0.5 * marsDensity * this.speed * this.speed;
+    this._relVel.copy(this.velocity).sub(atmo.wind);
+    this.dynamicPressure = 0.5 * marsDensity * this._relVel.lengthSq();
 
     const horizDist = Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y);
     this.downrange = (horizDist / 1000.0).toFixed(1);
@@ -847,8 +1020,8 @@ export class StarshipMissionPhysics {
         const tFall = (vyNow > 0 ? vyNow / gNow : 0) +
           Math.sqrt((2 * Math.max(1000.0, deorbitAlt - 30000.0 + apexRise)) / gNow);
 
-        const dxPad = this.padCoords.x - this.position.x;
-        const dzPad = this.padCoords.y - this.position.z;
+        const dxPad = this.shipCatchCoords.x - this.position.x;
+        const dzPad = this.shipCatchCoords.y - this.position.z;
         const horizDist = Math.hypot(dxPad, dzPad);
         const desiredHorizontal = THREE.MathUtils.clamp(horizDist / Math.max(20.0, tFall), 0.0, 420.0);
         const toPadX = horizDist > 0.001 ? dxPad / horizDist : 0;
@@ -920,10 +1093,10 @@ export class StarshipMissionPhysics {
         const bellyPitch = THREE.MathUtils.clamp(Math.PI * 0.5 - (flightPath + 1.13), 0.30, 1.48);
         this.pitch = THREE.MathUtils.lerp(this.pitch, bellyPitch, Math.min(1.0, dt * 2.5));
         this.roll = THREE.MathUtils.lerp(this.roll, 0.0, dt * 2.5);
-        this.vehicle.setChopsticks(0.0, 83.8);
+        this.vehicle.setShipChopsticks(0.0, this.shipArmY);
 
-        const dxPad = this.padCoords.x - this.position.x;
-        const dzPad = this.padCoords.y - this.position.z;
+        const dxPad = this.shipCatchCoords.x - this.position.x;
+        const dzPad = this.shipCatchCoords.y - this.position.z;
         this.vehicle.setFlapDeflection(
           Math.sin(this.missionTime * 2.2) * 0.18 + THREE.MathUtils.clamp(dxPad * 0.002, -0.25, 0.25),
           Math.cos(this.missionTime * 2.4) * 0.14 + THREE.MathUtils.clamp(dzPad * 0.002, -0.25, 0.25)
@@ -944,7 +1117,7 @@ export class StarshipMissionPhysics {
       }
 
       case FLIGHT_PHASES.LANDING_FLIP: {
-        const targetShipCatchY = this.padElevation + 52.0;
+        const targetShipCatchY = this.shipCatchBaseY;
         const heightAboveCatch = Math.max(0.1, this.position.y - targetShipCatchY);
 
         // Rotational PD torque controller swinging Starship from +90° belly-flop to 0° vertical
@@ -972,8 +1145,12 @@ export class StarshipMissionPhysics {
 
         if (heightAboveCatch <= 90.0) {
           const preClose = THREE.MathUtils.clamp((90.0 - heightAboveCatch) / 180.0, 0.0, 0.45);
-          this.vehicle.setChopsticks(preClose, 83.8);
+          this.vehicle.setShipChopsticks(preClose, this.shipArmY);
         }
+
+        // Terminal alignment funnel: null the horizontal offset onto the catch
+        // centreline over the last 60 m so the pins arrive perfectly centred.
+        this.alignShipToCatch(dt, heightAboveCatch);
 
         if (heightAboveCatch <= 12.0 && this.velocity.y > -12.0) {
           this.phase = FLIGHT_PHASES.TOUCHDOWN;
@@ -982,12 +1159,13 @@ export class StarshipMissionPhysics {
       }
 
       case FLIGHT_PHASES.TOUCHDOWN: {
-        const targetShipCatchY = this.padElevation + 52.0;
+        const targetShipCatchY = this.shipCatchBaseY;
         const hAbovePins = Math.max(0.0, this.position.y - targetShipCatchY);
 
         const pitchTorque = (0.0 - this.pitch) * 10.0 - this.pitchVel * 4.5;
         this.pitchVel += pitchTorque * dt;
         this.pitch += this.pitchVel * dt;
+        this.yaw = THREE.MathUtils.lerp(this.yaw, 0.0, 1.0 - Math.exp(-dt * 5.0));
 
         const targetVy = -THREE.MathUtils.clamp(0.35 + hAbovePins * 0.16, 0.35, 5.5);
         const vyErr = targetVy - this.velocity.y;
@@ -995,17 +1173,20 @@ export class StarshipMissionPhysics {
         const shipAvailAccel = this.getShipAvailAccel(6);
         this.throttle = THREE.MathUtils.clamp(neededAy / shipAvailAccel, 0.15, 0.90);
 
+        this.alignShipToCatch(dt, hAbovePins);
+
         const clampProgress = THREE.MathUtils.clamp(1.0 - (hAbovePins / 28.0), 0.45, 1.0);
-        this.vehicle.setChopsticks(clampProgress, 83.8);
+        this.vehicle.setShipChopsticks(clampProgress, this.shipArmY);
 
         if (hAbovePins <= 0.45 || this.position.y <= targetShipCatchY + 0.45) {
-          this.position.set(this.padCoords.x, targetShipCatchY, this.padCoords.y);
+          this.position.set(this.shipCatchCoords.x, targetShipCatchY, this.shipCatchCoords.y);
           this.velocity.set(0, 0, 0);
           this.pitch = 0;
+          this.yaw = 0;
           this.pitchVel = 0;
           this.throttle = 0;
           this.shipCaughtByTower = true;
-          this.vehicle.setChopsticks(1.0, 83.8);
+          this.vehicle.setShipChopsticks(1.0, this.shipArmY);
           this.phase = FLIGHT_PHASES.LANDED;
           this.cargoDoorsDeployed = true;
         }
@@ -1016,6 +1197,22 @@ export class StarshipMissionPhysics {
         this.throttle = 0.0;
         break;
     }
+  }
+
+  // Captures the last few metres of the approach on the arm centreline. The
+  // physical catch point and the arm tips are the same coordinate, so any
+  // residual lateral error is nulled here instead of arriving beside the pins.
+  alignShipToCatch(dt, heightAboveCatch) {
+    if (heightAboveCatch > 80.0) return;
+    const gain = heightAboveCatch < 12.0 ? 5.5 : 2.2;
+    const k = 1.0 - Math.exp(-dt * gain);
+    this.position.x += (this.shipCatchCoords.x - this.position.x) * k;
+    this.position.z += (this.shipCatchCoords.y - this.position.z) * k;
+    const damp = Math.exp(-dt * (heightAboveCatch < 12.0 ? 6.0 : 2.6));
+    this.velocity.x *= damp;
+    this.velocity.z *= damp;
+    this.yaw = THREE.MathUtils.lerp(this.yaw, 0.0, k);
+    this.roll = THREE.MathUtils.lerp(this.roll, 0.0, k);
   }
 
   updateManualPhaseLabel(agl) {
@@ -1043,13 +1240,14 @@ export class StarshipMissionPhysics {
     if (this.boosterState === BOOSTER_STATES.ATTACHED) return;
 
     this.boosterTimer += dt;
-    // Catch pins sit 65.5 m above the booster base, so the base must stop
-    // 19.5 m above the pad for the carriage at 85 m to take the load.
-    const targetCatchElevation = this.padElevation + 19.5;
-    const carriageHeight = 85.0;
+    // Catch pins sit 65.5 m above the booster base, so the base must stop at
+    // the dedicated booster-catch elevation for the arm carriage to take the
+    // load. Both values come from the shared master plan.
+    const targetCatchElevation = this.boosterCatchBaseY;
+    const carriageHeight = this.boosterArmY;
 
-    const toPadX = this.padCoords.x - this.boosterPosition.x;
-    const toPadZ = this.padCoords.y - this.boosterPosition.z;
+    const toPadX = this.boosterCatchCoords.x - this.boosterPosition.x;
+    const toPadZ = this.boosterCatchCoords.y - this.boosterPosition.z;
     const horizDist = Math.hypot(toPadX, toPadZ);
     const toPadDir = this._toPadDir.set(
       horizDist > 0.001 ? toPadX / horizDist : 0,
@@ -1133,7 +1331,7 @@ export class StarshipMissionPhysics {
           this.boosterRaptorMode = 'OFF';
           this.boosterEngineCount = 0;
           this.vehicle.setBoosterThrottle(0.0);
-          this.vehicle.setChopsticks(0.0, carriageHeight);
+          this.vehicle.setBoosterChopsticks(0.0, carriageHeight);
         }
         break;
       }
@@ -1143,13 +1341,17 @@ export class StarshipMissionPhysics {
         this.boosterEngineCount = 0;
         this.vehicle.setBoosterThrottle(0.0);
 
-        // Aerodynamic drag on the engine section and deployed grid fins.
-        const rho = this.surfaceDensity * Math.exp(-boosterAlt / this.scaleHeight);
+        // Layered atmospheric drag on the engine section and deployed grid
+        // fins. Uses the air-relative velocity, so the near-surface wind shear
+        // is included instead of assuming a still atmosphere.
+        const bAtmo = this.sampleAtmosphere(boosterAlt, this._boosterAtmo);
+        const rho = bAtmo.density;
         const boosterMass = Math.max(1.0, this.getBoosterMass());
-        const v = this.boosterVelocity.length();
+        this._relBoosterVel.copy(this.boosterVelocity).sub(bAtmo.wind);
+        const v = this._relBoosterVel.length();
         if (v > 0.5 && rho > 1e-9) {
           const dragAccel = (0.5 * rho * v * v * 1.15 * BOOSTER_DRAG_AREA) / boosterMass;
-          this.boosterVelocity.addScaledVector(this.boosterVelocity, -dragAccel * (dt / v));
+          this.boosterVelocity.addScaledVector(this._relBoosterVel, -dragAccel * (dt / v));
         }
         this.boosterVelocity.y -= localG * dt;
 
@@ -1245,20 +1447,33 @@ export class StarshipMissionPhysics {
           THREE.MathUtils.clamp(toPadDir.z * 0.25, -0.25, 0.25)
         );
 
+        // Terminal alignment funnel: within 60 m, pull the booster onto the
+        // arm centreline and bleed lateral velocity. This is the final capture
+        // guidance that makes the pins meet the pads dead-centre.
+        if (altitudeAboveCatch <= 60.0) {
+          const k = 1.0 - Math.exp(-dt * (altitudeAboveCatch < 10.0 ? 6.0 : 2.4));
+          this.boosterPosition.x += (this.boosterCatchCoords.x - this.boosterPosition.x) * k;
+          this.boosterPosition.z += (this.boosterCatchCoords.y - this.boosterPosition.z) * k;
+          const damp = Math.exp(-dt * (altitudeAboveCatch < 10.0 ? 6.5 : 3.0));
+          this.boosterVelocity.x *= damp;
+          this.boosterVelocity.z *= damp;
+        }
+
         if (altitudeAboveCatch <= 42.0) {
           const clampProgress = THREE.MathUtils.clamp(1.0 - altitudeAboveCatch / 42.0, 0.0, 1.0);
-          this.vehicle.setChopsticks(clampProgress, carriageHeight);
+          this.vehicle.setBoosterChopsticks(clampProgress, carriageHeight);
         }
 
         if (altitudeAboveCatch <= 1.2 || this.boosterPosition.y <= targetCatchElevation + 1.2) {
-          this.boosterPosition.set(this.padCoords.x, targetCatchElevation, this.padCoords.y);
+          this.boosterPosition.set(this.boosterCatchCoords.x, targetCatchElevation, this.boosterCatchCoords.y);
           this.boosterVelocity.set(0, 0, 0);
+          this.boosterQuaternion.identity();
           this.boosterState = BOOSTER_STATES.CAUGHT;
           this.boosterTimer = 0.0;
           this.boosterRaptorMode = 'OFF';
           this.boosterEngineCount = 0;
           this.vehicle.setBoosterThrottle(0.0);
-          this.vehicle.setChopsticks(1.0, carriageHeight);
+          this.vehicle.setBoosterChopsticks(1.0, carriageHeight);
           this.vehicle.setGridFinSteering(0, 0);
         }
         break;
@@ -1270,20 +1485,11 @@ export class StarshipMissionPhysics {
         this.boosterVelocity.set(0, 0, 0);
         this.vehicle.setBoosterThrottle(0.0);
         this.boosterQuaternion.identity();
-
-        const shipReturningToTower = (
-          this.phase === FLIGHT_PHASES.BELLYFLOP ||
-          this.phase === FLIGHT_PHASES.LANDING_FLIP ||
-          this.phase === FLIGHT_PHASES.TOUCHDOWN ||
-          this.phase === FLIGHT_PHASES.LANDED
-        );
-        if (shipReturningToTower) {
-          this.vehicle.boosterGroup.visible = false;
-        } else {
-          this.vehicle.boosterGroup.visible = true;
-          this.boosterPosition.set(this.padCoords.x, targetCatchElevation, this.padCoords.y);
-          this.vehicle.setChopsticks(1.0, carriageHeight);
-        }
+        // The booster remains visible on its dedicated tower while the ship
+        // finishes entry. Starbase Operations takes over from here.
+        this.vehicle.boosterGroup.visible = true;
+        this.boosterPosition.set(this.boosterCatchCoords.x, targetCatchElevation, this.boosterCatchCoords.y);
+        this.vehicle.setBoosterChopsticks(1.0, carriageHeight);
         break;
       }
     }
