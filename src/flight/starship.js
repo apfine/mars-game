@@ -1441,9 +1441,17 @@ export class StarshipMissionVehicle {
     const roadMat = new THREE.MeshStandardMaterial({
       color: 0x2b2b2e,
       metalness: 0.15,
-      roughness: 0.92
+      roughness: 0.92,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1
     });
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf0b429 });
+    const lineMat = new THREE.MeshBasicMaterial({
+      color: 0xf0b429,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2
+    });
     // Unique segment set (routes overlap around the factory)
     const seen = new Set();
     const addSegment = (a, b) => {
@@ -1458,8 +1466,8 @@ export class StarshipMissionVehicle {
       const midX = (a.x + b.x) / 2;
       const midZ = (a.z + b.z) / 2;
       const yaw = Math.atan2(dx, dz);
-      const road = new THREE.Mesh(new THREE.BoxGeometry(13, 0.12, len), roadMat);
-      road.position.set(midX, 0.08, midZ);
+      const road = new THREE.Mesh(new THREE.BoxGeometry(13, 0.16, len), roadMat);
+      road.position.set(midX, 0.22, midZ);
       road.rotation.y = yaw;
       road.receiveShadow = true;
       pad.add(road);
@@ -1467,8 +1475,8 @@ export class StarshipMissionVehicle {
       const dashes = Math.max(1, Math.floor(len / 18));
       for (let i = 0; i < dashes; i++) {
         const t = (i + 0.5) / dashes;
-        const dash = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.03, 5), lineMat);
-        dash.position.set(a.x + dx * t, 0.16, a.z + dz * t);
+        const dash = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.04, 5), lineMat);
+        dash.position.set(a.x + dx * t, 0.32, a.z + dz * t);
         dash.rotation.y = yaw;
         pad.add(dash);
       }

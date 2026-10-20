@@ -90,30 +90,32 @@ export const STARBASE_LAYOUT = {
   },
 
   routes: {
+    // Booster road: from Booster Tower, south along West industrial road into Mega Bay West Door
     boosterToReview: [
       { x: -144.5, z: 86.0 },
-      { x: -136.0, z: 190.0 },
-      { x: -60.0, z: 190.0 }
+      { x: -136.0, z: 160.0 },
+      { x: -80.0, z: 190.0 }
     ],
     boosterToFactory: [
-      { x: -60.0, z: 190.0 },
-      { x: 0.0, z: 260.0 },
-      { x: 110.0, z: 260.0 },
-      { x: 170.0, z: 280.0 }
+      { x: -80.0, z: 190.0 },
+      { x: -20.0, z: 230.0 },
+      { x: 60.0, z: 230.0 },
+      { x: 110.0, z: 230.0 }
     ],
     boosterRollout: [
-      { x: 170.0, z: 280.0 },
-      { x: 35.0, z: 280.0 },
+      { x: 110.0, z: 230.0 },
+      { x: 35.0, z: 160.0 },
       { x: 35.0, z: 0.0 }
     ],
+    // Starship road: from Ship Tower, south along East perimeter road into Mega Bay South Door
     shipToReview: [
       { x: 129.5, z: -92.0 },
-      { x: 138.0, z: 190.0 },
-      { x: 60.0, z: 190.0 }
+      { x: 145.0, z: 50.0 },
+      { x: 155.0, z: 160.0 }
     ],
     shipToFactory: [
-      { x: 60.0, z: 190.0 },
-      { x: 100.0, z: 260.0 },
+      { x: 155.0, z: 160.0 },
+      { x: 165.0, z: 220.0 },
       { x: 170.0, z: 280.0 }
     ]
   }

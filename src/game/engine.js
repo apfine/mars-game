@@ -980,16 +980,6 @@ export class MarsGameEngine {
       this.operations.update(dt);
       this.ensureTransferStarted();
 
-      // In Auto Mission, once orbit is established and tanker (if needed) is ready,
-      // calculate the gravitational pathway and automatically commence transfer
-      if (this.missionPhysics.phase === FLIGHT_PHASES.ORBIT &&
-          this.missionPhysics.autoMission &&
-          !this.tankerOps.active &&
-          !this.journey.active &&
-          this.missionPhysics.orbitTimer > 4.5) {
-        this.beginTransfer();
-      }
-
       if (this.input.consumeSinglePress('handbrake')) {
         this.handleFlightStageAction();
       }

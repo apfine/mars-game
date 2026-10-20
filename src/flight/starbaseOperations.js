@@ -283,16 +283,23 @@ export class StarbaseOperations {
       const t = Math.min(1, track.timer / track.transportDuration);
       const e = easeInOut(t);
       sampleRoute(track.route, e, this._tmp);
+
+      // World coordinates for the physics entities
+      const worldX = p.padCoords.x + this._tmp.x;
+      const worldZ = p.padCoords.y + this._tmp.z;
+
       if (isBooster) {
-        p.boosterPosition.set(this._tmp.x, track.targetY, this._tmp.z);
+        p.boosterPosition.set(worldX, track.targetY, worldZ);
         p.boosterQuaternion.identity();
       } else {
-        p.position.set(this._tmp.x, track.targetY, this._tmp.z);
+        p.position.set(worldX, track.targetY, worldZ);
         p.quaternion.identity();
       }
+
+      // Local coordinates for the crawler inside starship.group
       const crawler = this.vehicle.crawlers?.[track.kind];
       if (crawler) {
-        crawler.group.position.set(this._tmp.x - p.padCoords.x, crawler.baseY, this._tmp.z - p.padCoords.y);
+        crawler.group.position.set(this._tmp.x, crawler.baseY, this._tmp.z);
       }
       if (t >= 1) {
         track.stage = STAGE.FACTORY;
@@ -305,12 +312,15 @@ export class StarbaseOperations {
     if (track.stage === STAGE.FACTORY) {
       this.vehicle.setReviewScan(track.kind, true, Math.min(1, track.timer / 3.2));
       const crawler = this.vehicle.crawlers?.[track.kind];
+      const doorX = isBooster ? L.factory.conveyorDoorX : L.factory.recoveryDoorX;
+      const doorZ = isBooster ? L.factory.conveyorDoorZ : L.factory.recoveryDoorZ;
       if (crawler) {
-        crawler.group.position.set(
-          L.factory.recoveryDoorX - p.padCoords.x,
-          crawler.baseY,
-          L.factory.recoveryDoorZ - p.padCoords.y
-        );
+        crawler.group.position.set(doorX, crawler.baseY, doorZ);
+      }
+      if (isBooster) {
+        p.boosterPosition.set(p.padCoords.x + doorX, track.targetY, p.padCoords.y + doorZ);
+      } else {
+        p.position.set(p.padCoords.x + doorX, track.targetY, p.padCoords.y + doorZ);
       }
       if (track.timer >= 3.2) {
         track.stage = STAGE.DONE;
@@ -323,6 +333,7 @@ export class StarbaseOperations {
         }
         if (crawler) crawler.group.visible = false;
       }
+    }
     }
   }
 }

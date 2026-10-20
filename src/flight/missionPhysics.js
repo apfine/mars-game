@@ -435,22 +435,31 @@ export class StarshipMissionPhysics {
   triggerInterplanetary(target = null) {
     const destination = target || (this.planetId === 'mars' ? 'earth' : 'mars');
     if (!PLANET_PROFILES[destination] || destination === this.planetId) return false;
-    // THE BOOSTER NEVER TRANSFERS! Only the Starship vehicle transfers across planets.
-    if (this.vehicle.isMated) {
-      this.vehicle.setMated(false);
+
+    // Enforce rule: In Auto mode or unless explicitly done in Manual mode with a mated stack,
+    // the booster NEVER transfers between bodies. It remains safely caught/landed on its home planet.
+    const isExplicitManualMated = !this.autoMission && this.vehicle.isMated;
+    if (!isExplicitManualMated) {
+      if (this.vehicle.isMated) {
+        this.vehicle.setMated(false);
+      }
+      this.vehicle.boosterGroup.visible = false;
+      this.boosterState = BOOSTER_STATES.CAUGHT;
+      this.boosterVelocity.set(0, 0, 0);
+      this.vehicle.setBoosterThrottle(0);
     }
+
     this.transferTarget = destination;
     this.phase = FLIGHT_PHASES.INTERPLANETARY;
     this.scriptedControl = true;
     this.yardControl = false;
     this.throttle = 0;
     this.velocity.set(0, 0, 0);
-    this.boosterVelocity.set(0, 0, 0);
+    if (!isExplicitManualMated) {
+      this.boosterVelocity.set(0, 0, 0);
+      this.vehicle.boosterGroup.visible = false;
+    }
     this.vehicle.setStarshipThrottle(0, true);
-    this.vehicle.setBoosterThrottle(0);
-    // Secure booster on home planet launch complex
-    this.vehicle.boosterGroup.visible = false;
-    this.boosterState = BOOSTER_STATES.CAUGHT;
     return true;
   }
 

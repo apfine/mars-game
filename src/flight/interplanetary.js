@@ -572,7 +572,7 @@ export class InterplanetaryJourney {
     });
     const ocean = new THREE.Mesh(new THREE.CircleGeometry(24000, 128), oceanMat);
     ocean.rotation.x = -Math.PI / 2;
-    ocean.position.set(this.padCoords.x, this.padGroundY - 0.7, this.padCoords.y);
+    ocean.position.set(this.padCoords.x, this.padGroundY - 1.2, this.padCoords.y);
     this.earthSurface.add(ocean);
     this.earthOcean = ocean;
     this.earthOceanMat = oceanMat;
@@ -584,11 +584,14 @@ export class InterplanetaryJourney {
       roughness: 0.88,
       metalness: 0.02,
       transparent: true,
-      opacity: 1.0
+      opacity: 1.0,
+      polygonOffset: true,
+      polygonOffsetFactor: 4,
+      polygonOffsetUnits: 4
     });
     const ground = new THREE.Mesh(new THREE.CircleGeometry(9200, 96), groundMat);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(this.padCoords.x, this.padGroundY + 0.06, this.padCoords.y);
+    ground.position.set(this.padCoords.x, this.padGroundY - 0.22, this.padCoords.y);
     ground.receiveShadow = true;
     this.earthSurface.add(ground);
     this.earthGround = ground;
@@ -602,26 +605,32 @@ export class InterplanetaryJourney {
       metalness: 0.0,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 1.0
+      opacity: 1.0,
+      polygonOffset: true,
+      polygonOffsetFactor: 3,
+      polygonOffsetUnits: 3
     });
     const beach = new THREE.Mesh(new THREE.RingGeometry(8900, 9900, 128), beachMat);
     beach.rotation.x = -Math.PI / 2;
-    beach.position.set(this.padCoords.x, this.padGroundY - 0.12, this.padCoords.y);
+    beach.position.set(this.padCoords.x, this.padGroundY - 0.45, this.padCoords.y);
     this.earthSurface.add(beach);
     this.earthBeachMat = beachMat;
 
-    // Graded concrete apron around the launch complex
+    // Graded concrete apron around the launch complex - set beneath pad structures to prevent Z-fighting
     const apronMat = new THREE.MeshStandardMaterial({
       map: makeEarthConcreteTexture(),
       color: 0xced1cb,
       roughness: 0.88,
       metalness: 0.05,
       transparent: true,
-      opacity: 1.0
+      opacity: 1.0,
+      polygonOffset: true,
+      polygonOffsetFactor: 2,
+      polygonOffsetUnits: 2
     });
     const apron = new THREE.Mesh(new THREE.CircleGeometry(490, 80), apronMat);
     apron.rotation.x = -Math.PI / 2;
-    apron.position.set(this.padCoords.x, this.padGroundY + 0.14, this.padCoords.y);
+    apron.position.set(this.padCoords.x, this.padGroundY - 0.04, this.padCoords.y);
     apron.receiveShadow = true;
     this.earthSurface.add(apron);
     this.earthApronMat = apronMat;

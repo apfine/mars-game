@@ -633,22 +633,20 @@ export class PostLaunchSpace {
           // Dust scattering on Mars; cool Rayleigh twilight on Earth.
           surfaceColor += mix(vec3(0.62, 0.25, 0.12) * 0.28, vec3(0.08, 0.24, 0.50) * 0.18, earth) * twilight;
 
-          // Rayleigh + Mie Atmospheric Haze & Planetary Limb Fresnel
+          // Rayleigh + Mie Atmospheric Haze & Planetary Limb scattering
           float fresnel = 1.0 - max(0.0, dot(N, V));
-          float innerDustHaze = pow(fresnel, 2.4);
-          float midAtmoBand = pow(fresnel, 4.5);
-          float outerAirglow = pow(fresnel, 8.0);
+          float sunIllum = max(0.12, macroNdotL * 0.70 + 0.30);
 
-          float sunIllum = max(0.10, macroNdotL * 0.75 + 0.25);
+          // Smooth volumetric atmospheric blending without a razor-sharp neon ring
+          float atmoDepth = pow(fresnel, mix(2.6, 3.2, earth));
+          vec3 limbColor = mix(uAtmosphereColor, uAirglowBlue, smoothstep(0.35, 0.92, fresnel));
+          surfaceColor = mix(surfaceColor, limbColor * sunIllum, atmoDepth * (earth > 0.5 ? 0.62 : 0.50));
 
-          surfaceColor = mix(surfaceColor, uAtmosphereColor * sunIllum, innerDustHaze * 0.45);
+          // Soft edge feathering so there is zero artificial sharp polygon ring cutting into space
+          float edgeFeather = smoothstep(0.002, 0.075, dot(N, V));
+          float finalAlpha = uFade * mix(1.0, edgeFeather, earth > 0.5 ? 0.88 : 0.75);
 
-          vec3 limbGlow = mix(uAtmosphereColor, uAirglowBlue, 0.52) * midAtmoBand * 0.55 * sunIllum;
-          limbGlow += uAirglowBlue * outerAirglow * 1.15 * sunIllum;
-
-          vec3 finalColor = surfaceColor + limbGlow;
-
-          gl_FragColor = vec4(finalColor, uFade);
+          gl_FragColor = vec4(surfaceColor, finalAlpha);
         }
       `,
       transparent: true,
