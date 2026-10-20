@@ -122,9 +122,10 @@ export class MarsAtmosphere {
           // Deep cosmic space background
           vec3 spaceBlack = vec3(0.0005, 0.0008, 0.0018);
 
-          // 3D Undistorted Spherical Starfield & Milky Way (visible in upper atmosphere & space)
+          // 3D Undistorted Spherical Starfield & Milky Way (visible in upper atmosphere, space, and nocturnal night sky)
           float abovePlanetLimb = smoothstep(horizonDip - 0.02, horizonDip + 0.04, dir.y);
-          float starVisibility = clamp((1.0 - atmoDensity * 0.88) * abovePlanetLimb, 0.0, 1.0);
+          float nightFactor = clamp(-sunDir.y * 4.0 + 0.2, 0.0, 1.0);
+          float starVisibility = clamp(((1.0 - atmoDensity * 0.88) + nightFactor * atmoDensity * 0.95) * abovePlanetLimb, 0.0, 1.0);
           vec3 cosmosCol = spaceBlack;
 
           if (starVisibility > 0.01) {
@@ -143,9 +144,10 @@ export class MarsAtmosphere {
             cosmosCol += vec3(0.032, 0.042, 0.072) * galacticBand * bandCore * starVisibility * 0.28;
           }
 
-          // Physical Martian Rayleigh + Dust Mie Scattering
+          // Physical Planetary Rayleigh + Dust Mie Scattering with Diurnal Day/Night attenuation
           float zenithFactor = clamp(elevAboveHorizon * 1.45, 0.0, 1.0);
-          vec3 daySky = mix(uSkyHorizon, uSkyZenith, pow(zenithFactor, 0.72));
+          float daylightScalar = clamp(sunDir.y * 3.5 + 0.15, 0.025, 1.0);
+          vec3 daySky = mix(uSkyHorizon, uSkyZenith, pow(zenithFactor, 0.72)) * daylightScalar;
 
           // Forward solar scattering through suspended aerosols. Mars uses a
           // ferric-oxide tint; Earth uses a much cooler, cleaner white-blue.
@@ -1239,6 +1241,48 @@ export class MarsAtmosphere {
     this.time += dt;
     this.skyMat.uniforms.uTime.value = this.time;
 
+    // -------------------------------------------------------------------------
+    // True Astronomical Diurnal Day & Night Cycle (Earth: 24h / 86400s, Mars: 24.66h / 88775s)
+    // -------------------------------------------------------------------------
+    const isEarth = this.planetId === 'earth';
+    const dayPeriod = isEarth ? 86400.0 : 88775.2; // true rotational sol duration in seconds
+    const timeSpeed = (physics && typeof physics.timeScale === 'number') ? physics.timeScale : 1.0;
+    this.diurnalClock = (this.diurnalClock ?? (dayPeriod * 0.38)) + dt * timeSpeed;
+    const solFraction = (this.diurnalClock % dayPeriod) / dayPeriod;
+    const solAngle = solFraction * Math.PI * 2.0;
+
+    // Sun movement across the sky: rises in East (+X), arcs over South (+Z), sets in West (-X)
+    const sunElev = Math.sin(solAngle);
+    const sunAzim = Math.cos(solAngle);
+    const dynSunDir = this._dynamicSunDir || (this._dynamicSunDir = new THREE.Vector3());
+    dynSunDir.set(
+      sunAzim * 0.88,
+      sunElev,
+      Math.sin(solAngle * 0.5) * 0.32
+    ).normalize();
+
+    this.skyMat.uniforms.uSunPos.value.copy(dynSunDir);
+
+    // Diurnal illumination modulation
+    const baseLightIntensity = isEarth ? 2.35 : 1.8;
+    const isDay = sunElev > 0.04;
+    const isTwilight = Math.abs(sunElev) <= 0.14;
+
+    if (isDay) {
+      const dayFactor = Math.pow(Math.max(0.01, sunElev), 0.55);
+      this.sunLight.intensity = Math.max(0.18, dayFactor * baseLightIntensity);
+      if (isTwilight) {
+        // Sunset / dawn golden hour
+        this.sunLight.color.setHex(isEarth ? 0xffa058 : 0xff7c44);
+      } else {
+        this.sunLight.color.setHex(isEarth ? 0xfff5e2 : 0xffe6d0);
+      }
+    } else {
+      // Nighttime starlight & moonlight illumination
+      this.sunLight.intensity = 0.08;
+      this.sunLight.color.setHex(isEarth ? 0x182c44 : 0x22151b);
+    }
+
     // 1. Anchor skydome, regional surface, distant mountains and directional light to active camera/player
     this.skyMesh.position.copy(playerPos);
     if (this.regionalSurfaceMesh && this.regionalSurfaceMesh.visible) {
@@ -1249,9 +1293,9 @@ export class MarsAtmosphere {
       this.distantMountains.position.set(playerPos.x, 0, playerPos.z);
     }
     this.sunLight.position.set(
-      playerPos.x + SUN_DIR.x * 500,
-      SUN_DIR.y * 500,
-      playerPos.z + SUN_DIR.z * 500
+      playerPos.x + dynSunDir.x * 600,
+      playerPos.y + Math.max(-80, dynSunDir.y * 600),
+      playerPos.z + dynSunDir.z * 600
     );
     this.sunLight.target.position.copy(playerPos);
     this.sunLight.target.updateMatrixWorld();

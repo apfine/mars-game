@@ -559,7 +559,7 @@ export class InterplanetaryJourney {
     this.earthSurface.visible = false;
     this.scene.add(this.earthSurface);
 
-    // Realistic circular ocean body with shoreline blending (zero flat square box cutoffs in space!)
+    // Realistic carved circular ocean body with spherical planetary curvature
     const oceanMat = new THREE.MeshStandardMaterial({
       map: makeOceanTexture(),
       color: 0x4896d8,
@@ -569,14 +569,24 @@ export class InterplanetaryJourney {
       transparent: true,
       opacity: 0.95
     });
-    const ocean = new THREE.Mesh(new THREE.CircleGeometry(24000, 128), oceanMat);
-    ocean.rotation.x = -Math.PI / 2;
-    ocean.position.set(this.padCoords.x, this.padGroundY - 1.2, this.padCoords.y);
+    const oceanGeo = new THREE.PlaneGeometry(48000, 48000, 72, 72);
+    oceanGeo.rotateX(-Math.PI / 2);
+    const oPos = oceanGeo.attributes.position;
+    for (let i = 0; i < oPos.count; i++) {
+      const vx = oPos.getX(i);
+      const vz = oPos.getZ(i);
+      const r = Math.hypot(vx, vz);
+      oPos.setY(i, -(r * r) / (2.0 * 2400000.0) - 2.8);
+    }
+    oceanGeo.computeVertexNormals();
+
+    const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+    ocean.position.set(this.padCoords.x, this.padGroundY, this.padCoords.y);
     this.earthSurface.add(ocean);
     this.earthOcean = ocean;
     this.earthOceanMat = oceanMat;
 
-    // Grassland and coastal peninsula
+    // Carved coastal Earth peninsula with realistic 3D relief, bluffs, rolling hills, and planetary curvature
     const groundMat = new THREE.MeshStandardMaterial({
       map: makeGrassTexture(),
       color: 0x5a8848,
@@ -588,9 +598,34 @@ export class InterplanetaryJourney {
       polygonOffsetFactor: 4,
       polygonOffsetUnits: 4
     });
-    const ground = new THREE.Mesh(new THREE.CircleGeometry(9200, 96), groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(this.padCoords.x, this.padGroundY - 0.22, this.padCoords.y);
+
+    const groundGeo = new THREE.PlaneGeometry(18400, 18400, 96, 96);
+    groundGeo.rotateX(-Math.PI / 2);
+    const gPos = groundGeo.attributes.position;
+    for (let i = 0; i < gPos.count; i++) {
+      const vx = gPos.getX(i);
+      const vz = gPos.getZ(i);
+      const r = Math.hypot(vx, vz);
+      // Planetary curvature drop
+      let y = -(r * r) / (2.0 * 2400000.0) - 0.22;
+
+      // Center pad complex (r < 490m) stays flat. Surrounding terrain has carved relief
+      if (r > 480) {
+        const blend = Math.min(1.0, (r - 480) / 550.0);
+        // Inland bluffs and rolling green hills
+        const relief = Math.sin(vx * 0.0011) * Math.cos(vz * 0.0011) * 22.0
+                     + Math.sin(vx * 0.0026 + 1.2) * 11.0
+                     + Math.cos(vz * 0.0032) * 8.0;
+        // Slope gently towards the beach at the perimeter
+        const shoreDrop = r > 7600 ? (r - 7600) * -0.007 : 0.0;
+        y += (Math.max(-3.5, relief) + shoreDrop) * blend;
+      }
+      gPos.setY(i, y);
+    }
+    groundGeo.computeVertexNormals();
+
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.position.set(this.padCoords.x, this.padGroundY, this.padCoords.y);
     ground.receiveShadow = true;
     this.earthSurface.add(ground);
     this.earthGround = ground;
@@ -609,9 +644,19 @@ export class InterplanetaryJourney {
       polygonOffsetFactor: 3,
       polygonOffsetUnits: 3
     });
-    const beach = new THREE.Mesh(new THREE.RingGeometry(8900, 9900, 128), beachMat);
-    beach.rotation.x = -Math.PI / 2;
-    beach.position.set(this.padCoords.x, this.padGroundY - 0.45, this.padCoords.y);
+    const beachGeo = new THREE.RingGeometry(8700, 9900, 96, 6);
+    beachGeo.rotateX(-Math.PI / 2);
+    const bPos = beachGeo.attributes.position;
+    for (let i = 0; i < bPos.count; i++) {
+      const vx = bPos.getX(i);
+      const vz = bPos.getZ(i);
+      const r = Math.hypot(vx, vz);
+      bPos.setY(i, -(r * r) / (2.0 * 2400000.0) - 0.45);
+    }
+    beachGeo.computeVertexNormals();
+
+    const beach = new THREE.Mesh(beachGeo, beachMat);
+    beach.position.set(this.padCoords.x, this.padGroundY, this.padCoords.y);
     this.earthSurface.add(beach);
     this.earthBeachMat = beachMat;
 
@@ -634,175 +679,418 @@ export class InterplanetaryJourney {
     this.earthSurface.add(apron);
     this.earthApronMat = apronMat;
 
-    // Low rolling hills along the inland perimeter
-    const hillMat = new THREE.MeshStandardMaterial({
-      color: 0x3d662c,
-      roughness: 0.95,
-      metalness: 0.0,
-      transparent: true,
-      opacity: 1.0
-    });
-    this.earthHillMat = hillMat;
-    for (let i = 0; i < 42; i++) {
-      const a = (i / 42) * Math.PI * 2;
-      const r = 3400 + (i % 7) * 420;
-      const hill = new THREE.Mesh(
-        new THREE.ConeGeometry(320 + (i % 4) * 110, 85 + (i % 3) * 55, 16),
-        hillMat
-      );
-      hill.position.set(
-        this.padCoords.x + Math.cos(a) * r,
-        this.padGroundY + 36,
-        this.padCoords.y + Math.sin(a) * r
-      );
-      hill.rotation.y = a;
-      this.earthSurface.add(hill);
-    }
+    // -------------------------------------------------------------------------
+    // 10 DETAILED BOTANICAL TREE ARCHETYPES (High detail, zero draw-call lag via InstancedMesh)
+    // -------------------------------------------------------------------------
+    const barkDarkMat = new THREE.MeshStandardMaterial({ color: 0x483422, roughness: 0.95, transparent: true, opacity: 1.0 });
+    const barkPaleMat = new THREE.MeshStandardMaterial({ color: 0x765a3c, roughness: 0.92, transparent: true, opacity: 1.0 });
+    const barkSilverMat = new THREE.MeshStandardMaterial({ color: 0xd8d3c6, roughness: 0.85, transparent: true, opacity: 1.0 });
+    const pineDarkMat = new THREE.MeshStandardMaterial({ color: 0x143c1c, roughness: 0.92, transparent: true, opacity: 1.0 });
+    const pineMediumMat = new THREE.MeshStandardMaterial({ color: 0x1d5227, roughness: 0.90, transparent: true, opacity: 1.0 });
+    const oakGreenMat = new THREE.MeshStandardMaterial({ color: 0x2d682c, roughness: 0.88, transparent: true, opacity: 1.0 });
+    const cypressMat = new THREE.MeshStandardMaterial({ color: 0x173a1d, roughness: 0.92, transparent: true, opacity: 1.0 });
+    const willowMat = new THREE.MeshStandardMaterial({ color: 0x648c34, roughness: 0.88, transparent: true, opacity: 1.0 });
+    const mapleRedMat = new THREE.MeshStandardMaterial({ color: 0xb83818, roughness: 0.86, transparent: true, opacity: 1.0 });
+    const birchLeafMat = new THREE.MeshStandardMaterial({ color: 0x5da83a, roughness: 0.88, transparent: true, opacity: 1.0 });
+    const firDarkMat = new THREE.MeshStandardMaterial({ color: 0x102f15, roughness: 0.94, transparent: true, opacity: 1.0 });
+    const mangroveMat = new THREE.MeshStandardMaterial({ color: 0x275628, roughness: 0.90, transparent: true, opacity: 1.0 });
+    const magnoliaMat = new THREE.MeshStandardMaterial({ color: 0x214b22, roughness: 0.88, transparent: true, opacity: 1.0 });
+    const flowerBlossomMat = new THREE.MeshStandardMaterial({ color: 0xffedf3, roughness: 0.75, emissive: new THREE.Color(0x331018), emissiveIntensity: 0.35 });
 
-    // High-fidelity natural 3D tree system (realistic multi-tier conifers & leafy oak broadleafs)
-    const trunkMat = new THREE.MeshStandardMaterial({
-      color: 0x4a3520,
-      roughness: 0.95,
-      transparent: true,
-      opacity: 1.0
-    });
-    const pineMat = new THREE.MeshStandardMaterial({
-      color: 0x1d4d28,
-      roughness: 0.92,
-      transparent: true,
-      opacity: 1.0
-    });
-    const pineLightMat = new THREE.MeshStandardMaterial({
-      color: 0x276335,
-      roughness: 0.90,
-      transparent: true,
-      opacity: 1.0
-    });
-    const oakMat = new THREE.MeshStandardMaterial({
-      color: 0x2e6d30,
-      roughness: 0.88,
-      transparent: true,
-      opacity: 1.0
-    });
-    const shrubMat = new THREE.MeshStandardMaterial({
-      color: 0x3c7e3e,
-      roughness: 0.92,
-      transparent: true,
-      opacity: 1.0
-    });
-
-    this.earthTreeMaterials = [trunkMat, pineMat, pineLightMat, oakMat, shrubMat];
+    this.earthTreeMaterials = [
+      barkDarkMat, barkPaleMat, barkSilverMat, pineDarkMat, pineMediumMat,
+      oakGreenMat, cypressMat, willowMat, mapleRedMat, birchLeafMat,
+      firDarkMat, mangroveMat, magnoliaMat, flowerBlossomMat
+    ];
     this.earthTreeObstacles = [];
 
-    const totalPines = 160;
-    const totalOaks = 140;
-    const totalShrubs = 120;
+    // Counts per archetype across the landscape (~1,120 trees total)
+    const countPalm = 120;
+    const countPine = 150;
+    const countOak = 130;
+    const countCypress = 100;
+    const countWillow = 90;
+    const countMaple = 100;
+    const countBirch = 110;
+    const countFir = 140;
+    const countMangrove = 90;
+    const countMagnolia = 90;
 
-    // Conifer pine instancing: realistic tiered boughs
-    const pineTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.8, 1.4, 18, 6), trunkMat, totalPines);
-    const pineTier1Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(6.8, 14, 7), pineMat, totalPines);
-    const pineTier2Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(5.2, 12, 7), pineLightMat, totalPines);
-    const pineTier3Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(3.6, 10, 7), pineMat, totalPines);
+    // Archetype 1: Coastal Palm (curved trunk + radial drooping fronds + coconuts)
+    const palmTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.7, 1.3, 16, 6), barkPaleMat, countPalm);
+    const palmFrondInst = new THREE.InstancedMesh(new THREE.ConeGeometry(7.8, 2.2, 8), oakGreenMat, countPalm);
+    const palmNutInst = new THREE.InstancedMesh(new THREE.SphereGeometry(1.4, 5, 5), barkDarkMat, countPalm);
 
-    // Oak broadleaf instancing: clustered organic leafy canopies
-    const oakTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.2, 1.8, 14, 6), trunkMat, totalOaks);
-    const oakCanopyInst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(9.0, 2), oakMat, totalOaks);
-    const oakCanopy2Inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(7.2, 2), shrubMat, totalOaks);
+    // Archetype 2: Ponderosa Pine (3 tiered cones)
+    const pineTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.8, 1.4, 18, 6), barkDarkMat, countPine);
+    const pineT1Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(6.8, 12, 7), pineDarkMat, countPine);
+    const pineT2Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(5.2, 10, 7), pineMediumMat, countPine);
+    const pineT3Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(3.6, 9, 7), pineDarkMat, countPine);
 
-    // Shrubbery instancing
-    const shrubInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(3.2, 1), shrubMat, totalShrubs);
+    // Archetype 3: Sprawling English Oak (stout trunk + 2 broadleaf domes)
+    const oakTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.3, 1.9, 14, 6), barkDarkMat, countOak);
+    const oakDome1Inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(9.0, 2), oakGreenMat, countOak);
+    const oakDome2Inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(7.2, 2), birchLeafMat, countOak);
+
+    // Archetype 4: Mediterranean Cypress (slender columnar spire)
+    const cypressTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.6, 0.9, 6, 6), barkDarkMat, countCypress);
+    const cypressSpireInst = new THREE.InstancedMesh(new THREE.ConeGeometry(2.6, 26, 8), cypressMat, countCypress);
+
+    // Archetype 5: Weeping Willow (umbrella + cascading fronds)
+    const willowTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.2, 1.7, 12, 6), barkDarkMat, countWillow);
+    const willowDomeInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(9.5, 7.0, 6, 8), willowMat, countWillow);
+
+    // Archetype 6: Autumn Red Maple (vibrant orange-crimson canopy)
+    const mapleTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.9, 1.4, 15, 6), barkDarkMat, countMaple);
+    const mapleCanopyInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(8.2, 2), mapleRedMat, countMaple);
+
+    // Archetype 7: Silver Birch / Aspen (slender pale trunk + airy fluttering foliage)
+    const birchTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.8, 20, 6), barkSilverMat, countBirch);
+    const birchCanopyInst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(6.8, 2), birchLeafMat, countBirch);
+
+    // Archetype 8: Douglas Fir / Giant Spruce (tall conifer with 4 dense tiered skirts)
+    const firTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.9, 1.5, 24, 6), barkDarkMat, countFir);
+    const firT1Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(7.5, 12, 7), firDarkMat, countFir);
+    const firT2Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(5.8, 10, 7), firDarkMat, countFir);
+    const firT3Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(4.2, 9, 7), pineDarkMat, countFir);
+
+    // Archetype 9: Coastal Mangrove (stilt prop-roots + dense low umbrella)
+    const mangroveTrunkInst = new THREE.InstancedMesh(new THREE.ConeGeometry(3.5, 7, 6), barkPaleMat, countMangrove);
+    const mangroveDomeInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(8.0, 5.0, 4.5, 8), mangroveMat, countMangrove);
+
+    // Archetype 10: Flowering Magnolia / Dogwood (glossy dark canopy with bright blossoms)
+    const magnoliaTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.8, 1.2, 11, 6), barkPaleMat, countMagnolia);
+    const magnoliaCanopyInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(7.0, 2), magnoliaMat, countMagnolia);
+    const magnoliaBloomInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(3.4, 1), flowerBlossomMat, countMagnolia);
 
     const dummy = new THREE.Object3D();
 
-    // Plant pines in natural woodland groves along the coast & hills
-    for (let i = 0; i < totalPines; i++) {
-      const angle = (i / totalPines) * Math.PI * 2 + (i % 9) * 0.22;
-      const radius = 680 + (i % 23) * 110 + (Math.sin(i * 3.7) * 220);
-      const x = this.padCoords.x + Math.cos(angle) * radius;
-      const z = this.padCoords.y + Math.sin(angle) * radius;
-      const scale = 0.75 + (i % 5) * 0.16 + (Math.cos(i) * 0.1);
+    // Helper to evaluate carved surface height for tree placement
+    const sampleCarvedY = (vx, vz) => {
+      const r = Math.hypot(vx, vz);
+      let y = -(r * r) / (2.0 * 2400000.0) - 0.22;
+      if (r > 480) {
+        const blend = Math.min(1.0, (r - 480) / 550.0);
+        const relief = Math.sin(vx * 0.0011) * Math.cos(vz * 0.0011) * 22.0
+                     + Math.sin(vx * 0.0026 + 1.2) * 11.0
+                     + Math.cos(vz * 0.0032) * 8.0;
+        const shoreDrop = r > 7600 ? (r - 7600) * -0.007 : 0.0;
+        y += (Math.max(-3.5, relief) + shoreDrop) * blend;
+      }
+      return this.padGroundY + y;
+    };
+
+    // 1. Plant Palms along coastal beaches & peninsulas
+    for (let i = 0; i < countPalm; i++) {
+      const angle = (i / countPalm) * Math.PI * 2 + (i % 7) * 0.2;
+      const radius = 6200 + (i % 23) * 95 + Math.sin(i * 3.1) * 240;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.8 + (i % 5) * 0.12;
+
+      this.earthTreeObstacles.push({ x, z, radius: 1.6 });
+
+      dummy.position.set(x, y + 7.5 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0.12 * Math.sin(i), angle, 0.12 * Math.cos(i));
+      dummy.updateMatrix();
+      palmTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x + Math.sin(i) * 1.5, y + 16.5 * s, z + Math.cos(i) * 1.5);
+      dummy.rotation.set(0, angle, 0);
+      dummy.updateMatrix();
+      palmFrondInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x + Math.sin(i) * 0.8, y + 15.0 * s, z + Math.cos(i) * 0.8);
+      dummy.scale.set(s * 0.7, s * 0.7, s * 0.7);
+      dummy.updateMatrix();
+      palmNutInst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // 2. Plant Ponderosa Pines across inland slopes & ridges
+    for (let i = 0; i < countPine; i++) {
+      const angle = (i / countPine) * Math.PI * 2 + (i % 9) * 0.24;
+      const radius = 950 + (i % 31) * 120 + Math.sin(i * 2.7) * 320;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.8 + (i % 5) * 0.15;
 
       this.earthTreeObstacles.push({ x, z, radius: 1.8 });
 
-      // Trunk
-      dummy.position.set(x, this.padGroundY + 8.0 * scale, z);
-      dummy.scale.set(scale, scale, scale);
+      dummy.position.set(x, y + 8.5 * s, z);
+      dummy.scale.set(s, s, s);
       dummy.rotation.set(0, angle, 0);
       dummy.updateMatrix();
       pineTrunkInst.setMatrixAt(i, dummy.matrix);
 
-      // Tier 1 (base bough)
-      dummy.position.set(x, this.padGroundY + 16.0 * scale, z);
+      dummy.position.set(x, y + 16.0 * s, z);
       dummy.updateMatrix();
-      pineTier1Inst.setMatrixAt(i, dummy.matrix);
+      pineT1Inst.setMatrixAt(i, dummy.matrix);
 
-      // Tier 2 (middle bough)
-      dummy.position.set(x, this.padGroundY + 23.0 * scale, z);
+      dummy.position.set(x, y + 22.0 * s, z);
       dummy.updateMatrix();
-      pineTier2Inst.setMatrixAt(i, dummy.matrix);
+      pineT2Inst.setMatrixAt(i, dummy.matrix);
 
-      // Tier 3 (top bough)
-      dummy.position.set(x, this.padGroundY + 29.0 * scale, z);
+      dummy.position.set(x, y + 27.5 * s, z);
       dummy.updateMatrix();
-      pineTier3Inst.setMatrixAt(i, dummy.matrix);
+      pineT3Inst.setMatrixAt(i, dummy.matrix);
     }
 
-    // Plant broadleaf oaks in lush meadows
-    for (let i = 0; i < totalOaks; i++) {
-      const angle = (i / totalOaks) * Math.PI * 2 + 0.45 + (i % 7) * 0.18;
-      const radius = 580 + (i % 19) * 95 + (Math.cos(i * 2.3) * 160);
-      const x = this.padCoords.x + Math.cos(angle) * radius;
-      const z = this.padCoords.y + Math.sin(angle) * radius;
-      const scale = 0.8 + (i % 6) * 0.14;
+    // 3. Plant Sprawling English Oaks in meadows & parkways
+    for (let i = 0; i < countOak; i++) {
+      const angle = (i / countOak) * Math.PI * 2 + 0.45 + (i % 7) * 0.18;
+      const radius = 680 + (i % 29) * 110 + Math.cos(i * 2.3) * 180;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.85 + (i % 6) * 0.14;
 
       this.earthTreeObstacles.push({ x, z, radius: 2.2 });
 
-      // Trunk
-      dummy.position.set(x, this.padGroundY + 6.5 * scale, z);
-      dummy.scale.set(scale, scale, scale);
+      dummy.position.set(x, y + 6.5 * s, z);
+      dummy.scale.set(s, s, s);
       dummy.rotation.set(0, angle + 0.5, 0);
       dummy.updateMatrix();
       oakTrunkInst.setMatrixAt(i, dummy.matrix);
 
-      // Main rounded canopy
-      dummy.position.set(x, this.padGroundY + 20.0 * scale, z);
+      dummy.position.set(x, y + 19.5 * s, z);
       dummy.updateMatrix();
-      oakCanopyInst.setMatrixAt(i, dummy.matrix);
+      oakDome1Inst.setMatrixAt(i, dummy.matrix);
 
-      // Secondary canopy cluster
-      dummy.position.set(x + 3.0 * scale, this.padGroundY + 24.0 * scale, z + 2.0 * scale);
-      dummy.scale.set(scale * 0.85, scale * 0.85, scale * 0.85);
+      dummy.position.set(x + 3.2 * s, y + 23.5 * s, z + 2.0 * s);
+      dummy.scale.set(s * 0.82, s * 0.82, s * 0.82);
       dummy.updateMatrix();
-      oakCanopy2Inst.setMatrixAt(i, dummy.matrix);
+      oakDome2Inst.setMatrixAt(i, dummy.matrix);
     }
 
-    // Plant coastal shrubs & bushes
-    for (let i = 0; i < totalShrubs; i++) {
-      const angle = (i / totalShrubs) * Math.PI * 2 + (i % 11) * 0.35;
-      const radius = 500 + (i % 29) * 75;
-      const x = this.padCoords.x + Math.cos(angle) * radius;
-      const z = this.padCoords.y + Math.sin(angle) * radius;
-      const scale = 0.6 + (i % 4) * 0.25;
+    // 4. Plant Mediterranean Cypresses along facility borders
+    for (let i = 0; i < countCypress; i++) {
+      const angle = (i / countCypress) * Math.PI * 2 + (i % 5) * 0.15;
+      const radius = 540 + (i % 17) * 70;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.8 + (i % 4) * 0.16;
 
-      dummy.position.set(x, this.padGroundY + 2.0 * scale, z);
-      dummy.scale.set(scale, scale * 0.8, scale);
-      dummy.rotation.set(0, angle * 1.5, 0);
+      this.earthTreeObstacles.push({ x, z, radius: 1.2 });
+
+      dummy.position.set(x, y + 3.0 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, angle, 0);
       dummy.updateMatrix();
-      shrubInst.setMatrixAt(i, dummy.matrix);
+      cypressTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 14.5 * s, z);
+      dummy.updateMatrix();
+      cypressSpireInst.setMatrixAt(i, dummy.matrix);
     }
 
+    // 5. Plant Weeping Willows along lagoon banks & wetlands
+    for (let i = 0; i < countWillow; i++) {
+      const angle = (i / countWillow) * Math.PI * 2 + 1.2;
+      const radius = 2400 + (i % 15) * 85 + Math.sin(i * 1.7) * 150;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.85 + (i % 5) * 0.14;
+
+      this.earthTreeObstacles.push({ x, z, radius: 1.9 });
+
+      dummy.position.set(x, y + 5.5 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, angle, 0);
+      dummy.updateMatrix();
+      willowTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 13.5 * s, z);
+      dummy.updateMatrix();
+      willowDomeInst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // 6. Plant Autumn Red Maples across inland woodlands
+    for (let i = 0; i < countMaple; i++) {
+      const angle = (i / countMaple) * Math.PI * 2 + 2.1;
+      const radius = 1800 + (i % 21) * 110 + Math.cos(i * 2.1) * 200;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.8 + (i % 6) * 0.15;
+
+      this.earthTreeObstacles.push({ x, z, radius: 1.6 });
+
+      dummy.position.set(x, y + 7.0 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, angle, 0);
+      dummy.updateMatrix();
+      mapleTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 17.5 * s, z);
+      dummy.updateMatrix();
+      mapleCanopyInst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // 7. Plant Silver Birches / Aspens scattered across hillsides
+    for (let i = 0; i < countBirch; i++) {
+      const angle = (i / countBirch) * Math.PI * 2 + 0.8;
+      const radius = 2900 + (i % 25) * 130 + Math.sin(i * 2.5) * 260;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.85 + (i % 5) * 0.12;
+
+      this.earthTreeObstacles.push({ x, z, radius: 1.3 });
+
+      dummy.position.set(x, y + 9.5 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, angle, 0);
+      dummy.updateMatrix();
+      birchTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 21.0 * s, z);
+      dummy.updateMatrix();
+      birchCanopyInst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // 8. Plant Douglas Firs / Giant Spruces in high conifer stands
+    for (let i = 0; i < countFir; i++) {
+      const angle = (i / countFir) * Math.PI * 2 + 3.1;
+      const radius = 3800 + (i % 27) * 140 + Math.cos(i * 1.9) * 320;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.9 + (i % 5) * 0.18;
+
+      this.earthTreeObstacles.push({ x, z, radius: 2.0 });
+
+      dummy.position.set(x, y + 11.0 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, angle, 0);
+      dummy.updateMatrix();
+      firTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 16.5 * s, z);
+      dummy.updateMatrix();
+      firT1Inst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 23.5 * s, z);
+      dummy.updateMatrix();
+      firT2Inst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 30.0 * s, z);
+      dummy.updateMatrix();
+      firT3Inst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // 9. Plant Coastal Mangroves along the shoreline shallows
+    for (let i = 0; i < countMangrove; i++) {
+      const angle = (i / countMangrove) * Math.PI * 2 + 0.3;
+      const radius = 7800 + (i % 17) * 75 + Math.sin(i * 2.2) * 140;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.8 + (i % 4) * 0.15;
+
+      this.earthTreeObstacles.push({ x, z, radius: 2.2 });
+
+      dummy.position.set(x, y + 3.2 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, angle, 0);
+      dummy.updateMatrix();
+      mangroveTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 8.5 * s, z);
+      dummy.updateMatrix();
+      mangroveDomeInst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // 10. Plant Flowering Magnolias & Dogwoods around facility grounds
+    for (let i = 0; i < countMagnolia; i++) {
+      const angle = (i / countMagnolia) * Math.PI * 2 + 1.8;
+      const radius = 620 + (i % 19) * 80;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      const x = this.padCoords.x + vx;
+      const z = this.padCoords.y + vz;
+      const y = sampleCarvedY(vx, vz);
+      const s = 0.8 + (i % 5) * 0.14;
+
+      this.earthTreeObstacles.push({ x, z, radius: 1.4 });
+
+      dummy.position.set(x, y + 5.0 * s, z);
+      dummy.scale.set(s, s, s);
+      dummy.rotation.set(0, angle, 0);
+      dummy.updateMatrix();
+      magnoliaTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, y + 13.0 * s, z);
+      dummy.updateMatrix();
+      magnoliaCanopyInst.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x + 1.2 * s, y + 14.8 * s, z + 1.0 * s);
+      dummy.updateMatrix();
+      magnoliaBloomInst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // Update instance matrices for all 10 archetypes
+    palmTrunkInst.instanceMatrix.needsUpdate = true;
+    palmFrondInst.instanceMatrix.needsUpdate = true;
+    palmNutInst.instanceMatrix.needsUpdate = true;
     pineTrunkInst.instanceMatrix.needsUpdate = true;
-    pineTier1Inst.instanceMatrix.needsUpdate = true;
-    pineTier2Inst.instanceMatrix.needsUpdate = true;
-    pineTier3Inst.instanceMatrix.needsUpdate = true;
+    pineT1Inst.instanceMatrix.needsUpdate = true;
+    pineT2Inst.instanceMatrix.needsUpdate = true;
+    pineT3Inst.instanceMatrix.needsUpdate = true;
     oakTrunkInst.instanceMatrix.needsUpdate = true;
-    oakCanopyInst.instanceMatrix.needsUpdate = true;
-    oakCanopy2Inst.instanceMatrix.needsUpdate = true;
-    shrubInst.instanceMatrix.needsUpdate = true;
+    oakDome1Inst.instanceMatrix.needsUpdate = true;
+    oakDome2Inst.instanceMatrix.needsUpdate = true;
+    cypressTrunkInst.instanceMatrix.needsUpdate = true;
+    cypressSpireInst.instanceMatrix.needsUpdate = true;
+    willowTrunkInst.instanceMatrix.needsUpdate = true;
+    willowDomeInst.instanceMatrix.needsUpdate = true;
+    mapleTrunkInst.instanceMatrix.needsUpdate = true;
+    mapleCanopyInst.instanceMatrix.needsUpdate = true;
+    birchTrunkInst.instanceMatrix.needsUpdate = true;
+    birchCanopyInst.instanceMatrix.needsUpdate = true;
+    firTrunkInst.instanceMatrix.needsUpdate = true;
+    firT1Inst.instanceMatrix.needsUpdate = true;
+    firT2Inst.instanceMatrix.needsUpdate = true;
+    firT3Inst.instanceMatrix.needsUpdate = true;
+    mangroveTrunkInst.instanceMatrix.needsUpdate = true;
+    mangroveDomeInst.instanceMatrix.needsUpdate = true;
+    magnoliaTrunkInst.instanceMatrix.needsUpdate = true;
+    magnoliaCanopyInst.instanceMatrix.needsUpdate = true;
+    magnoliaBloomInst.instanceMatrix.needsUpdate = true;
 
     this.earthSurface.add(
-      pineTrunkInst, pineTier1Inst, pineTier2Inst, pineTier3Inst,
-      oakTrunkInst, oakCanopyInst, oakCanopy2Inst, shrubInst
+      palmTrunkInst, palmFrondInst, palmNutInst,
+      pineTrunkInst, pineT1Inst, pineT2Inst, pineT3Inst,
+      oakTrunkInst, oakDome1Inst, oakDome2Inst,
+      cypressTrunkInst, cypressSpireInst,
+      willowTrunkInst, willowDomeInst,
+      mapleTrunkInst, mapleCanopyInst,
+      birchTrunkInst, birchCanopyInst,
+      firTrunkInst, firT1Inst, firT2Inst, firT3Inst,
+      mangroveTrunkInst, mangroveDomeInst,
+      magnoliaTrunkInst, magnoliaCanopyInst, magnoliaBloomInst
     );
 
     // Low clouds drifting through the coastal sky.

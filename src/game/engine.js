@@ -836,8 +836,17 @@ export class MarsGameEngine {
     if (this.missionPhysics.planetId === 'earth') {
       const dx = x - this.missionPhysics.padCoords.x;
       const dz = z - this.missionPhysics.padCoords.y;
-      // Concrete apron around the launch complex, grass beyond it.
-      return this.missionPhysics.padGroundY + (dx * dx + dz * dz < 470 * 470 ? 0.14 : 0.06);
+      const r = Math.hypot(dx, dz);
+      if (r <= 480) {
+        return this.missionPhysics.padGroundY + 0.14;
+      }
+      const yCurve = -(r * r) / (2.0 * 2400000.0) - 0.22;
+      const blend = Math.min(1.0, (r - 480) / 550.0);
+      const relief = Math.sin(dx * 0.0011) * Math.cos(dz * 0.0011) * 22.0
+                   + Math.sin(dx * 0.0026 + 1.2) * 11.0
+                   + Math.cos(dz * 0.0032) * 8.0;
+      const shoreDrop = r > 7600 ? (r - 7600) * -0.007 : 0.0;
+      return this.missionPhysics.padGroundY + yCurve + (Math.max(-3.5, relief) + shoreDrop) * blend + 0.35;
     }
     return getMarsHeight(x, z);
   }
@@ -1038,7 +1047,8 @@ export class MarsGameEngine {
         isNitroActive: false,
         onGroundCount: camAltitude < 200 ? 4 : 0,
         speedKmh: this.missionPhysics.speed * 3.6,
-        isInterplanetary: this.missionPhysics.phase === FLIGHT_PHASES.INTERPLANETARY || Boolean(this.journey?.active)
+        isInterplanetary: this.missionPhysics.phase === FLIGHT_PHASES.INTERPLANETARY || Boolean(this.journey?.active),
+        timeScale: this.timeScale
       });
 
       if (onMars && camAltitude < 5000) {
@@ -1114,7 +1124,8 @@ export class MarsGameEngine {
         speedKmh: this.walker.speedKmh,
         velocity: this.walker.velocity,
         isNitroActive: false,
-        onGroundCount: 0
+        onGroundCount: 0,
+        timeScale: this.timeScale
       });
 
       const nearbyPOIs = onMars ? this.scatter.getNearbyPOIs(activePos) : [];
@@ -1157,6 +1168,7 @@ export class MarsGameEngine {
         this.scatter?.setVisible(false);
       }
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
+      this.physics.timeScale = this.timeScale;
       this.atmosphere.update(scaledDt, this.physics.position, this.physics);
       this.audio.update(this.physics);
       this.cameraController.update(scaledDt, this.physics);
