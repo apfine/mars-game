@@ -375,8 +375,13 @@ export class StarshipMissionPhysics {
     this.vehicle.starshipGroup.quaternion.copy(this.quaternion);
     this.vehicle.boosterGroup.position.copy(this.boosterPosition);
     this.vehicle.boosterGroup.quaternion.copy(this.boosterQuaternion);
-    this.vehicle.setBoosterThrottle(0);
-    this.vehicle.setStarshipThrottle(0, false);
+    // Yard control owns the vehicles while recovery/restacking. Scripted space
+    // control (interplanetary cruise) is different: the journey sets the
+    // transfer burn each frame, so do not stamp it out here.
+    if (this.yardControl) {
+      this.vehicle.setBoosterThrottle(0);
+      this.vehicle.setStarshipThrottle(0, false);
+    }
     this.vehicle.update(dt);
   }
 
@@ -1114,17 +1119,11 @@ export class StarshipMissionPhysics {
           this.starshipScore = Math.round(10000 + (this.altitude / 1000) * 45 + (this.speed * 1.6) + boosterBonus);
         }
         this.orbitTimer += dt;
-        if (this.orbitTimer >= 7.0) {
-          // AUTO flies the interplanetary itinerary first. If the requested
-          // destination is the planet we are already orbiting, deorbit and fly
-          // the local tower-catch profile instead.
-          const target = this.destination || 'earth';
-          if (target !== this.planetId && this.triggerInterplanetary(target)) {
-            this.orbitTimer = 0;
-          } else {
-            this.triggerDeorbit();
-          }
-        }
+        // Orbit is a stable hold. INTERPLANETARY TRANSFER and DEORBIT are
+        // deliberately pilot-initiated from the orbit-only operations panel;
+        // AUTO still flies the ascent, entry and catch guidance once the crew
+        // commits the burn. This prevents the old bug where the transfer began
+        // before the pilot could choose a destination.
         break;
       }
 

@@ -113,7 +113,12 @@ export class StarbaseOperations {
 
   update(dt) {
     const p = this.physics;
-    p.opsMessage = this.message;
+    // Yard messages own the status line only while a recovery/restack
+    // operation is actually running. Otherwise the orbit tanker and transfer
+    // guidance need to keep their own message visible.
+    if (this.state !== 'IDLE' || this.message) {
+      p.opsMessage = this.message;
+    }
 
     if (this.state === 'IDLE') {
       // Start only after the ship is secured, so both vehicles are recovered

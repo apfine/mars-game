@@ -349,7 +349,9 @@ export class MarsCameraController {
       const padZ = physics.padCoords.y;
       const stationX = padX - 110.0;
       const stationZ = padZ - 95.0;
-      const groundY = getMarsHeight(stationX, stationZ) + 4.5;
+      const groundY = physics.planetId === 'earth'
+        ? physics.padGroundY + 4.5
+        : getMarsHeight(stationX, stationZ) + 4.5;
       this.currentPos.set(stationX, groundY, stationZ);
 
       const cosP = Math.cos(this.groundGimbalPitch);

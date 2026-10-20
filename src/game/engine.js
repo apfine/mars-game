@@ -66,6 +66,19 @@ export class MarsGameEngine {
     // it possible to inspect mission state from the developer console.
     if (typeof window !== 'undefined') window.__marsGame = this;
 
+    // Orbital tanker state machine. A transfer that needs more propellant than
+    // the ship carried to orbit triggers a rendezvous, hard dock, and cryogenic
+    // transfer before the injection burn is allowed.
+    this.tankerOps = {
+      active: false,
+      phase: 'idle',
+      timer: 0,
+      progress: 0,
+      target: null,
+      fromFuel: 0,
+      targetFuel: 0
+    };
+
     this.clock = new THREE.Clock();
     this.lastOnGround = 4;
 
@@ -279,6 +292,10 @@ export class MarsGameEngine {
         this.missionPhysics.resetToPad();
         this.missionPhysics.destination = 'earth';
         this.journey.reset();
+        this.tankerOps = { active: false, phase: 'idle', timer: 0, progress: 0, target: null, fromFuel: 0, targetFuel: 0 };
+        this.missionPhysics.tankerActive = false;
+        this.missionPhysics.tankerStatus = '';
+        this.missionPhysics.opsMessage = '';
         this.operations?.reset();
         this.applyPlanetEnvironment('mars');
         this.setTimeScale(1);
@@ -304,10 +321,16 @@ export class MarsGameEngine {
         this.missionPhysics.toggleCargoDoors();
       },
       onTouchPitch: (val) => {
-        this.input.state.pitch = val;
+        this.input.setTouchFlightInput({ pitch: val });
       },
       onTouchYaw: (val) => {
-        this.input.state.steer = val;
+        this.input.setTouchFlightInput({ steer: val });
+      },
+      onTouchThrottle: (dir, held) => {
+        this.input.setTouchFlightInput({
+          throttleUp: held && dir > 0,
+          throttleDown: held && dir < 0
+        });
       },
       onExit: () => {
         this.setMode('walking');
@@ -377,17 +400,136 @@ export class MarsGameEngine {
     this.missionPhysics.setDestination(target);
   }
 
-  // Starts the heliocentric transfer when the vehicle is in orbit. AUTO mode
-  // uses 100× compression automatically; MANUAL can still choose 1× or 1000×.
+  getTransferFuelRequirement(target) {
+    // Enough for the injection burn, mid-course correction, and a propulsive
+    // entry reserve. The exact value is intentionally legible in the HUD.
+    return target === 'earth' ? 62 : 68;
+  }
+
+  // Transfer, deorbit and refuelling are orbit-only operations. The HUD hides
+  // them outside ORBIT, but keep the guard here as well so keyboard shortcuts
+  // or automation cannot bypass the mission gate.
   beginTransfer() {
-    const target = this.missionPhysics.destination;
-    if (!target || target === this.missionPhysics.planetId) {
+    const physics = this.missionPhysics;
+    if (physics.phase !== FLIGHT_PHASES.ORBIT) {
+      physics.opsMessage = 'TRANSFER WINDOW UNAVAILABLE // REACH ORBIT';
+      return;
+    }
+    if (this.tankerOps.active) {
+      physics.opsMessage = 'TRANSFER HOLD // ORBITAL TANKER IN PROGRESS';
+      return;
+    }
+    const target = physics.destination;
+    if (!target || target === physics.planetId) {
       this.beginDeorbit();
       return;
     }
-    if (!this.missionPhysics.triggerInterplanetary(target)) return;
-    this.setTimeScale(this.missionPhysics.autoMission ? 100 : Math.max(8, this.timeScale));
+    const required = this.getTransferFuelRequirement(target);
+    if (physics.starshipFuel < required - 0.25) {
+      this.beginOrbitalRefuel(target);
+      return;
+    }
+    this.startInterplanetaryTransfer(target);
+  }
+
+  startInterplanetaryTransfer(target) {
+    if (!this.missionPhysics.triggerInterplanetary(target)) return false;
+    this.setTimeScale(this.missionPhysics.autoMission ? 4 : Math.max(1, Math.min(this.timeScale, 4)));
     this.ensureTransferStarted();
+    return true;
+  }
+
+  beginOrbitalRefuel(target) {
+    if (this.tankerOps.active) return;
+    const physics = this.missionPhysics;
+    this.tankerOps = {
+      active: true,
+      phase: 'rendezvous',
+      timer: 0,
+      progress: 0,
+      target,
+      fromFuel: physics.starshipFuel,
+      targetFuel: 94
+    };
+    physics.tankerActive = true;
+    physics.tankerStatus = 'ORBITAL TANKER // RENDEZVOUS';
+    physics.opsMessage = `PROPELLANT ${Math.round(physics.starshipFuel)}% // CALLING TANKER`;
+    this.journey.startTankerRendezvous();
+    this.journey.tankerProgress = 0;
+    this.setTimeScale(1);
+    this.flightHud?.notifyTanker?.('RENDEZVOUS', 0);
+  }
+
+  updateTankerOperations(dt) {
+    const ops = this.tankerOps;
+    if (!ops.active) return;
+    const physics = this.missionPhysics;
+    if (physics.phase !== FLIGHT_PHASES.ORBIT) {
+      // If the pilot deorbits or resets during docking, stand the tanker down.
+      this.tankerOps.active = false;
+      this.tankerOps.phase = 'idle';
+      physics.tankerActive = false;
+      physics.tankerStatus = '';
+      this.journey.endTanker();
+      return;
+    }
+
+    ops.timer += dt;
+    if (ops.phase === 'rendezvous') {
+      ops.progress = THREE.MathUtils.clamp(ops.timer / 5.0, 0, 1);
+      this.journey.tankerProgress = ops.progress;
+      physics.tankerStatus = 'ORBITAL TANKER // RENDEZVOUS';
+      physics.opsMessage = `TANKER APPROACH // ${Math.round(ops.progress * 100)}%`;
+      this.flightHud?.notifyTanker?.('RENDEZVOUS', ops.progress);
+      if (ops.progress >= 1) {
+        ops.phase = 'docking';
+        ops.timer = 0;
+        ops.progress = 0;
+        this.journey.setTankerPhase('docked');
+        physics.tankerStatus = 'ORBITAL TANKER // HARD DOCK';
+        physics.opsMessage = 'HARD DOCK // UMBILICAL LATCHED';
+        this.flightHud?.notifyTanker?.('DOCKED', 0);
+      }
+    } else if (ops.phase === 'docking') {
+      ops.progress = THREE.MathUtils.clamp(ops.timer / 2.2, 0, 1);
+      this.journey.tankerProgress = ops.progress;
+      if (ops.progress >= 1) {
+        ops.phase = 'transfer';
+        ops.timer = 0;
+        ops.progress = 0;
+        this.journey.setTankerPhase('transfer');
+        physics.tankerStatus = 'ORBITAL TANKER // PROPELLANT TRANSFER';
+        physics.opsMessage = 'CRYOGENIC TRANSFER // LINE PRESSURE NOMINAL';
+        this.flightHud?.notifyTanker?.('TRANSFER', 0);
+      }
+    } else if (ops.phase === 'transfer') {
+      ops.progress = THREE.MathUtils.clamp(ops.timer / 6.0, 0, 1);
+      const eased = THREE.MathUtils.smoothstep(ops.progress, 0, 1);
+      physics.starshipFuel = THREE.MathUtils.lerp(ops.fromFuel, ops.targetFuel, eased);
+      this.journey.tankerProgress = ops.progress;
+      physics.opsMessage = `PROPELLANT ${Math.round(physics.starshipFuel)}% // ${Math.round(ops.targetFuel)}% TARGET`;
+      this.flightHud?.notifyTanker?.('TRANSFER', ops.progress);
+      if (ops.progress >= 1) {
+        ops.phase = 'complete';
+        ops.timer = 0;
+        ops.progress = 1;
+        physics.starshipFuel = ops.targetFuel;
+        physics.tankerStatus = 'ORBITAL TANKER // REFUEL COMPLETE';
+        physics.opsMessage = 'REFUEL COMPLETE // TRANSFER WINDOW OPEN';
+        this.flightHud?.notifyTanker?.('COMPLETE', 1);
+      }
+    } else if (ops.phase === 'complete') {
+      if (ops.timer > 1.4) {
+        const target = ops.target;
+        this.tankerOps.active = false;
+        this.tankerOps.phase = 'idle';
+        physics.tankerActive = false;
+        physics.tankerStatus = '';
+        physics.opsMessage = '';
+        this.journey.endTanker();
+        this.startInterplanetaryTransfer(target);
+      }
+    }
   }
 
   beginDeorbit() {
@@ -410,7 +552,15 @@ export class MarsGameEngine {
   // Hands the entry interface back to the flight integrator once the cruise is
   // complete, then swaps terrain/sky to the destination environment.
   handlePlanetArrival(planetId) {
+    // The real arrival callback fires after the journey marks itself complete;
+    // this guard also makes manual/debug arrival deterministic.
+    this.journey.active = false;
+    this.journey.arrived = true;
+    this.journey.hideTransferTrail();
     this.missionPhysics.enterPlanetEntry(planetId);
+    this.missionPhysics.transferStatus = '';
+    this.missionPhysics.transferProgress = 0;
+    this.missionPhysics.opsMessage = '';
     this.applyPlanetEnvironment(planetId);
     this.missionPhysics.setDestination(planetId === 'mars' ? 'earth' : 'mars');
     this.setTimeScale(1);
@@ -770,6 +920,7 @@ export class MarsGameEngine {
     // MODE A: STARSHIP FLIGHT SIMULATION
     // =========================================================
     if (this.mode === 'starship') {
+      this.updateTankerOperations(dt);
       this.operations.update(dt);
       this.ensureTransferStarted();
       if (this.input.consumeSinglePress('handbrake')) {

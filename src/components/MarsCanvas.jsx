@@ -393,6 +393,9 @@ export default function MarsCanvas() {
             <button id="flight-reset-btn" className="hud-pill-btn flight-reset-btn" aria-label="Reset to Launch Pad">
               PAD
             </button>
+            <button id="flight-hide-ui-btn" className="hud-pill-btn flight-hide-ui-btn" aria-label="Hide HUD except vitals" title="Hide UI / vitals-only view (H)">
+              HUD
+            </button>
             <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Return to Astronaut / Rover">
               EVA
             </button>
@@ -442,7 +445,7 @@ export default function MarsCanvas() {
           <div className="score-card-inner">
             <div className="score-header">
               <span className="score-badge">SECO // ORBITAL INSERTION</span>
-              <h2 className="score-title">LOW MARS ORBIT ACHIEVED</h2>
+              <h2 id="flight-score-title" className="score-title">LOW MARS ORBIT ACHIEVED</h2>
             </div>
             <div className="score-main-value">
               <span className="score-num" id="flight-score-val">15,420</span>
@@ -694,6 +697,39 @@ export default function MarsCanvas() {
               <button id="flight-btn-yaw-right" className="touch-btn flight-dir-btn" aria-label="Yaw Right">▶</button>
             </div>
             <button id="flight-btn-pitch-up" className="touch-btn flight-dir-btn" aria-label="Pitch Nose Down">▼</button>
+          </div>
+        </div>
+
+        {/* SpaceX-style semicircular attitude director: pitch ladder + bank. */}
+        <div id="flight-attitude-gauge" className="flight-attitude-gauge" aria-label="Vehicle attitude indicator">
+          <div className="att-gauge-head">
+            <span>ATTITUDE</span>
+            <span id="att-gauge-mode">LVLH</span>
+          </div>
+          <div className="att-dial">
+            <div id="att-horizon" className="att-horizon">
+              <div className="att-sky"></div>
+              <div className="att-ground"></div>
+              <div className="att-ladder">
+                <span className="att-line l1"></span>
+                <span className="att-line l2"></span>
+                <span className="att-line l3"></span>
+                <span className="att-line l4"></span>
+                <span className="att-line l5"></span>
+              </div>
+              <span className="att-horizon-line"></span>
+            </div>
+            <div className="att-bank-tick t1"></div>
+            <div className="att-bank-tick t2"></div>
+            <div className="att-bank-tick t3"></div>
+            <div id="att-roll-pointer" className="att-roll-pointer"></div>
+            <div className="att-reticle">⌖</div>
+          </div>
+          <div className="att-readouts">
+            <span>P <b id="att-pitch-val">90°</b></span>
+            <span>R <b id="att-roll-val">0°</b></span>
+            <span>Y <b id="att-yaw-val">0°</b></span>
+            <span>VS <b id="att-vs-val">0</b></span>
           </div>
         </div>
       </div>

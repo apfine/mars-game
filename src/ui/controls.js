@@ -27,8 +27,40 @@ export class InputManager {
     this.touchActive = false;
     this.isMobile = this.detectMobile();
 
+    // Persistent virtual axes. The update loop resets keyboard/gamepad
+    // continuous axes every frame, so pointer holds must live in a separate
+    // state that survives until the finger/button is released.
+    this.touchState = {
+      throttle: 0,
+      steer: 0,
+      pitch: 0,
+      roll: 0,
+      throttleUp: false,
+      throttleDown: false,
+      fullThrottle: false,
+      throttleCut: false,
+      handbrake: false,
+      nitro: false,
+      assist: false
+    };
+
     this.initKeyboard();
     this.initGamepad();
+  }
+
+  setTouchFlightInput(patch = {}) {
+    Object.assign(this.touchState, patch);
+  }
+
+  clearTouchFlightInput() {
+    this.touchState.throttle = 0;
+    this.touchState.steer = 0;
+    this.touchState.pitch = 0;
+    this.touchState.roll = 0;
+    this.touchState.throttleUp = false;
+    this.touchState.throttleDown = false;
+    this.touchState.fullThrottle = false;
+    this.touchState.throttleCut = false;
   }
 
   detectMobile() {
@@ -160,9 +192,12 @@ export class InputManager {
     if (this.touchState) {
       if (this.touchState.throttle !== 0) this.state.throttle = this.touchState.throttle;
       if (this.touchState.steer !== 0) this.state.steer = this.touchState.steer;
-      if (this.touchState.pitch !== undefined && this.touchState.pitch !== 0) this.state.pitch = this.touchState.pitch;
+      if (this.touchState.pitch !== 0) this.state.pitch = this.touchState.pitch;
+      if (this.touchState.roll !== 0) this.state.roll = this.touchState.roll;
       if (this.touchState.throttleUp) this.state.throttleUp = true;
       if (this.touchState.throttleDown) this.state.throttleDown = true;
+      if (this.touchState.fullThrottle) this.state.fullThrottle = true;
+      if (this.touchState.throttleCut) this.state.throttleCut = true;
       if (this.touchState.handbrake) this.state.handbrake = true;
       if (this.touchState.nitro) this.state.nitro = true;
       if (this.touchState.assist) this.state.assist = true;

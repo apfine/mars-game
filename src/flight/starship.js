@@ -554,11 +554,30 @@ function createPlumeMaterial({ core = 0xffffff, mid = 0xffaa33, outer = 0xff4411
         col = mix(col, uOuter, smoothstep(0.45, 1.0, t));
         col += uCore * diamonds * 1.5;
         col *= (1.0 + uVacuum * 0.35) * (1.25 + fres * 0.9);
-        float alpha = (body * (0.42 + fres * 0.95) * flicker + diamonds * 0.85) * uThrottle;
+        float alpha = (body * (0.42 + fres * 0.95) * flicker + diamonds * 0.85) * uThrottle * 0.62;
         gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
       }
     `
   });
+}
+
+let _engineGlowTexture = null;
+function getEngineGlowTexture() {
+  if (_engineGlowTexture || typeof document === 'undefined') return _engineGlowTexture;
+  const cv = document.createElement('canvas');
+  cv.width = 128;
+  cv.height = 128;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 62);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.18, 'rgba(210,240,255,0.92)');
+  grad.addColorStop(0.48, 'rgba(90,170,255,0.34)');
+  grad.addColorStop(1, 'rgba(20,60,160,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  _engineGlowTexture = new THREE.CanvasTexture(cv);
+  _engineGlowTexture.colorSpace = THREE.SRGBColorSpace;
+  return _engineGlowTexture;
 }
 
 export class StarshipMissionVehicle {
@@ -2191,8 +2210,8 @@ export class StarshipMissionVehicle {
     S.add(shipEnginesInst);
 
     // Starship Atmospheric Plume
-    const shipFlameGeo = new THREE.CylinderGeometry(2.4, 4.6, 24, 18, 6, true);
-    shipFlameGeo.translate(0, -12, 0);
+    const shipFlameGeo = new THREE.CylinderGeometry(1.8, 3.4, 20, 18, 6, true);
+    shipFlameGeo.translate(0, -10, 0);
     this.starshipFlame = new THREE.Mesh(
       shipFlameGeo,
       createPlumeMaterial({ core: 0xbde6ff, mid: 0x4db6ff, outer: 0x1f5cff })
@@ -2215,11 +2234,22 @@ export class StarshipMissionVehicle {
   // 4. SPECIAL FX: SPACE JELLYFISH PLUME & HYPERSONIC PLASMA SHEATH
   // -------------------------------------------------------------
   buildFX() {
-    // "SPACE JELLYFISH" Twilight Expansion Plume
-    const jellyGeo = new THREE.SphereGeometry(45, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.75);
-    jellyGeo.rotateX(Math.PI);
-    jellyGeo.scale(1.0, 2.4, 1.0);
-    jellyGeo.translate(0, -55, 0);
+    // "SPACE JELLYFISH" vacuum-expansion plume.
+    // The old geometry was a 45 m bubble stretched to 110 m. The chase camera
+    // sits only ~90 m away, so it flew *inside* the additive shell and a giant
+    // purple triangular wall covered the sky. Keep the same visual language but
+    // constrain the bell to a real engine-exit envelope that the camera can
+    // always see around rather than through.
+    const jellyProfile = [
+      new THREE.Vector2(0.9, 0.0),
+      new THREE.Vector2(2.8, -5.0),
+      new THREE.Vector2(6.4, -16.0),
+      new THREE.Vector2(10.5, -31.0),
+      new THREE.Vector2(13.0, -46.0),
+      new THREE.Vector2(9.2, -58.0),
+      new THREE.Vector2(0.35, -66.0)
+    ];
+    const jellyGeo = new THREE.LatheGeometry(jellyProfile, 28);
 
     this.jellyfishMat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
@@ -2251,19 +2281,43 @@ export class StarshipMissionVehicle {
 
         void main() {
           if (uIntensity <= 0.005) discard;
-          float y = -vPos.y / 110.0;
+          float y = clamp(-vPos.y / 66.0, 0.0, 1.0);
           float oneMinusZ = 1.0 - abs(vNormal.z);
           float fres = oneMinusZ * oneMinusZ;
-          float ripple = sin(vPos.y * 0.2 - uTime * 6.0) * 0.15 + sin(vPos.x * 0.3) * 0.1;
+          float ripple = sin(vPos.y * 0.34 - uTime * 6.0) * 0.15 + sin(vPos.x * 0.5) * 0.1;
           vec3 col = mix(uColorCore, uColorOuter, clamp(y * 1.2 + ripple, 0.0, 1.0));
-          float alpha = clamp(fres * (1.0 - y * 0.7) * uIntensity * 1.5, 0.0, 0.85);
+          // Fade toward the bell rim and tip so the plume never reads as a
+          // hard-edged polygon or an opaque plane.
+          float tipFade = smoothstep(0.0, 0.06, y) * (1.0 - smoothstep(0.68, 1.0, y));
+          float alpha = clamp(fres * tipFade * uIntensity * 0.72, 0.0, 0.42);
           gl_FragColor = vec4(col, alpha);
         }
       `
     });
     this.jellyfishMesh = new THREE.Mesh(jellyGeo, this.jellyfishMat);
     this.jellyfishMesh.visible = false;
+    this.jellyfishMesh.renderOrder = 5;
     this.starshipGroup.add(this.jellyfishMesh);
+
+    // A compact exhaust glow + real light so the torch remains legible even
+    // when the plume is seen against a bright planetary limb.
+    this.engineGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: getEngineGlowTexture(),
+      color: 0x8fd8ff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+      opacity: 0
+    }));
+    this.engineGlow.position.set(0, -4.0, 0);
+    this.engineGlow.scale.set(14, 24, 1);
+    this.engineGlow.visible = false;
+    this.starshipGroup.add(this.engineGlow);
+
+    this.starshipEngineLight = new THREE.PointLight(0x6fc8ff, 0, 160, 2);
+    this.starshipEngineLight.position.set(0, -8, 0);
+    this.starshipGroup.add(this.starshipEngineLight);
 
     // HYPERSONIC IONIZED PLASMA SHEATH ON +Z WINDWARD BLACK HEATSHIELD BELLY
     const plasmaGeo = new THREE.CylinderGeometry(5.15, 5.65, 38, 24, 1, true, -Math.PI * 0.54, Math.PI * 1.08);
@@ -2429,8 +2483,19 @@ export class StarshipMissionVehicle {
     const active = throttle > 0.01;
     this.starshipFlame.visible = active;
     if (this.starshipFlame.material.uniforms) {
-      this.starshipFlame.material.uniforms.uThrottle.value = active ? (0.4 + throttle * 0.6) : 0;
-      this.starshipFlame.material.uniforms.uVacuum.value = isVacuum ? 1 : 0;
+      const u = this.starshipFlame.material.uniforms;
+      u.uThrottle.value = active ? (0.55 + throttle * 0.75) : 0;
+      u.uVacuum.value = isVacuum ? 1 : 0;
+      // Sea-level Raptors burn orange; vacuum Raptors burn blue-violet.
+      if (isVacuum) {
+        u.uCore.value.setHex(0xe8f7ff);
+        u.uMid.value.setHex(0x67c8ff);
+        u.uOuter.value.setHex(0x2f6dff);
+      } else {
+        u.uCore.value.setHex(0xfff4d6);
+        u.uMid.value.setHex(0xffa432);
+        u.uOuter.value.setHex(0xff3d0a);
+      }
     }
     if (active) {
       this.starshipFlame.scale.set(
@@ -2440,10 +2505,26 @@ export class StarshipMissionVehicle {
       );
     }
 
-    const jellyVis = active && isVacuum;
+    if (this.engineGlow) {
+      this.engineGlow.visible = active;
+      this.engineGlow.material.color.setHex(isVacuum ? 0x8fd8ff : 0xffb060);
+      this.engineGlow.material.opacity = active ? 0.36 + throttle * 0.38 : 0;
+      const s = 6 + throttle * 6;
+      this.engineGlow.scale.set(s, s * 1.7, 1);
+    }
+    if (this.starshipEngineLight) {
+      this.starshipEngineLight.color.setHex(isVacuum ? 0x6fc8ff : 0xff8a3a);
+      this.starshipEngineLight.intensity = active ? 4 + throttle * 16 : 0;
+      this.starshipEngineLight.distance = 180;
+    }
+
+    // A full vacuum-expansion shell reads as a wall from the chase camera.
+    // Keep the torch compact and legible: the cylindrical Raptor plume plus
+    // glow/light carry the effect without the old purple jellyfish sheet.
+    const jellyVis = false;
     if (this.jellyfishMesh) this.jellyfishMesh.visible = jellyVis;
     if (this.jellyfishMat) {
-      this.jellyfishMat.uniforms.uIntensity.value = jellyVis ? throttle * 0.95 : 0.0;
+      this.jellyfishMat.uniforms.uIntensity.value = 0.0;
     }
   }
 

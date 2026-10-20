@@ -2495,3 +2495,231 @@ html, body {
   .flight-ops-status { display: none; }
   .flight-action-prompt { top: 128px; }
 }
+
+/* ---------------------------------------------------------------
+   Clean orbit-only operations, hide-UI mode and attitude director
+   --------------------------------------------------------------- */
+.flight-ops-btn.needs-tanker {
+  border-color: rgba(255, 186, 82, 0.72) !important;
+  color: #ffd28a !important;
+  box-shadow: 0 0 12px rgba(255, 168, 48, 0.18);
+}
+
+.flight-hide-ui-btn.active {
+  background: rgba(80, 190, 255, 0.22) !important;
+  border-color: rgba(120, 210, 255, 0.75) !important;
+  color: #c9f3ff !important;
+}
+
+/* Vitals-only mode: unobstructed exterior view with broadcast telemetry and
+   the attitude director. The HUD button stays available for restoring. */
+.flight-hud-layer.vitals-only .spx-top-left,
+.flight-hud-layer.vitals-only .flight-cam-bar,
+.flight-hud-layer.vitals-only .spx-dest-switch,
+.flight-hud-layer.vitals-only .spx-traj-switch,
+.flight-hud-layer.vitals-only .hud-pill-btn:not(.flight-hide-ui-btn),
+.flight-hud-layer.vitals-only .flight-ops-bar,
+.flight-hud-layer.vitals-only .spx-trajectory-prompt,
+.flight-hud-layer.vitals-only .spx-gimbal-bar,
+.flight-hud-layer.vitals-only .flight-mobile-steering,
+.flight-hud-layer.vitals-only .flight-score-card,
+.flight-hud-layer.vitals-only .spx-manual-controls,
+.flight-hud-layer.vitals-only #flight-action-prompt {
+  display: none !important;
+}
+
+.flight-hud-layer.vitals-only .spx-top-bar {
+  justify-content: flex-end;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.flight-attitude-gauge {
+  position: absolute;
+  right: 24px;
+  bottom: 196px;
+  width: 198px;
+  padding: 8px 9px 7px;
+  border: 1px solid rgba(160, 210, 240, 0.2);
+  border-radius: 8px;
+  background: rgba(7, 12, 18, 0.66);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: none;
+  z-index: 105;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.att-gauge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #8fb5cd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 1.4px;
+  margin-bottom: 5px;
+}
+
+.att-gauge-head span:last-child {
+  color: #6fd8ff;
+}
+
+.att-dial {
+  position: relative;
+  width: 180px;
+  height: 92px;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 180px 180px 0 0;
+  border: 1px solid rgba(146, 212, 255, 0.45);
+  border-bottom: 2px solid rgba(174, 225, 255, 0.75);
+  background: #0a1622;
+  box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.65), 0 0 14px rgba(62, 166, 235, 0.08);
+}
+
+.att-horizon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 220px;
+  height: 220px;
+  margin-left: -110px;
+  margin-top: -110px;
+  transition: transform 90ms linear;
+  will-change: transform;
+}
+
+.att-sky,
+.att-ground {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 50%;
+}
+
+.att-sky {
+  top: 0;
+  background: linear-gradient(180deg, #0d3d6c 0%, #2477b8 78%, #66b5e8 100%);
+}
+
+.att-ground {
+  bottom: 0;
+  background: linear-gradient(180deg, #8c5b36 0%, #5b3b26 72%, #2b1b13 100%);
+}
+
+.flight-attitude-gauge.earth .att-ground {
+  background: linear-gradient(180deg, #4f7d52 0%, #2f5a46 58%, #173b4d 100%);
+}
+
+.att-horizon-line {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 1.5px;
+  margin-top: -0.75px;
+  background: rgba(235, 249, 255, 0.98);
+  box-shadow: 0 0 6px rgba(150, 225, 255, 0.85);
+}
+
+.att-ladder {
+  position: absolute;
+  inset: 0;
+}
+
+.att-line {
+  position: absolute;
+  left: 50%;
+  width: 24px;
+  height: 1px;
+  margin-left: -12px;
+  background: rgba(225, 245, 255, 0.55);
+}
+
+.att-line.l1 { top: 33%; width: 15px; margin-left: -7.5px; }
+.att-line.l2 { top: 39%; width: 20px; margin-left: -10px; }
+.att-line.l3 { top: 45%; width: 27px; margin-left: -13.5px; }
+.att-line.l4 { top: 55%; width: 27px; margin-left: -13.5px; }
+.att-line.l5 { top: 61%; width: 20px; margin-left: -10px; }
+
+.att-bank-tick {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 7px;
+  margin-left: -0.5px;
+  background: rgba(178, 229, 255, 0.72);
+  transform-origin: 50% 92px;
+}
+
+.att-bank-tick.t1 { transform: rotate(-48deg); }
+.att-bank-tick.t2 { transform: rotate(0deg); height: 10px; }
+.att-bank-tick.t3 { transform: rotate(48deg); }
+
+.att-roll-pointer {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 0;
+  height: 0;
+  margin-left: -5px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid #ffd166;
+  transform-origin: 50% 88px;
+  filter: drop-shadow(0 0 3px rgba(255, 195, 70, 0.7));
+}
+
+.att-reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: #ffcf5f;
+  font-size: 17px;
+  line-height: 1;
+  text-shadow: 0 0 5px rgba(255, 190, 60, 0.6);
+}
+
+.att-readouts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+  margin-top: 6px;
+  color: #7fa5bd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+
+.att-readouts b {
+  color: #e5f7ff;
+  font-weight: 900;
+}
+
+@media (max-width: 900px) {
+  .flight-attitude-gauge {
+    right: 10px;
+    bottom: 178px;
+    width: 150px;
+    transform: scale(0.88);
+    transform-origin: bottom right;
+  }
+  .att-dial { width: 134px; height: 69px; }
+  .att-horizon { width: 164px; height: 164px; margin-left: -82px; margin-top: -82px; }
+  .att-bank-tick { transform-origin: 50% 69px; }
+  .att-roll-pointer { transform-origin: 50% 65px; }
+}
+
+@media (max-width: 560px) {
+  .flight-attitude-gauge {
+    transform: scale(0.72);
+    right: 4px;
+    bottom: 152px;
+  }
+}

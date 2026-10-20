@@ -13,6 +13,189 @@ import * as THREE from 'three';
 // - Orographic water-ice clouds over volcanic summits
 // ---------------------------------------------------------------------------
 let _cachedMarsTexture = null;
+let _cachedEarthTexture = null;
+
+// A hand-shaped but geographically recognisable Earth albedo map. We avoid
+// external image dependencies, yet keep the silhouette of the real continents
+// so the globe reads as Earth from orbit instead of a generic blue marble.
+export function createProceduralEarthTexture() {
+  if (typeof document === 'undefined') return null;
+  if (_cachedEarthTexture) return _cachedEarthTexture;
+
+  const W = 2048;
+  const H = 1024;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const g = cv.getContext('2d');
+  if (!g) return null;
+
+  // ---- Ocean -----------------------------------------------------------
+  const ocean = g.createLinearGradient(0, 0, 0, H);
+  ocean.addColorStop(0.0, '#071b38');
+  ocean.addColorStop(0.18, '#0a2d5f');
+  ocean.addColorStop(0.46, '#0b4b8f');
+  ocean.addColorStop(0.58, '#0d5a9f');
+  ocean.addColorStop(0.82, '#082d61');
+  ocean.addColorStop(1.0, '#06162f');
+  g.fillStyle = ocean;
+  g.fillRect(0, 0, W, H);
+
+  // Subtle sea-floor / current variation.
+  for (let i = 0; i < 420; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const r = 20 + Math.random() * 130;
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    const warm = Math.random() > 0.55;
+    grad.addColorStop(0, warm ? 'rgba(20,98,150,0.055)' : 'rgba(8,35,80,0.07)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  const px = (lon) => ((lon + 180) / 360) * W;
+  const py = (lat) => ((90 - lat) / 180) * H;
+
+  const fillPolygon = (points, fill) => {
+    g.beginPath();
+    for (let i = 0; i < points.length; i++) {
+      const [lon, lat] = points[i];
+      const x = px(lon);
+      const y = py(lat);
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fillStyle = fill;
+    g.fill();
+  };
+
+  // ---- Continents ------------------------------------------------------
+  // Coordinates are deliberately simplified but preserve real continental
+  // shapes: the Americas, Africa, Europe, Asia, Australia and Antarctica.
+  fillPolygon([
+    [-168, 66], [-150, 71], [-132, 70], [-115, 73], [-95, 73], [-78, 70],
+    [-62, 59], [-52, 47], [-63, 45], [-70, 40], [-81, 25], [-97, 18],
+    [-106, 23], [-115, 31], [-125, 41], [-135, 53], [-150, 61]
+  ], '#46763d');
+  fillPolygon([
+    [-81, 12], [-70, 12], [-54, 4], [-35, -6], [-39, -23], [-47, -31],
+    [-54, -40], [-66, -55], [-75, -50], [-72, -31], [-79, -10]
+  ], '#3f7238');
+  fillPolygon([
+    [-17, 37], [-5, 36], [10, 37], [31, 31], [43, 12], [51, 11],
+    [42, -12], [35, -25], [20, -35], [10, -30], [1, -5], [-10, 5],
+    [-17, 20]
+  ], '#7a793d');
+  fillPolygon([
+    [-10, 36], [0, 44], [14, 38], [30, 40], [40, 45], [30, 60],
+    [20, 70], [6, 60], [-5, 50]
+  ], '#4e7a3b');
+  fillPolygon([
+    [30, 45], [60, 55], [88, 70], [120, 75], [158, 70], [180, 60],
+    [172, 10], [145, 0], [122, -9], [100, 5], [80, 8], [60, 25],
+    [42, 30], [30, 40]
+  ], '#5f7d3b');
+  fillPolygon([
+    [112, -10], [130, -12], [153, -25], [150, -38], [125, -35],
+    [114, -25]
+  ], '#8b6f3e');
+  fillPolygon([
+    [-55, 60], [-40, 59], [-20, 60], [-18, 76], [-28, 83], [-46, 83],
+    [-60, 75]
+  ], '#d9e8e9');
+  fillPolygon([
+    [-180, -65], [180, -65], [180, -90], [-180, -90]
+  ], '#eef5f5');
+
+  // Great Britain / Ireland, Japan, Madagascar, New Zealand.
+  fillPolygon([[-11, 50], [-5, 58], [1, 51], [-4, 49]], '#527c3e');
+  fillPolygon([[-10, 52], [-6, 55], [-8, 51]], '#4e783a');
+  fillPolygon([[130, 31], [141, 40], [146, 43], [142, 34], [135, 31]], '#4c753d');
+  fillPolygon([[43, -12], [50, -17], [47, -25], [43, -20]], '#6e7e3e');
+  fillPolygon([[166, -35], [178, -38], [174, -46], [166, -45]], '#5b7f46');
+
+  // ---- Deserts, forests, mountain ranges -------------------------------
+  const biome = (cx, cy, rx, ry, color, alpha = 1) => {
+    const grad = g.createRadialGradient(px(cx), py(cy), 4, px(cx), py(cy), Math.max(rx, ry));
+    grad.addColorStop(0, color);
+    grad.addColorStop(0.6, color);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalAlpha = alpha;
+    g.fillStyle = grad;
+    g.beginPath();
+    g.ellipse(px(cx), py(cy), rx, ry, -0.18, 0, Math.PI * 2);
+    g.fill();
+    g.globalAlpha = 1;
+  };
+  // Sahara, Arabian, Gobi, Australian outback, Atacama, Kalahari.
+  biome(12, 23, 150, 70, '#c8a96a', 0.9);
+  biome(42, 22, 70, 48, '#c7a164', 0.78);
+  biome(95, 43, 110, 50, '#b9a477', 0.7);
+  biome(134, -25, 100, 48, '#b4824e', 0.8);
+  biome(-70, -24, 24, 70, '#b39261', 0.7);
+  biome(22, -23, 55, 40, '#b0955d', 0.55);
+  // Amazon, Congo, Southeast Asia rainforests.
+  biome(-62, -4, 90, 44, '#1f6131', 0.9);
+  biome(20, 0, 65, 38, '#2a6a35', 0.85);
+  biome(110, 2, 75, 35, '#256a34', 0.75);
+  // Boreal forest belt.
+  biome(-100, 55, 200, 30, '#315c3a', 0.6);
+  biome(100, 60, 250, 34, '#315c3a', 0.6);
+  // Rockies / Andes / Himalaya rock + snow.
+  biome(-108, 42, 28, 60, '#8b8170', 0.55);
+  biome(-70, -25, 18, 100, '#8c7d69', 0.65);
+  biome(82, 32, 90, 18, '#8e806b', 0.55);
+  biome(82, 32, 60, 8, '#e7ecec', 0.5);
+
+  // ---- Coastline haze / islands ----------------------------------------
+  for (let i = 0; i < 520; i++) {
+    const lon = -180 + Math.random() * 360;
+    const lat = -58 + Math.random() * 132;
+    const r = 1 + Math.random() * 5;
+    g.fillStyle = `rgba(60,110,58,${0.08 + Math.random() * 0.12})`;
+    g.beginPath();
+    g.arc(px(lon), py(lat), r, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // ---- Fine terrain grain ---------------------------------------------
+  const img = g.getImageData(0, 0, W, H);
+  const d = img.data;
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const i = (y * W + x) * 4;
+      const n = (Math.random() - 0.5) * 8;
+      d[i] = Math.max(0, Math.min(255, d[i] + n));
+      d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + n));
+      d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + n));
+    }
+  }
+  g.putImageData(img, 0, 0);
+
+  // ---- Polar caps ------------------------------------------------------
+  const north = g.createLinearGradient(0, 0, 0, 78);
+  north.addColorStop(0, 'rgba(248,252,255,0.98)');
+  north.addColorStop(0.55, 'rgba(240,249,255,0.78)');
+  north.addColorStop(1, 'rgba(240,249,255,0)');
+  g.fillStyle = north;
+  g.fillRect(0, 0, W, 86);
+  const south = g.createLinearGradient(0, H - 86, 0, H);
+  south.addColorStop(0, 'rgba(240,249,255,0)');
+  south.addColorStop(0.45, 'rgba(242,250,255,0.8)');
+  south.addColorStop(1, 'rgba(250,254,255,0.98)');
+  g.fillStyle = south;
+  g.fillRect(0, H - 86, W, 86);
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  _cachedEarthTexture = tex;
+  return tex;
+}
 
 function createProceduralMarsTexture() {
   if (typeof document === 'undefined') return null;
@@ -260,6 +443,35 @@ export class PostLaunchSpace {
     this.sunDirection = new THREE.Vector3(0.5, 0.65, 0.45).normalize();
     this.orbitRotation = 0.0;
     this.initialized = false;
+    this.planetId = 'mars';
+    this.pendingPlanetId = 'mars';
+  }
+
+  // Switches the high-altitude globe between worlds. Earth gets its own
+  // albedo, Rayleigh-blue limb and cloud treatment so arriving from Mars never
+  // shows a red Mars-looking planet above the Earth Starbase.
+  setPlanet(planetId) {
+    this.pendingPlanetId = planetId === 'earth' ? 'earth' : 'mars';
+    this.planetId = this.pendingPlanetId;
+    if (!this.initialized) return;
+    this._applyPlanetLook();
+  }
+
+  _applyPlanetLook() {
+    const earth = this.planetId === 'earth';
+    if (this.planetMat) {
+      const u = this.planetMat.uniforms;
+      u.uMap.value = earth ? createProceduralEarthTexture() : createProceduralMarsTexture();
+      u.uEarth.value = earth ? 1 : 0;
+      u.uAtmosphereColor.value.setHex(earth ? 0x5b9fe8 : 0xc8825c);
+      u.uAirglowBlue.value.setHex(earth ? 0x9bd6ff : 0x5ca8e6);
+    }
+    if (this.airglowMat) {
+      this.airglowMat.uniforms.uDustColor.value.setHex(earth ? 0x7fb8ef : 0xe28d62);
+      this.airglowMat.uniforms.uAirglowCyan.value.setHex(earth ? 0x6fc5ff : 0x58b2ff);
+    }
+    if (this.phobosMesh) this.phobosMesh.visible = !earth;
+    if (this.deimosMesh) this.deimosMesh.visible = !earth;
   }
 
   ensureInitialized() {
@@ -269,6 +481,8 @@ export class PostLaunchSpace {
     this.initAtmosphericAirglowLimb();
     this.initCosmicSpaceEnvironment();
     this.initOrbitalSatellite();
+    this.planetId = this.pendingPlanetId || 'mars';
+    this._applyPlanetLook();
   }
 
   initPlanetGlobe() {
@@ -286,6 +500,7 @@ export class PostLaunchSpace {
         uFade: { value: 0.0 },
         uAtmosphereColor: { value: new THREE.Color(0xc8825c) },
         uAirglowBlue: { value: new THREE.Color(0x5ca8e6) },
+        uEarth: { value: 0.0 },
         uTime: { value: 0.0 }
       },
       vertexShader: `
@@ -311,6 +526,7 @@ export class PostLaunchSpace {
         uniform float uFade;
         uniform vec3 uAtmosphereColor;
         uniform vec3 uAirglowBlue;
+        uniform float uEarth;
         uniform float uTime;
 
         varying vec2 vUv;
@@ -386,16 +602,20 @@ export class PostLaunchSpace {
 
           vec3 bumpN = normalize(N + (tangent * (h0 - hx) + bitangent * (h0 - hy)) * 0.75);
 
-          // Modulate with rich Martian geological detail matched to regionalSurfaceMesh & marsTerrain
-          float microTex = noise3D(S * 210.0);
-          baseAlbedo *= 0.78 + 0.32 * h0;
-          baseAlbedo *= 0.90 + 0.18 * microTex;
+          float earth = clamp(uEarth, 0.0, 1.0);
 
-          // Subtle equatorial water-ice cirrus wisps
-          float latMask = 1.0 - smoothstep(0.15, 0.75, abs(S.z));
-          float cloudNoise = fbm3D(S * 14.0 + vec3(uTime * 0.002, 0.0, uTime * 0.001));
-          float cloudFactor = smoothstep(0.64, 0.85, cloudNoise) * latMask * 0.24;
-          baseAlbedo = mix(baseAlbedo, vec3(0.82, 0.68, 0.58), cloudFactor);
+          // Modulate with geological detail. Mars has stronger canyon/regolith
+          // relief; Earth keeps its albedo crisp while retaining cloud relief.
+          float microTex = noise3D(S * 210.0);
+          baseAlbedo *= mix(0.78 + 0.32 * h0, 0.93 + 0.12 * h0, earth);
+          baseAlbedo *= mix(0.90 + 0.18 * microTex, 0.96 + 0.08 * microTex, earth);
+
+          // Cloud systems. Earth gets broad white frontal bands and tropical
+          // convection; Mars keeps only thin water-ice cirrus.
+          float latMask = mix(1.0 - smoothstep(0.15, 0.75, abs(S.z)), 1.0, earth);
+          float cloudNoise = fbm3D(S * mix(14.0, 10.0, earth) + vec3(uTime * mix(0.002, 0.006, earth), 0.0, uTime * 0.001));
+          float cloudFactor = smoothstep(mix(0.64, 0.53, earth), mix(0.85, 0.76, earth), cloudNoise) * latMask * mix(0.24, 0.78, earth);
+          baseAlbedo = mix(baseAlbedo, mix(vec3(0.82, 0.68, 0.58), vec3(0.95, 0.98, 1.0), earth), cloudFactor);
 
           // Day/Night Solar Terminator with calibrated dusty regolith reflectance (never bleaches white!)
           float NdotL = dot(bumpN, L);
@@ -405,12 +625,13 @@ export class PostLaunchSpace {
 
           float twilight = smoothstep(-0.22, 0.06, macroNdotL) * (1.0 - smoothstep(0.04, 0.40, macroNdotL));
 
-          vec3 dayLight = vec3(0.96, 0.82, 0.70);
+          vec3 dayLight = mix(vec3(0.96, 0.82, 0.70), vec3(1.03, 1.04, 1.02), earth);
           vec3 nightLight = vec3(0.005, 0.006, 0.012);
-          vec3 surfaceColor = baseAlbedo * (vec3(0.22, 0.13, 0.10) * dayFactor + mix(nightLight, dayLight, diff));
+          vec3 ambientTint = mix(vec3(0.22, 0.13, 0.10), vec3(0.09, 0.13, 0.18), earth);
+          vec3 surfaceColor = baseAlbedo * (ambientTint * dayFactor + mix(nightLight, dayLight, diff));
 
-          // Warm dust scattering along the terminator
-          surfaceColor += vec3(0.62, 0.25, 0.12) * twilight * 0.28;
+          // Dust scattering on Mars; cool Rayleigh twilight on Earth.
+          surfaceColor += mix(vec3(0.62, 0.25, 0.12) * 0.28, vec3(0.08, 0.24, 0.50) * 0.18, earth) * twilight;
 
           // Rayleigh + Mie Atmospheric Haze & Planetary Limb Fresnel
           float fresnel = 1.0 - max(0.0, dot(N, V));
@@ -503,6 +724,10 @@ export class PostLaunchSpace {
 
     this.airglowMesh = new THREE.Mesh(airglowGeo, airglowMat);
     this.airglowMesh.renderOrder = -790;
+    // The old back-sided airglow shell was responsible for the translucent
+    // faceted dome seen from high altitude. The planet shader already carries a
+    // physically softer Rayleigh limb, so the extra shell stays disabled.
+    this.airglowMesh.visible = false;
     this.airglowMat = airglowMat;
     this.group.add(this.airglowMesh);
   }

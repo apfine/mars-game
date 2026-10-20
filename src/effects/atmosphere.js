@@ -41,8 +41,9 @@ export class MarsAtmosphere {
   }
 
   createSky() {
-    // Hyper-Realistic 360° Mars Physical Sky Dome (radius 850m so it is never clipped in Rover or Flight mode)
-    const skyGeo = new THREE.SphereGeometry(850, 32, 24);
+    // High-resolution dome avoids any low-poly interpolation bands in the
+    // starfield when the camera is above the atmosphere.
+    const skyGeo = new THREE.SphereGeometry(850, 64, 48);
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -134,11 +135,12 @@ export class MarsAtmosphere {
             float twinkle = 0.88 + 0.12 * sin(uTime * 2.8 + tintSeed.x * 30.0);
             cosmosCol += starTint * (s1 * twinkle + s2) * starVisibility;
 
-            // Subtle Milky Way galactic dust band
+            // Subtle Milky Way galactic glow. Keep it additive and starlit:
+            // an unlit dust lane reads as a giant dark stripe across the sky.
             float galLat = abs(dot(dir, normalize(vec3(0.58, 0.68, -0.44))));
-            float galacticBand = exp(-galLat * galLat * 18.0);
-            float dustRift = smoothstep(0.0, 0.08, galLat);
-            cosmosCol += vec3(0.05, 0.065, 0.105) * galacticBand * dustRift * starVisibility * 0.45;
+            float galacticBand = exp(-galLat * galLat * 22.0);
+            float bandCore = 1.0 - 0.25 * smoothstep(0.0, 0.2, galLat);
+            cosmosCol += vec3(0.032, 0.042, 0.072) * galacticBand * bandCore * starVisibility * 0.28;
           }
 
           // Physical Martian Rayleigh + Dust Mie Scattering
@@ -366,27 +368,39 @@ export class MarsAtmosphere {
   }
 
   // Build an image-based lighting environment from the sky shader so metals, glass and paint reflect
-  // the Martian sky and sand instead of looking flat and black.
+  // the local sky and ground instead of looking flat and black.
   buildEnvironment(renderer) {
+    this.renderer = renderer;
+    this.rebuildEnvironment();
+  }
+
+  rebuildEnvironment() {
+    if (!this.renderer || !this.skyMat) return;
     const envScene = new THREE.Scene();
-    const skyClone = new THREE.Mesh(new THREE.SphereGeometry(50, 16, 12), this.skyMat.clone());
+    const skyClone = new THREE.Mesh(new THREE.SphereGeometry(50, 24, 16), this.skyMat.clone());
     skyClone.material.uniforms.uTime.value = 0;
+    skyClone.material.uniforms.uAltitude.value = 0;
+    skyClone.material.uniforms.uSpaceFade.value = 0;
     skyClone.renderOrder = -10;
     envScene.add(skyClone);
 
+    const isEarth = this.planetId === 'earth';
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(95, 16).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xc4724a })
+      new THREE.MeshBasicMaterial({ color: isEarth ? 0x5a7d52 : 0xc4724a })
     );
     ground.position.y = -1.0;
     envScene.add(ground);
 
-    const pmrem = new THREE.PMREMGenerator(renderer);
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
     const rt = pmrem.fromScene(envScene, 0.015);
+    const previous = this.scene.environment;
     this.scene.environment = rt.texture;
-    this.scene.environmentIntensity = 0.85;
+    this.scene.environmentIntensity = isEarth ? 1.0 : 0.85;
+    if (previous) previous.dispose();
     pmrem.dispose();
     skyClone.geometry.dispose();
+    skyClone.material.dispose();
     ground.geometry.dispose();
   }
 
@@ -714,6 +728,19 @@ export class MarsAtmosphere {
       this.scene.fog.color.setHex(planetId === 'earth' ? 0xbcd8f0 : 0xe0aa8c);
     }
 
+    // Distant horizon ridges are tinted to the local atmosphere. Earth gets
+    // cool blue-green coastal hills instead of the red Olympus silhouette.
+    if (this.distantMountains?.material?.uniforms) {
+      const mu = this.distantMountains.material.uniforms;
+      if (planetId === 'earth') {
+        mu.uHaze.value.setHex(0xa8c7d8);
+        mu.uPeak.value.setHex(0x5d7d6a);
+      } else {
+        mu.uHaze.value.setHex(0xe0aa8c);
+        mu.uPeak.value.setHex(0xc88d70);
+      }
+    }
+
     // Surface dust, tracks and Martian moons are Mars-only.
     const isMars = planetId !== 'earth';
     if (this.dustPoints) this.dustPoints.visible = isMars && !this.isFlight;
@@ -721,6 +748,9 @@ export class MarsAtmosphere {
     if (this.phobos) this.phobos.visible = isMars && !this.isFlight;
     if (this.deimos) this.deimos.visible = isMars && !this.isFlight;
     this.planetId = planetId;
+    if (this.postLaunchSpace) this.postLaunchSpace.setPlanet(planetId);
+    // Refresh IBL so steel and paint reflect the world they are standing on.
+    this.rebuildEnvironment();
   }
 
   setFlightMode(isFlight) {
@@ -1185,8 +1215,11 @@ export class MarsAtmosphere {
       this.distantMountains.visible = a < 180;
     }
     if (this.regionalSurfaceMesh && this.regionalMat) {
-      // Regional 36km Martian surface visible in flight mode from 0m up to 14km, seamlessly cross-fading into the 3D planet globe
-      const regOpacity = this.isFlight ? (1.0 - THREE.MathUtils.smoothstep(a, 3500, 14000)) : 0.0;
+      // Regional 36km surface is Martian-only. Earth uses its dedicated ocean,
+      // grass, tree and cloud environment -- never a red Mars skirt.
+      const regOpacity = (this.isFlight && this.planetId === 'mars')
+        ? (1.0 - THREE.MathUtils.smoothstep(a, 3500, 14000))
+        : 0.0;
       this.regionalSurfaceMesh.visible = regOpacity > 0.01;
       this.regionalMat.uniforms.uAltitude.value = a;
       this.regionalMat.uniforms.uOpacity.value = regOpacity;
