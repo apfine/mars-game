@@ -334,6 +334,5 @@ export class StarbaseOperations {
         if (crawler) crawler.group.visible = false;
       }
     }
-    }
   }
 }
