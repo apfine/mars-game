@@ -121,13 +121,17 @@ export class StarbaseOperations {
     }
 
     if (this.state === 'IDLE') {
-      // Start only after the ship is secured, so both vehicles are recovered
-      // together and orbital guidance is never interrupted by yard motion.
-      if (p.phase === 'LANDED' && p.shipCaughtByTower) {
+      // Trigger recovery whenever a vehicle touches down or is caught on the pad/tower
+      if (p.phase === 'LANDED') {
         this.state = 'RECOVERY';
-        this.beginTrack(this.booster, p.boosterPosition, p.padGroundY + 2.0);
+        const hasBooster = p.boosterState === 'CAUGHT' || (this.vehicle.boosterGroup && this.vehicle.boosterGroup.visible);
+        if (hasBooster) {
+          this.beginTrack(this.booster, p.boosterPosition, p.padGroundY + 2.0);
+        } else {
+          this.booster.stage = STAGE.DONE;
+        }
         this.beginTrack(this.ship, p.position, p.padElevation);
-        this.message = 'STARBASE OPS // RECOVERY CREWS MOVING IN';
+        this.message = 'STARBASE OPS // RECOVERY CREWS DEPLOYING CRAWLER & CONVEYOR';
       }
       return;
     }
@@ -156,11 +160,19 @@ export class StarbaseOperations {
       // Visible factory choreography: erection arm lifts, stacker trolley
       // indexes and the review beacons sweep the refurbished sections.
       this.vehicle.setErectorAngle(THREE.MathUtils.lerp(-0.32, 0.05, easeInOut(t)));
-      this.vehicle.setReviewScan('ship', t > 0.72, t);
-      this.vehicle.setReviewScan('booster', t > 0.55, t);
+      this.vehicle.setReviewScan('ship', t > 0.65, t);
+      this.vehicle.setReviewScan('booster', t > 0.45, t);
+
+      if (t < 0.45) {
+        this.message = 'FACTORY // RAPTOR REFURBISHMENT · HEAT SHIELD TILES REPAIR';
+      } else if (t < 0.85) {
+        this.message = 'ROBOTIC ARMS // ROLLING REFURBISHED VEHICLES ONTO CONVEYOR';
+      } else {
+        this.message = 'ROBOTIC CHOPSTICKS // HOISTING & LOADING BOOSTER ONTO LAUNCH MOUNT';
+      }
 
       if (this.buildTimer >= 7.5) {
-        this.message = 'LAUNCH MOUNT // NEW STACK ROLLOUT';
+        this.message = 'ROBOTIC ARMS // HOISTING & MATING STARSHIP ONTO BOOSTER';
         p.prepareNextMission();
         this.state = 'READY';
         this.readyTimer = 0;
@@ -177,8 +189,8 @@ export class StarbaseOperations {
       const close = Math.min(1, this.readyTimer / 2.8);
       this.vehicle.setLaunchChopsticks(close, L.launchTower.armY);
       this.message = close >= 1
-        ? 'STARBASE OPS // NEW STACK SECURED · READY FOR NEXT MISSION'
-        : 'STARBASE OPS // CLOSING LAUNCH ARMS ON NEW STACK';
+        ? 'STARBASE OPS // NEW STACK SECURED BY ROBOTIC ARMS · READY FOR LAUNCH'
+        : 'ROBOTIC CHOPSTICKS // MATING STARSHIP STACK · LATCHING UMBILICALS';
 
       // Continuous AUTO campaign: launch the fresh stack after a short hold so
       // the reload is visible rather than an instant teleport.
@@ -211,11 +223,11 @@ export class StarbaseOperations {
   buildMessage() {
     const s = this.ship.stage;
     const b = this.booster.stage;
-    if (s === STAGE.LOWER || b === STAGE.LOWER) return 'STARBASE OPS // LOWERING CATCH ARMS · CRAWLERS INBOUND';
-    if (s === STAGE.TRANSPORT || b === STAGE.TRANSPORT) return 'STARBASE OPS // ROLLING VEHICLES TO INSPECTION & FABRICATION';
-    if (s === STAGE.FACTORY || b === STAGE.FACTORY) return 'FACTORY // THERMAL SURVEY · STRUCTURAL INSPECTION · REFURBISHMENT';
+    if (s === STAGE.LOWER || b === STAGE.LOWER) return 'STARBASE OPS // LOWERING VEHICLE ONTO CONVEYOR CRAWLER';
+    if (s === STAGE.TRANSPORT || b === STAGE.TRANSPORT) return 'CONVEYOR TRANSIT // MOVING STARSHIP & BOOSTER TO REPAIR HANGAR';
+    if (s === STAGE.FACTORY || b === STAGE.FACTORY) return 'FACTORY // THERMAL SURVEY · ROBOTIC REFURBISHMENT';
     if (s === STAGE.WAIT || b === STAGE.WAIT) return 'STARBASE OPS // SAFING VEHICLES · VENTING RESIDUAL PROPELLANT';
-    return 'STARBASE OPS // RECOVERY IN PROGRESS';
+    return 'STARBASE OPS // CONVEYOR & REPAIR IN PROGRESS';
   }
 
   updateTrack(track, dt) {

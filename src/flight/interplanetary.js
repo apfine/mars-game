@@ -413,19 +413,38 @@ export class InterplanetaryJourney {
     this.celestialGroup = new THREE.Group();
     this.scene.add(this.celestialGroup);
 
-    // The real Earth-Mars separation is 225 million km. The 3D scene uses a
-    // compressed navigation volume, but the *apparent* size is kept honest:
-    // Earth is only a bright point/very small disc from Mars, not a second
-    // world hanging overhead.
+    // Astronomical scale & positions:
+    // Earth-Mars mean orbital separation is 225,400,000 km (1.507 AU).
+    // In our heliocentric 3D navigation volume:
+    // Earth is at 1.000 AU equivalent, Mars at 1.524 AU equivalent.
+    // The central Sun radiates gravitational field and celestial illumination.
     const azimuth = 0.6;
     this.earthAnchor.set(
-      this.padCoords.x + Math.sin(azimuth) * 290000,
-      this.padGroundY + 90000,
-      this.padCoords.y + Math.cos(azimuth) * 290000
+      this.padCoords.x + Math.sin(azimuth) * 360000,
+      this.padGroundY + 110000,
+      this.padCoords.y + Math.cos(azimuth) * 360000
     );
-    this.earthBaseScale = 0.035;
-    this.moonBaseScale = 0.045;
-    this.marsBaseScale = 0.035;
+    this.earthBaseScale = 0.045;
+    this.moonBaseScale = 0.038;
+    this.marsBaseScale = 0.040;
+
+    // The Central Sun (SOL)
+    const sunAzimuth = -0.92;
+    this.sunAnchor = new THREE.Vector3(
+      this.padCoords.x + Math.sin(sunAzimuth) * 650000,
+      this.padGroundY + 280000,
+      this.padCoords.y + Math.cos(sunAzimuth) * 650000
+    );
+    this.sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeStarGlowTexture(0xfff6d0),
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    }));
+    this.sunGlow.position.copy(this.sunAnchor);
+    this.sunGlow.scale.set(38000, 38000, 1);
+    this.celestialGroup.add(this.sunGlow);
 
     const earthMat = new THREE.MeshStandardMaterial({
       map: makeEarthTexture(),
@@ -455,14 +474,13 @@ export class InterplanetaryJourney {
     this.clouds.scale.setScalar(this.earthBaseScale);
     this.celestialGroup.add(this.clouds);
 
-    // Atmospheric rim glow is deliberately subtle so the tiny distant Earth
-    // reads as a star-like world rather than a second sun.
+    // Atmospheric rim glow
     this.earthGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(EARTH_RADIUS_SCENE * 1.02, 48, 32),
+      new THREE.SphereGeometry(EARTH_RADIUS_SCENE * 1.025, 48, 32),
       new THREE.MeshBasicMaterial({
         color: 0x5ba8ff,
         transparent: true,
-        opacity: 0.09,
+        opacity: 0.22,
         side: THREE.BackSide,
         blending: THREE.AdditiveBlending,
         depthWrite: false
@@ -475,43 +493,43 @@ export class InterplanetaryJourney {
     this.earthStar = new THREE.Sprite(new THREE.SpriteMaterial({
       map: makeStarGlowTexture(0x7fc8ff),
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.85,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       depthTest: true
     }));
     this.earthStar.position.copy(this.earthAnchor);
-    this.earthStar.scale.set(1800, 1800, 1);
+    this.earthStar.scale.set(3200, 3200, 1);
     this.celestialGroup.add(this.earthStar);
 
-    // Mars seen from Earth's sky: a small rust-coloured point.
+    // Mars seen from Earth's sky: realistic rust-red celestial body
     const marsAzimuth = -2.35;
     this.marsAnchor = new THREE.Vector3(
-      this.padCoords.x + Math.sin(marsAzimuth) * 420000,
-      this.padGroundY + 150000,
-      this.padCoords.y + Math.cos(marsAzimuth) * 420000
+      this.padCoords.x + Math.sin(marsAzimuth) * 480000,
+      this.padGroundY + 160000,
+      this.padCoords.y + Math.cos(marsAzimuth) * 480000
     );
     this.marsGlobe = new THREE.Mesh(
-      new THREE.SphereGeometry(EARTH_RADIUS_SCENE * 0.52, 48, 32),
+      new THREE.SphereGeometry(EARTH_RADIUS_SCENE * 0.53, 48, 32),
       new THREE.MeshStandardMaterial({
-        color: 0xb96745,
-        roughness: 1.0,
-        emissive: new THREE.Color(0x2b0d06),
-        emissiveIntensity: 0.2
+        color: 0xc86a42,
+        roughness: 0.95,
+        emissive: new THREE.Color(0x381208),
+        emissiveIntensity: 0.24
       })
     );
     this.marsGlobe.position.copy(this.marsAnchor);
-    this.marsGlobe.scale.setScalar(this.marsBaseScale * 0.6);
+    this.marsGlobe.scale.setScalar(this.marsBaseScale);
     this.celestialGroup.add(this.marsGlobe);
     this.marsStar = new THREE.Sprite(new THREE.SpriteMaterial({
       map: makeStarGlowTexture(0xff8a5a),
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.75,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     }));
     this.marsStar.position.copy(this.marsAnchor);
-    this.marsStar.scale.set(2400, 2400, 1);
+    this.marsStar.scale.set(2800, 2800, 1);
     this.celestialGroup.add(this.marsStar);
 
     this.moonOrbitRadius = 62000;
@@ -534,8 +552,6 @@ export class InterplanetaryJourney {
     this.moon.scale.setScalar(this.moonBaseScale);
     this.celestialGroup.add(this.moon);
 
-    // The orbit ring is a navigation graphic, not a real planetary ring. Hide
-    // it by default so Earth never reads as Saturn.
     this.moonOrbitRing = null;
   }
 
@@ -544,130 +560,242 @@ export class InterplanetaryJourney {
     this.earthSurface.visible = false;
     this.scene.add(this.earthSurface);
 
-    const ocean = new THREE.Mesh(
-      new THREE.PlaneGeometry(160000, 160000),
-      new THREE.MeshStandardMaterial({
-        map: makeOceanTexture(),
-        color: 0xffffff,
-        roughness: 0.2,
-        metalness: 0.16,
-        envMapIntensity: 1.15
-      })
-    );
+    // Realistic circular ocean body with shoreline blending (zero flat square box cutoffs in space!)
+    const oceanMat = new THREE.MeshStandardMaterial({
+      map: makeOceanTexture(),
+      color: 0x4896d8,
+      roughness: 0.15,
+      metalness: 0.28,
+      envMapIntensity: 1.25,
+      transparent: true,
+      opacity: 0.95
+    });
+    const ocean = new THREE.Mesh(new THREE.CircleGeometry(24000, 128), oceanMat);
     ocean.rotation.x = -Math.PI / 2;
     ocean.position.set(this.padCoords.x, this.padGroundY - 0.7, this.padCoords.y);
     this.earthSurface.add(ocean);
     this.earthOcean = ocean;
+    this.earthOceanMat = oceanMat;
 
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(9000, 96),
-      new THREE.MeshStandardMaterial({
-        map: makeGrassTexture(),
-        color: 0xffffff,
-        roughness: 0.96,
-        metalness: 0.0
-      })
-    );
+    // Grassland and coastal peninsula
+    const groundMat = new THREE.MeshStandardMaterial({
+      map: makeGrassTexture(),
+      color: 0x5a8848,
+      roughness: 0.88,
+      metalness: 0.02,
+      transparent: true,
+      opacity: 1.0
+    });
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(9200, 96), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(this.padCoords.x, this.padGroundY + 0.06, this.padCoords.y);
     ground.receiveShadow = true;
     this.earthSurface.add(ground);
     this.earthGround = ground;
+    this.earthGroundMat = groundMat;
 
-    // Sandy coastal ring makes the land/ocean boundary read as a beach rather
-    // than a hard geometry cut.
-    const beach = new THREE.Mesh(
-      new THREE.RingGeometry(8800, 9750, 128),
-      new THREE.MeshStandardMaterial({
-        map: makeBeachTexture(),
-        color: 0xffffff,
-        roughness: 0.92,
-        metalness: 0.0,
-        side: THREE.DoubleSide
-      })
-    );
+    // Sandy coastal ring makes the land/ocean boundary read as a beach
+    const beachMat = new THREE.MeshStandardMaterial({
+      map: makeBeachTexture(),
+      color: 0xd8c89a,
+      roughness: 0.92,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 1.0
+    });
+    const beach = new THREE.Mesh(new THREE.RingGeometry(8900, 9900, 128), beachMat);
     beach.rotation.x = -Math.PI / 2;
     beach.position.set(this.padCoords.x, this.padGroundY - 0.12, this.padCoords.y);
     this.earthSurface.add(beach);
+    this.earthBeachMat = beachMat;
 
-    // Graded concrete apron around the launch complex.
-    const apron = new THREE.Mesh(
-      new THREE.CircleGeometry(470, 80),
-      new THREE.MeshStandardMaterial({
-        map: makeEarthConcreteTexture(),
-        color: 0xc9cbc4,
-        roughness: 0.9,
-        metalness: 0.02
-      })
-    );
+    // Graded concrete apron around the launch complex
+    const apronMat = new THREE.MeshStandardMaterial({
+      map: makeEarthConcreteTexture(),
+      color: 0xced1cb,
+      roughness: 0.88,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 1.0
+    });
+    const apron = new THREE.Mesh(new THREE.CircleGeometry(490, 80), apronMat);
     apron.rotation.x = -Math.PI / 2;
     apron.position.set(this.padCoords.x, this.padGroundY + 0.14, this.padCoords.y);
     apron.receiveShadow = true;
     this.earthSurface.add(apron);
+    this.earthApronMat = apronMat;
 
-    // Low rolling hills and a treeline so the Earth site is immediately
-    // distinguishable from the Martian apron.
-    const hillMat = new THREE.MeshStandardMaterial({ color: 0x4f6e3d, roughness: 1.0, metalness: 0.0 });
-    for (let i = 0; i < 34; i++) {
-      const a = (i / 34) * Math.PI * 2;
-      const r = 3200 + (i % 5) * 380;
-      const hill = new THREE.Mesh(new THREE.ConeGeometry(280 + (i % 4) * 90, 70 + (i % 3) * 40, 14), hillMat);
+    // Low rolling hills along the inland perimeter
+    const hillMat = new THREE.MeshStandardMaterial({
+      color: 0x3d662c,
+      roughness: 0.95,
+      metalness: 0.0,
+      transparent: true,
+      opacity: 1.0
+    });
+    this.earthHillMat = hillMat;
+    for (let i = 0; i < 42; i++) {
+      const a = (i / 42) * Math.PI * 2;
+      const r = 3400 + (i % 7) * 420;
+      const hill = new THREE.Mesh(
+        new THREE.ConeGeometry(320 + (i % 4) * 110, 85 + (i % 3) * 55, 16),
+        hillMat
+      );
       hill.position.set(
         this.padCoords.x + Math.cos(a) * r,
-        this.padGroundY + 30,
+        this.padGroundY + 36,
         this.padCoords.y + Math.sin(a) * r
       );
       hill.rotation.y = a;
       this.earthSurface.add(hill);
     }
 
-    // Detailed broadleaf + conifer treeline. Instanced so the added density
-    // costs only a handful of draw calls.
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x59402a, roughness: 1.0 });
-    const coniferMat = new THREE.MeshStandardMaterial({ color: 0x244f2c, roughness: 0.95 });
-    const broadleafMat = new THREE.MeshStandardMaterial({ color: 0x336b33, roughness: 0.92 });
-    const treeCount = 190;
-    const trunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.9, 1.6, 12, 6), trunkMat, treeCount);
-    const coniferInst = new THREE.InstancedMesh(new THREE.ConeGeometry(6.6, 27, 7), coniferMat, treeCount);
-    const broadleafInst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(8.5, 1), broadleafMat, treeCount);
+    // High-fidelity natural 3D tree system (realistic multi-tier conifers & leafy oak broadleafs)
+    const trunkMat = new THREE.MeshStandardMaterial({
+      color: 0x4a3520,
+      roughness: 0.95,
+      transparent: true,
+      opacity: 1.0
+    });
+    const pineMat = new THREE.MeshStandardMaterial({
+      color: 0x1d4d28,
+      roughness: 0.92,
+      transparent: true,
+      opacity: 1.0
+    });
+    const pineLightMat = new THREE.MeshStandardMaterial({
+      color: 0x276335,
+      roughness: 0.90,
+      transparent: true,
+      opacity: 1.0
+    });
+    const oakMat = new THREE.MeshStandardMaterial({
+      color: 0x2e6d30,
+      roughness: 0.88,
+      transparent: true,
+      opacity: 1.0
+    });
+    const shrubMat = new THREE.MeshStandardMaterial({
+      color: 0x3c7e3e,
+      roughness: 0.92,
+      transparent: true,
+      opacity: 1.0
+    });
+
+    this.earthTreeMaterials = [trunkMat, pineMat, pineLightMat, oakMat, shrubMat];
+    this.earthTreeObstacles = [];
+
+    const totalPines = 160;
+    const totalOaks = 140;
+    const totalShrubs = 120;
+
+    // Conifer pine instancing: realistic tiered boughs
+    const pineTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.8, 1.4, 18, 6), trunkMat, totalPines);
+    const pineTier1Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(6.8, 14, 7), pineMat, totalPines);
+    const pineTier2Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(5.2, 12, 7), pineLightMat, totalPines);
+    const pineTier3Inst = new THREE.InstancedMesh(new THREE.ConeGeometry(3.6, 10, 7), pineMat, totalPines);
+
+    // Oak broadleaf instancing: clustered organic leafy canopies
+    const oakTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.2, 1.8, 14, 6), trunkMat, totalOaks);
+    const oakCanopyInst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(9.0, 2), oakMat, totalOaks);
+    const oakCanopy2Inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(7.2, 2), shrubMat, totalOaks);
+
+    // Shrubbery instancing
+    const shrubInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(3.2, 1), shrubMat, totalShrubs);
+
     const dummy = new THREE.Object3D();
-    let coniferIdx = 0;
-    let broadleafIdx = 0;
-    let trunkIdx = 0;
-    for (let i = 0; i < treeCount; i++) {
-      const angle = (i / treeCount) * Math.PI * 2 + (i % 7) * 0.13;
-      const radius = 620 + (i % 17) * 82 + Math.random() * 180;
+
+    // Plant pines in natural woodland groves along the coast & hills
+    for (let i = 0; i < totalPines; i++) {
+      const angle = (i / totalPines) * Math.PI * 2 + (i % 9) * 0.22;
+      const radius = 680 + (i % 23) * 110 + (Math.sin(i * 3.7) * 220);
       const x = this.padCoords.x + Math.cos(angle) * radius;
       const z = this.padCoords.y + Math.sin(angle) * radius;
-      const scale = 0.72 + Math.random() * 0.85;
-      dummy.position.set(x, this.padGroundY + 6.0 * scale, z);
+      const scale = 0.75 + (i % 5) * 0.16 + (Math.cos(i) * 0.1);
+
+      this.earthTreeObstacles.push({ x, z, radius: 1.8 });
+
+      // Trunk
+      dummy.position.set(x, this.padGroundY + 8.0 * scale, z);
       dummy.scale.set(scale, scale, scale);
-      dummy.rotation.y = angle;
+      dummy.rotation.set(0, angle, 0);
       dummy.updateMatrix();
-      trunkInst.setMatrixAt(trunkIdx++, dummy.matrix);
-      if (i % 3 === 0) {
-        dummy.position.set(x, this.padGroundY + 23 * scale, z);
-        dummy.rotation.y = angle + 0.3;
-        dummy.updateMatrix();
-        coniferInst.setMatrixAt(coniferIdx++, dummy.matrix);
-      } else {
-        dummy.position.set(x, this.padGroundY + 22.5 * scale, z);
-        dummy.rotation.set(0.1 * Math.random(), angle, 0.1 * Math.random());
-        dummy.scale.set(scale * (0.9 + Math.random() * 0.25), scale * 0.85, scale * (0.9 + Math.random() * 0.25));
-        dummy.updateMatrix();
-        broadleafInst.setMatrixAt(broadleafIdx++, dummy.matrix);
-      }
+      pineTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      // Tier 1 (base bough)
+      dummy.position.set(x, this.padGroundY + 16.0 * scale, z);
+      dummy.updateMatrix();
+      pineTier1Inst.setMatrixAt(i, dummy.matrix);
+
+      // Tier 2 (middle bough)
+      dummy.position.set(x, this.padGroundY + 23.0 * scale, z);
+      dummy.updateMatrix();
+      pineTier2Inst.setMatrixAt(i, dummy.matrix);
+
+      // Tier 3 (top bough)
+      dummy.position.set(x, this.padGroundY + 29.0 * scale, z);
+      dummy.updateMatrix();
+      pineTier3Inst.setMatrixAt(i, dummy.matrix);
     }
-    trunkInst.count = trunkIdx;
-    coniferInst.count = coniferIdx;
-    broadleafInst.count = broadleafIdx;
-    trunkInst.instanceMatrix.needsUpdate = true;
-    coniferInst.instanceMatrix.needsUpdate = true;
-    broadleafInst.instanceMatrix.needsUpdate = true;
-    trunkInst.castShadow = true;
-    coniferInst.castShadow = true;
-    broadleafInst.castShadow = true;
-    this.earthSurface.add(trunkInst, coniferInst, broadleafInst);
+
+    // Plant broadleaf oaks in lush meadows
+    for (let i = 0; i < totalOaks; i++) {
+      const angle = (i / totalOaks) * Math.PI * 2 + 0.45 + (i % 7) * 0.18;
+      const radius = 580 + (i % 19) * 95 + (Math.cos(i * 2.3) * 160);
+      const x = this.padCoords.x + Math.cos(angle) * radius;
+      const z = this.padCoords.y + Math.sin(angle) * radius;
+      const scale = 0.8 + (i % 6) * 0.14;
+
+      this.earthTreeObstacles.push({ x, z, radius: 2.2 });
+
+      // Trunk
+      dummy.position.set(x, this.padGroundY + 6.5 * scale, z);
+      dummy.scale.set(scale, scale, scale);
+      dummy.rotation.set(0, angle + 0.5, 0);
+      dummy.updateMatrix();
+      oakTrunkInst.setMatrixAt(i, dummy.matrix);
+
+      // Main rounded canopy
+      dummy.position.set(x, this.padGroundY + 20.0 * scale, z);
+      dummy.updateMatrix();
+      oakCanopyInst.setMatrixAt(i, dummy.matrix);
+
+      // Secondary canopy cluster
+      dummy.position.set(x + 3.0 * scale, this.padGroundY + 24.0 * scale, z + 2.0 * scale);
+      dummy.scale.set(scale * 0.85, scale * 0.85, scale * 0.85);
+      dummy.updateMatrix();
+      oakCanopy2Inst.setMatrixAt(i, dummy.matrix);
+    }
+
+    // Plant coastal shrubs & bushes
+    for (let i = 0; i < totalShrubs; i++) {
+      const angle = (i / totalShrubs) * Math.PI * 2 + (i % 11) * 0.35;
+      const radius = 500 + (i % 29) * 75;
+      const x = this.padCoords.x + Math.cos(angle) * radius;
+      const z = this.padCoords.y + Math.sin(angle) * radius;
+      const scale = 0.6 + (i % 4) * 0.25;
+
+      dummy.position.set(x, this.padGroundY + 2.0 * scale, z);
+      dummy.scale.set(scale, scale * 0.8, scale);
+      dummy.rotation.set(0, angle * 1.5, 0);
+      dummy.updateMatrix();
+      shrubInst.setMatrixAt(i, dummy.matrix);
+    }
+
+    pineTrunkInst.instanceMatrix.needsUpdate = true;
+    pineTier1Inst.instanceMatrix.needsUpdate = true;
+    pineTier2Inst.instanceMatrix.needsUpdate = true;
+    pineTier3Inst.instanceMatrix.needsUpdate = true;
+    oakTrunkInst.instanceMatrix.needsUpdate = true;
+    oakCanopyInst.instanceMatrix.needsUpdate = true;
+    oakCanopy2Inst.instanceMatrix.needsUpdate = true;
+    shrubInst.instanceMatrix.needsUpdate = true;
+
+    this.earthSurface.add(
+      pineTrunkInst, pineTier1Inst, pineTier2Inst, pineTier3Inst,
+      oakTrunkInst, oakCanopyInst, oakCanopy2Inst, shrubInst
+    );
 
     // Low clouds drifting through the coastal sky.
     this.earthCloudSprites = new THREE.Group();
@@ -1113,9 +1241,32 @@ export class InterplanetaryJourney {
     if (this.transferDots) this.transferDots.material.opacity = 0;
   }
 
-  update(dt, timeScale = 1) {
+  update(dt, timeScale = 1, currentAltitude = 0) {
     this.time += dt;
     this._satelliteTime += dt;
+
+    // Altitude-based fading for Earth local terrain:
+    // When ascending above 1200m, fade out the regional landing zone so it seamlessly gives way
+    // to the 3D spherical Earth globe with zero flat-plane cutoffs in the sky!
+    if (this.planetId === 'earth' && this.earthSurface) {
+      if (currentAltitude > 3200) {
+        this.earthSurface.visible = false;
+      } else {
+        this.earthSurface.visible = true;
+        const fade = currentAltitude <= 1200
+          ? 1.0
+          : Math.max(0.0, 1.0 - (currentAltitude - 1200) / 2000);
+
+        if (this.earthOceanMat) this.earthOceanMat.opacity = 0.95 * fade;
+        if (this.earthGroundMat) this.earthGroundMat.opacity = fade;
+        if (this.earthBeachMat) this.earthBeachMat.opacity = fade;
+        if (this.earthApronMat) this.earthApronMat.opacity = fade;
+        if (this.earthHillMat) this.earthHillMat.opacity = fade;
+        if (this.earthTreeMaterials) {
+          for (const m of this.earthTreeMaterials) m.opacity = fade;
+        }
+      }
+    }
 
     // Satellites stay alive in every mode so the sky is never empty.
     this._updateSatelliteSet(this.marsSatellites, dt, 1.0);
@@ -1149,9 +1300,12 @@ export class InterplanetaryJourney {
 
     if (!this.active) return;
 
-    // Scripted cinematic transit. Deliveries are compressed for play, but the
-    // route still takes tens of seconds at 1× so the ellipse and lunar flyby
-    // are readable. Warp only shortens it moderately.
+    // The booster NEVER transfers interplanetary; it stays on the home planet
+    if (this.vehicle?.boosterGroup) {
+      this.vehicle.boosterGroup.visible = false;
+    }
+
+    // Scripted cinematic transit along the Keplerian gravitational ellipse.
     const warp = Math.max(1, Math.min(timeScale, 3));
     this._lastScaleWarp = warp;
     this.progress = Math.min(1, this.progress + (dt * warp) / this.duration);
@@ -1162,10 +1316,6 @@ export class InterplanetaryJourney {
     this._sampleTangent(t, this._pathTangent);
     this.physics.position.copy(this._pathPoint);
 
-    // At the apsides the mathematical Hohmann tangent points straight up or
-    // down. Blend in the bearing to the destination so the ship (and chase
-    // camera) still reads as "flying toward the target world" rather than
-    // tipping vertically at departure/arrival.
     this._toDestination.copy(this.pathEnd).sub(this._pathPoint).normalize();
     this._flightDir.copy(this._pathTangent)
       .lerp(this._toDestination, 0.42)
@@ -1174,8 +1324,7 @@ export class InterplanetaryJourney {
       this._upAxis,
       this._flightDir
     );
-    // Keep the chase camera and attitude director aligned with the ship's
-    // actual direction of travel, not the last local-planet heading.
+
     const flatSpeed = Math.hypot(this._flightDir.x, this._flightDir.z);
     this.physics.yaw = Math.atan2(this._flightDir.x, this._flightDir.z);
     this.physics.pitch = Math.atan2(flatSpeed, this._flightDir.y);
@@ -1183,22 +1332,30 @@ export class InterplanetaryJourney {
     this.physics.yawDeg = ((this.physics.yaw * 180 / Math.PI) % 360 + 360) % 360;
     this.physics.pitchDeg = Math.abs(this.physics.pitch * 180 / Math.PI);
     this.physics.rollDeg = 0;
-    this.physics.speed = 26000 + 18000 * Math.sin(t * Math.PI);
+
+    // Physical heliocentric Keplerian velocity (from 32.7 km/s at Earth orbit to 21.5 km/s at Mars orbit)
+    const helioSpeed = 32700 - 11200 * t;
+    this.physics.speed = helioSpeed;
     this.physics.transferProgress = t;
-    this.physics.transferStatus = this.transferStatus;
 
     const burn = t < 0.055 || t > 0.952;
     this.vehicle.setStarshipThrottle(burn ? 0.9 : 0.0, true);
     this.vehicle.setReentryHeat(Math.max(0, Math.sin(t * Math.PI) * 0.045));
 
+    // Real Astronomical Distance calculation (Earth-Mars ~225.4 million km = 1.507 AU)
+    const totalDistKm = 225400000;
+    const remainingKm = Math.round(totalDistKm * (1.0 - t));
+    const distAu = (remainingKm / 149597870.7).toFixed(3);
+    const speedKmS = (helioSpeed / 1000).toFixed(1);
+
     const pct = Math.round(t * 100);
-    let status = `HOHMANN TRANSFER // ${pct}%`;
-    if (t < 0.07) status = `TRANS-${this.target === 'earth' ? 'MARS' : 'EARTH'} INJECTION // ${pct}%`;
+    let status = `GRAVITATIONAL TRANSFER // ${pct}% · ${Math.round(remainingKm / 1000000)}M KM (${distAu} AU) · ${speedKmS} KM/S`;
+    if (t < 0.07) status = `TRANS-${this.target === 'earth' ? 'MARS' : 'EARTH'} INJECTION // ${pct}% · ${distAu} AU`;
     if (this.target === 'earth' && this.moon) {
       const moonDist = this.physics.position.distanceTo(this.moon.position);
-      if (t > 0.62 && moonDist < 30000) status = `LUNAR FLYBY // ${Math.round(moonDist / 1000)} KM`;
+      if (t > 0.62 && moonDist < 30000) status = `LUNAR FLYBY GRAVITY ASSIST // ${Math.round(moonDist / 1000)} KM`;
     }
-    if (t > 0.92) status = 'ENTRY INTERFACE // TERMINAL GUIDANCE';
+    if (t > 0.92) status = `ENTRY INTERFACE // TARGET: ${this.target.toUpperCase()} STARBASE`;
     this.transferStatus = status;
     this.physics.transferStatus = status;
 

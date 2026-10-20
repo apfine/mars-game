@@ -435,7 +435,10 @@ export class StarshipMissionPhysics {
   triggerInterplanetary(target = null) {
     const destination = target || (this.planetId === 'mars' ? 'earth' : 'mars');
     if (!PLANET_PROFILES[destination] || destination === this.planetId) return false;
-    if (this.vehicle.isMated) return false;
+    // THE BOOSTER NEVER TRANSFERS! Only the Starship vehicle transfers across planets.
+    if (this.vehicle.isMated) {
+      this.vehicle.setMated(false);
+    }
     this.transferTarget = destination;
     this.phase = FLIGHT_PHASES.INTERPLANETARY;
     this.scriptedControl = true;
@@ -445,7 +448,9 @@ export class StarshipMissionPhysics {
     this.boosterVelocity.set(0, 0, 0);
     this.vehicle.setStarshipThrottle(0, true);
     this.vehicle.setBoosterThrottle(0);
+    // Secure booster on home planet launch complex
     this.vehicle.boosterGroup.visible = false;
+    this.boosterState = BOOSTER_STATES.CAUGHT;
     return true;
   }
 
@@ -933,7 +938,9 @@ export class StarshipMissionPhysics {
       this.position.addScaledVector(this.velocity, dt);
 
       // Ground / Pad / Tower Catch Physical Contact Constraints
-      const updatedGroundY = getMarsHeight(this.position.x, this.position.z);
+      const updatedGroundY = this.planetId === 'earth'
+        ? this.padGroundY
+        : getMarsHeight(this.position.x, this.position.z);
       const minFloorY = (this.vehicle.isMated && Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y) < 30.0)
         ? this.padElevation
         : updatedGroundY;
@@ -951,6 +958,19 @@ export class StarshipMissionPhysics {
             this.cargoDoorsDeployed = true;
           }
         }
+      }
+
+      // Mechazilla Launch Tower Solid Cylinder Collision Constraint
+      const towerDistX = this.position.x - (this.padCoords.x + L.launchTower.x);
+      const towerDistZ = this.position.z - (this.padCoords.y + L.launchTower.z);
+      const towerDist = Math.hypot(towerDistX, towerDistZ);
+      const minTowerDist = 13.5;
+      if (towerDist < minTowerDist && this.position.y < this.padElevation + L.launchTower.height) {
+        const pen = minTowerDist - towerDist;
+        this.position.x += (towerDistX / (towerDist || 1)) * pen;
+        this.position.z += (towerDistZ / (towerDist || 1)) * pen;
+        this.velocity.x *= 0.3;
+        this.velocity.z *= 0.3;
       }
 
       // E. CONVECTIVE PLASMA HEATING: Sutton-Graves stagnation-point flux
@@ -1072,12 +1092,13 @@ export class StarshipMissionPhysics {
 
       case FLIGHT_PHASES.BOOSTER_ASCENT: {
         this.throttle = 1.0;
-        // Gravity turn pitch program: 0° vertical off the pad, pitching downrange to ~42° by 22 km
-        const targetPitch = THREE.MathUtils.clamp((this.altitude / 38000.0) * 0.85, 0.0, 0.82);
+        // Gravity turn pitch program tailored to active planet's gravity & scale height
+        const stagingAlt = this.planetId === 'earth' ? 62000 : 22000;
+        const targetPitch = THREE.MathUtils.clamp((this.altitude / (stagingAlt * 1.5)) * 0.85, 0.0, 0.84);
         this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch, dt * 0.65);
         this.vehicle.setGridFinSteering(0, 0);
 
-        if (this.altitude >= 22000 || this.boosterFuel <= 18.0 || this.boosterFlameout) {
+        if (this.altitude >= stagingAlt || this.boosterFuel <= 18.0 || this.boosterFlameout) {
           this.phase = FLIGHT_PHASES.HOT_STAGING;
           this.hotStageTimer = 0.0;
         }
@@ -1095,15 +1116,19 @@ export class StarshipMissionPhysics {
       case FLIGHT_PHASES.STARSHIP_ASCENT: {
         this.throttle = 1.0;
         const isSuborbital = this.trajectoryMode === 'SUBORBITAL';
+        const isEarth = this.planetId === 'earth';
+        const orbitalAlt = isEarth ? 140000 : 84000;
+        const orbitalSpeed = isEarth ? 7600 : 3300;
+
         const targetAscentPitch = isSuborbital
           ? THREE.MathUtils.clamp(0.55 + (this.altitude / 60000.0) * 0.55, 0.55, 1.05)
-          : THREE.MathUtils.clamp(0.50 + ((this.altitude - 22000.0) / 62000.0) * 0.14, 0.50, 0.64);
+          : THREE.MathUtils.clamp(0.48 + (this.altitude / orbitalAlt) * 0.22, 0.48, 0.70);
         this.pitch = THREE.MathUtils.lerp(this.pitch, targetAscentPitch, dt * 0.75);
 
         if (isSuborbital && (this.altitude >= 48000 || this.speed >= 1650)) {
           this.phase = FLIGHT_PHASES.DEORBIT;
           this.entryStartAlt = Math.max(38000, this.altitude);
-        } else if (!isSuborbital && (this.altitude >= 84000 || this.horizontalSpeed >= 3300)) {
+        } else if (!isSuborbital && (this.altitude >= orbitalAlt || this.horizontalSpeed >= orbitalSpeed)) {
           this.phase = FLIGHT_PHASES.ORBIT;
           this.throttle = 0.0;
           this.orbitTimer = 0.0;

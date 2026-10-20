@@ -216,7 +216,7 @@ export class MarsRoverPhysics {
       if (heightDiff > 0) {
         // Ground is rising up: push up instantly with smooth compliance
         this.position.y = THREE.MathUtils.lerp(this.position.y, targetY, Math.min(1.0, dt * 35.0));
-        // Hard floor clamp to completely prevent sinking
+        // Strict floor clamp to completely prevent sinking
         if (this.position.y < targetY) {
           this.position.y = targetY;
         }
@@ -234,6 +234,10 @@ export class MarsRoverPhysics {
         }
       }
       this.groundVy = THREE.MathUtils.lerp(this.groundVy, gvyNow, 0.6);
+      // Absolute guarantee: never sink below terrain
+      if (this.position.y < targetY) {
+        this.position.y = targetY;
+      }
     } else {
       // Airborne in flight
       this.verticalVelocity -= this.gravity * dt;

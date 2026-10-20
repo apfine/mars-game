@@ -15,6 +15,7 @@ import { StarshipMissionPhysics, FLIGHT_PHASES } from '../flight/missionPhysics.
 import { MissionFlightHUD } from '../flight/missionUI.js';
 import { InterplanetaryJourney } from '../flight/interplanetary.js';
 import { StarbaseOperations } from '../flight/starbaseOperations.js';
+import { StarbaseObstacleSystem } from '../flight/solidCollisions.js';
 import { FlyingRoadster } from '../flight/roadster.js';
 import { PLANET_PROFILES } from '../flight/planetProfiles.js';
 
@@ -170,7 +171,10 @@ export class MarsGameEngine {
     this.roverModel = new MarsRoverModel();
     this.scene.add(this.roverModel.group);
     this.physics = new MarsRoverPhysics(this.roverModel);
-    this.physics.collider = this.scatter;
+    this.obstacles = new StarbaseObstacleSystem(new THREE.Vector2(1400, 1150));
+    this.physics.collider = {
+      resolve: (pos, radius, feetY) => this.resolveWorldCollisions(pos, radius, feetY)
+    };
 
     this.astronaut = new AstronautAvatar();
     this.scene.add(this.astronaut.group);
@@ -406,20 +410,31 @@ export class MarsGameEngine {
     return target === 'earth' ? 62 : 68;
   }
 
-  // Transfer, deorbit and refuelling are orbit-only operations. The HUD hides
-  // them outside ORBIT, but keep the guard here as well so keyboard shortcuts
-  // or automation cannot bypass the mission gate.
+  // Transfer, deorbit and refuelling operations. If requested while on the ground,
+  // the stack launches to orbit first with proper staging (booster stays on home world).
   beginTransfer() {
     const physics = this.missionPhysics;
+    const target = physics.destination || (physics.planetId === 'mars' ? 'earth' : 'mars');
+
+    // If on pad or landed on either world, launch into orbit first
+    if (physics.phase === FLIGHT_PHASES.ON_PAD || physics.phase === FLIGHT_PHASES.LANDED) {
+      physics.opsMessage = `LAUNCHING TO ORBIT // DESTINATION: ${target.toUpperCase()}`;
+      physics.setDestination(target);
+      this.operations.reset();
+      physics.startLaunch();
+      this.setMode('starship');
+      this.cameraController.resetGimbal();
+      return;
+    }
+
     if (physics.phase !== FLIGHT_PHASES.ORBIT) {
-      physics.opsMessage = 'TRANSFER WINDOW UNAVAILABLE // REACH ORBIT';
+      physics.opsMessage = 'TRANSFER WINDOW // ASCENDING TO ORBIT';
       return;
     }
     if (this.tankerOps.active) {
       physics.opsMessage = 'TRANSFER HOLD // ORBITAL TANKER IN PROGRESS';
       return;
     }
-    const target = physics.destination;
     if (!target || target === physics.planetId) {
       this.beginDeorbit();
       return;
@@ -827,6 +842,41 @@ export class MarsGameEngine {
     return getMarsHeight(x, z);
   }
 
+  resolveWorldCollisions(position, radius = 1.0, feetY = 0) {
+    let result = null;
+    // 1. Starbase structural obstacles (launch tower, OLM, catch towers, factory, tanks, pedestal, erector)
+    if (this.obstacles) {
+      const hit = this.obstacles.resolve(position, radius, feetY);
+      if (hit) result = hit;
+    }
+    // 2. Martian boulders, rock outcrops, and monuments
+    if (this.missionPhysics?.planetId === 'mars' && this.scatter?.resolve) {
+      const hit = this.scatter.resolve(position, radius, feetY);
+      if (hit) {
+        if (!result || hit.pen > result.pen) result = hit;
+      }
+    }
+    // 3. Earth forest tree trunks
+    if (this.missionPhysics?.planetId === 'earth' && this.journey?.earthTreeObstacles) {
+      for (const t of this.journey.earthTreeObstacles) {
+        const dx = position.x - t.x;
+        const dz = position.z - t.z;
+        const distSq = dx * dx + dz * dz;
+        const minSafe = radius + t.radius;
+        if (distSq < minSafe * minSafe) {
+          const dist = Math.sqrt(distSq) || 0.001;
+          const pen = minSafe - dist;
+          const nx = dx / dist;
+          const nz = dz / dist;
+          position.x += nx * pen;
+          position.z += nz * pen;
+          result = { hit: true, nx, nz, pen };
+        }
+      }
+    }
+    return result;
+  }
+
   updateWalkingPhysics(dt) {
     const input = this.input.state;
     const isRunning = Boolean(input.nitro);
@@ -849,7 +899,12 @@ export class MarsGameEngine {
 
     this.walker.position.x += moveX;
     this.walker.position.z += moveZ;
-    this.walker.position.y = this.getSurfaceHeight(this.walker.position.x, this.walker.position.z);
+
+    // Solid obstacle collision resolution for astronaut on foot (cannot walk through towers, walls, or tanks)
+    this.resolveWorldCollisions(this.walker.position, 0.45, this.walker.position.y);
+
+    const groundY = this.getSurfaceHeight(this.walker.position.x, this.walker.position.z);
+    this.walker.position.y = Math.max(this.walker.position.y, groundY);
 
     this.walker.velocity.set(sinY * this.walker.speed, 0, cosY * this.walker.speed);
     this.walker.speedKmh = Math.abs(Math.round(this.walker.speed * 3.6));
@@ -908,8 +963,9 @@ export class MarsGameEngine {
     this.input.update();
 
     // Interplanetary cruise, celestial rotation and satellite relay networks
-    // animate in every camera mode.
-    this.journey.update(dt, this.timeScale);
+    // animate in every camera mode. Pass active camera altitude for seamless LOD fading.
+    const camAltNow = Math.max(0, (this.camera ? this.camera.position.y : 0) - this.missionPhysics.padElevation);
+    this.journey.update(dt, this.timeScale, camAltNow);
     this.roadster.update(dt, this.mode === 'starship' ? this.missionPhysics : null);
     if (this.missionPhysics.phase !== FLIGHT_PHASES.INTERPLANETARY && this.journey.active) {
       this.journey.active = false;
@@ -923,6 +979,17 @@ export class MarsGameEngine {
       this.updateTankerOperations(dt);
       this.operations.update(dt);
       this.ensureTransferStarted();
+
+      // In Auto Mission, once orbit is established and tanker (if needed) is ready,
+      // calculate the gravitational pathway and automatically commence transfer
+      if (this.missionPhysics.phase === FLIGHT_PHASES.ORBIT &&
+          this.missionPhysics.autoMission &&
+          !this.tankerOps.active &&
+          !this.journey.active &&
+          this.missionPhysics.orbitTimer > 4.5) {
+        this.beginTransfer();
+      }
+
       if (this.input.consumeSinglePress('handbrake')) {
         this.handleFlightStageAction();
       }
