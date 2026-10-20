@@ -162,6 +162,8 @@ export class InputManager {
     if (this.keys['KeyS'] || this.keys['ArrowDown']) fwd -= 1;
     this.state.throttle = fwd;
     this.state.pitch = fwd; // W = pitch forward/down, S = pitch backward/up
+    this.state.forward = fwd > 0;
+    this.state.backward = fwd < 0;
 
     let turn = 0;
     if (this.keys['KeyD'] || this.keys['ArrowRight']) turn += 1;

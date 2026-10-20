@@ -1037,7 +1037,8 @@ export class MarsGameEngine {
         velocity: this.missionPhysics.velocity,
         isNitroActive: false,
         onGroundCount: camAltitude < 200 ? 4 : 0,
-        speedKmh: this.missionPhysics.speed * 3.6
+        speedKmh: this.missionPhysics.speed * 3.6,
+        isInterplanetary: this.missionPhysics.phase === FLIGHT_PHASES.INTERPLANETARY || Boolean(this.journey?.active)
       });
 
       if (onMars && camAltitude < 5000) {

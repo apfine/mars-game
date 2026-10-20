@@ -1264,7 +1264,7 @@ export class MarsAtmosphere {
     if (this.isFlight) {
       this.updateSpeedStreamers(physics?.altitude || 0, physics?.speed || 0, playerPos);
       if (this.postLaunchSpace) {
-        this.postLaunchSpace.update(dt, physics?.altitude || 0, physics?.speed || 0, playerPos);
+        this.postLaunchSpace.update(dt, physics?.altitude || 0, physics?.speed || 0, playerPos, Boolean(physics?.isInterplanetary));
       }
       return;
     }

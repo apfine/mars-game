@@ -502,12 +502,11 @@ export class InterplanetaryJourney {
     this.earthStar.scale.set(3200, 3200, 1);
     this.celestialGroup.add(this.earthStar);
 
-    // Mars seen from Earth's sky: realistic rust-red celestial body
-    const marsAzimuth = -2.35;
+    // Mars fixed position in solar system (pad coordinates at Starbase Mars)
     this.marsAnchor = new THREE.Vector3(
-      this.padCoords.x + Math.sin(marsAzimuth) * 480000,
-      this.padGroundY + 160000,
-      this.padCoords.y + Math.cos(marsAzimuth) * 480000
+      this.padCoords.x,
+      this.padGroundY - 8000,
+      this.padCoords.y
     );
     this.marsGlobe = new THREE.Mesh(
       new THREE.SphereGeometry(EARTH_RADIUS_SCENE * 0.53, 48, 32),
@@ -524,7 +523,7 @@ export class InterplanetaryJourney {
     this.marsStar = new THREE.Sprite(new THREE.SpriteMaterial({
       map: makeStarGlowTexture(0xff8a5a),
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.85,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     }));
@@ -1148,31 +1147,42 @@ export class InterplanetaryJourney {
     this.transferTube.material.opacity = 0.2;
     this.transferDots.material.opacity = 0.72;
 
+    this.celestialGroup.visible = true;
+    this.earth.position.copy(this.earthAnchor);
+    this.clouds.position.copy(this.earthAnchor);
+    this.earthGlow.position.copy(this.earthAnchor);
+    this.earthStar.position.copy(this.earthAnchor);
+    this.marsGlobe.position.copy(this.marsAnchor);
+    this.marsStar.position.copy(this.marsAnchor);
+
+    this.earth.visible = true;
+    this.clouds.visible = true;
+    this.earthGlow.visible = true;
+    this.earthStar.visible = true;
+    this.marsGlobe.visible = true;
+    this.marsStar.visible = true;
+    this.moon.visible = true;
+
     if (target === 'earth') {
-      this.celestialGroup.visible = true;
-      this.earth.visible = true;
-      this.clouds.visible = true;
-      this.earthGlow.visible = true;
-      this.earthStar.visible = true;
-      this.moon.visible = true;
-      this.earth.scale.setScalar(this.earthBaseScale);
-      this.clouds.scale.setScalar(this.earthBaseScale);
-      this.earthGlow.scale.setScalar(this.earthBaseScale);
+      this.earth.scale.setScalar(0.005);
+      this.clouds.scale.setScalar(0.005);
+      this.earthGlow.scale.setScalar(0.005);
+      this.earthStar.scale.set(3800, 3800, 1);
+      this.marsGlobe.scale.setScalar(this.marsBaseScale * 3.2);
+      this.marsStar.scale.set(1200, 1200, 1);
       this.moon.scale.setScalar(this.moonBaseScale);
       this.moon.position.set(
         this.earthAnchor.x - 38000,
         this.earthAnchor.y + 12000,
         this.earthAnchor.z + 44000
       );
-      this.marsGlobe.visible = false;
-      this.marsStar.visible = false;
     } else {
-      // Mars is the arrival world for an Earth departure. Keep it a small
-      // navigational target rather than a giant red sphere in the sky.
-      this.marsGlobe.visible = true;
-      this.marsGlobe.scale.setScalar(this.marsBaseScale * 1.8);
-      this.marsGlobe.position.copy(this.marsAnchor);
-      this.marsStar.visible = true;
+      this.marsGlobe.scale.setScalar(0.005);
+      this.marsStar.scale.set(3800, 3800, 1);
+      this.earth.scale.setScalar(this.earthBaseScale * 3.2);
+      this.clouds.scale.setScalar(this.earthBaseScale * 3.2);
+      this.earthGlow.scale.setScalar(this.earthBaseScale * 3.2);
+      this.earthStar.scale.set(1200, 1200, 1);
       this.earthSurface.visible = false;
       this.earthSurfaceSatellites.group.visible = false;
     }
@@ -1325,6 +1335,55 @@ export class InterplanetaryJourney {
     this._sampleTangent(t, this._pathTangent);
     this.physics.position.copy(this._pathPoint);
 
+    // Keep Earth and Mars at their FIXED solar system coordinates.
+    // The Starship is the ONLY object that moves along the transfer path!
+    // As the Starship moves, update the apparent visual scales of Mars and Earth realistically:
+    if (this.target === 'earth') {
+      // Departing Mars: Mars starts large, recedes into deep space, shrinking to a tiny red star
+      const marsShrink = Math.min(1.0, t * 2.2);
+      const marsScale = THREE.MathUtils.lerp(this.marsBaseScale * 3.2, 0.0035, marsShrink);
+      this.marsGlobe.scale.setScalar(marsScale);
+      this.marsStar.scale.set(
+        THREE.MathUtils.lerp(1200, 3600, marsShrink),
+        THREE.MathUtils.lerp(1200, 3600, marsShrink),
+        1
+      );
+
+      // Approaching Earth: Earth starts as a tiny blue star, grows into a massive planetary globe
+      const earthGrow = Math.max(0.0, (t - 0.25) / 0.75);
+      const earthScale = THREE.MathUtils.lerp(0.005, this.earthBaseScale * 3.2, earthGrow);
+      this.earth.scale.setScalar(earthScale);
+      this.clouds.scale.setScalar(earthScale);
+      this.earthGlow.scale.setScalar(earthScale);
+      this.earthStar.scale.set(
+        THREE.MathUtils.lerp(3800, 600, earthGrow),
+        THREE.MathUtils.lerp(3800, 600, earthGrow),
+        1
+      );
+    } else {
+      // Departing Earth: Earth recedes into a pale blue star in the rear
+      const earthShrink = Math.min(1.0, t * 2.2);
+      const earthScale = THREE.MathUtils.lerp(this.earthBaseScale * 3.2, 0.0035, earthShrink);
+      this.earth.scale.setScalar(earthScale);
+      this.clouds.scale.setScalar(earthScale);
+      this.earthGlow.scale.setScalar(earthScale);
+      this.earthStar.scale.set(
+        THREE.MathUtils.lerp(1200, 3600, earthShrink),
+        THREE.MathUtils.lerp(1200, 3600, earthShrink),
+        1
+      );
+
+      // Approaching Mars: Mars grows into a large rust-red planet
+      const marsGrow = Math.max(0.0, (t - 0.25) / 0.75);
+      const marsScale = THREE.MathUtils.lerp(0.005, this.marsBaseScale * 3.2, marsGrow);
+      this.marsGlobe.scale.setScalar(marsScale);
+      this.marsStar.scale.set(
+        THREE.MathUtils.lerp(3800, 600, marsGrow),
+        THREE.MathUtils.lerp(3800, 600, marsGrow),
+        1
+      );
+    }
+
     this._toDestination.copy(this.pathEnd).sub(this._pathPoint).normalize();
     this._flightDir.copy(this._pathTangent)
       .lerp(this._toDestination, 0.42)
@@ -1357,14 +1416,20 @@ export class InterplanetaryJourney {
     const distAu = (remainingKm / 149597870.7).toFixed(3);
     const speedKmS = (helioSpeed / 1000).toFixed(1);
 
+    // Hohmann transfer mission timeline in Days and Months (180 Earth days = 5.9 months)
+    const totalTransferDays = 180;
+    const elapsedDays = Math.round(t * totalTransferDays);
+    const elapsedMonths = (elapsedDays / 30.4375).toFixed(1);
+    const totalMonths = (totalTransferDays / 30.4375).toFixed(1);
+
     const pct = Math.round(t * 100);
-    let status = `GRAVITATIONAL TRANSFER // ${pct}% · ${Math.round(remainingKm / 1000000)}M KM (${distAu} AU) · ${speedKmS} KM/S`;
-    if (t < 0.07) status = `TRANS-${this.target === 'earth' ? 'MARS' : 'EARTH'} INJECTION // ${pct}% · ${distAu} AU`;
+    let status = `GRAVITATIONAL TRANSFER // Day ${elapsedDays} of ${totalTransferDays} (${elapsedMonths}/${totalMonths} Mo) · ${pct}% · ${Math.round(remainingKm / 1000000)}M KM (${distAu} AU)`;
+    if (t < 0.07) status = `TRANS-${this.target === 'earth' ? 'MARS' : 'EARTH'} INJECTION // Day ${elapsedDays} (${elapsedMonths} Mo) · ${pct}% · ${distAu} AU`;
     if (this.target === 'earth' && this.moon) {
       const moonDist = this.physics.position.distanceTo(this.moon.position);
-      if (t > 0.62 && moonDist < 30000) status = `LUNAR FLYBY GRAVITY ASSIST // ${Math.round(moonDist / 1000)} KM`;
+      if (t > 0.62 && moonDist < 30000) status = `LUNAR FLYBY GRAVITY ASSIST // Day ${elapsedDays} (${elapsedMonths} Mo) · ${Math.round(moonDist / 1000)} KM`;
     }
-    if (t > 0.92) status = `ENTRY INTERFACE // TARGET: ${this.target.toUpperCase()} STARBASE`;
+    if (t > 0.92) status = `ENTRY INTERFACE // TARGET: ${this.target.toUpperCase()} STARBASE · DAY ${elapsedDays} (${elapsedMonths} MO)`;
     this.transferStatus = status;
     this.physics.transferStatus = status;
 

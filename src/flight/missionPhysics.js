@@ -735,10 +735,13 @@ export class StarshipMissionPhysics {
         this.toggleCargoDoors();
       }
 
-      // If on pad or landed and user throttles up so Thrust > Weight, liftoff immediately!
-      if ((this.phase === FLIGHT_PHASES.ON_PAD || this.phase === FLIGHT_PHASES.LANDED || this.phase === FLIGHT_PHASES.COUNTDOWN) && this.throttle > 0.25) {
-        this.shipCaughtByTower = false;
-        this.phase = this.vehicle.isMated ? FLIGHT_PHASES.BOOSTER_ASCENT : FLIGHT_PHASES.STARSHIP_ASCENT;
+      // If on pad or landed and user triggers throttle or Space, liftoff immediately!
+      if ((this.phase === FLIGHT_PHASES.ON_PAD || this.phase === FLIGHT_PHASES.LANDED || this.phase === FLIGHT_PHASES.COUNTDOWN)) {
+        if (input.handbrake || this.throttle > 0.25) {
+          if (this.throttle < 0.5) this.throttle = 1.0;
+          this.shipCaughtByTower = false;
+          this.phase = this.vehicle.isMated ? FLIGHT_PHASES.BOOSTER_ASCENT : FLIGHT_PHASES.STARSHIP_ASCENT;
+        }
       }
 
       // Direct physical rotational torque from TVC (when thrusting), Aero Flaps, and RCS

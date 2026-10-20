@@ -119,16 +119,16 @@ export class MissionFlightHUD {
       });
     }
 
-    if (this.dom.destSwitch) {
-      const btns = this.dom.destSwitch.querySelectorAll('[data-dest]');
-      btns.forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          const dest = btn.getAttribute('data-dest');
-          if (dest && this.options.onSelectDestination) this.options.onSelectDestination(dest);
-        });
+    const destBtns = document.querySelectorAll('[data-dest]');
+    destBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const dest = btn.getAttribute('data-dest');
+        if (dest && this.options.onSelectDestination) this.options.onSelectDestination(dest);
+        const menu = document.getElementById('flight-mission-menu');
+        if (menu) menu.classList.remove('open');
       });
-    }
+    });
 
     if (this.dom.transferBtn) {
       this.dom.transferBtn.addEventListener('click', (e) => {
@@ -152,7 +152,7 @@ export class MissionFlightHUD {
     }
 
     if (this.dom.camBar) {
-      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
+      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn, .dropdown-item');
       tabs.forEach((tab) => {
         tab.addEventListener('click', (e) => {
           e.preventDefault();
@@ -160,7 +160,33 @@ export class MissionFlightHUD {
           if (cam && this.options.onSelectCamera) {
             this.options.onSelectCamera(cam);
           }
+          const menu = document.getElementById('flight-cam-menu');
+          if (menu) menu.classList.remove('open');
         });
+      });
+    }
+
+    // Generic Dropdown Toggle Handlers
+    const bindDropdown = (triggerId, menuId) => {
+      const trigger = document.getElementById(triggerId);
+      const menu = document.getElementById(menuId);
+      if (!trigger || !menu) return;
+      trigger.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const wasOpen = menu.classList.contains('open');
+        document.querySelectorAll('.spx-dropdown-menu').forEach((m) => m.classList.remove('open'));
+        if (!wasOpen) menu.classList.add('open');
+      });
+    };
+    bindDropdown('flight-cam-btn', 'flight-cam-menu');
+    bindDropdown('flight-mission-btn', 'flight-mission-menu');
+    bindDropdown('flight-actions-btn', 'flight-actions-menu');
+    bindDropdown('rover-cam-btn', 'rover-cam-menu');
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('click', () => {
+        document.querySelectorAll('.spx-dropdown-menu').forEach((m) => m.classList.remove('open'));
       });
     }
 
@@ -327,8 +353,20 @@ export class MissionFlightHUD {
 
   notifyCameraMode(modeName) {
     this.currentCamMode = modeName;
+    const labelEl = document.getElementById('flight-cam-current');
+    if (labelEl) {
+      const displayNames = {
+        CHASE: 'SHIP',
+        BOOSTER_CAM: 'BOOSTER',
+        COCKPIT: 'COCKPIT',
+        TOWER_CAM: 'TOWER',
+        GROUND_CAM: 'GROUND',
+        FREE_ORBIT: 'ORBIT'
+      };
+      labelEl.textContent = displayNames[modeName] || modeName;
+    }
     if (this.dom.camBar) {
-      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
+      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn, .dropdown-item');
       tabs.forEach((tab) => {
         tab.classList.toggle('active', tab.getAttribute('data-cam') === modeName);
       });
@@ -397,6 +435,18 @@ export class MissionFlightHUD {
       return `T- 00:00:0${sec}`;
     }
     const totalSec = Math.floor(Math.max(0, physics.missionTime));
+    if (totalSec >= 86400) {
+      const days = Math.floor(totalSec / 86400);
+      const remSec = totalSec % 86400;
+      const hrs = Math.floor(remSec / 3600).toString().padStart(2, '0');
+      const mins = Math.floor((remSec % 3600) / 60).toString().padStart(2, '0');
+      const months = (days / 30.4375).toFixed(1);
+      const years = (days / 365.25).toFixed(2);
+      if (days >= 365) {
+        return `T+ ${days}d ${hrs}h (${years} Y · ${months} M)`;
+      }
+      return `T+ ${days}d ${hrs}h (${months} Mo)`;
+    }
     const hrs = Math.floor(totalSec / 3600).toString().padStart(2, '0');
     const mins = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
     const secs = (totalSec % 60).toString().padStart(2, '0');
@@ -431,11 +481,15 @@ export class MissionFlightHUD {
     const inOrbit = physics.phase === FLIGHT_PHASES.ORBIT;
     const inTransit = physics.phase === FLIGHT_PHASES.INTERPLANETARY;
     const preLaunch = physics.phase === FLIGHT_PHASES.ON_PAD || physics.phase === FLIGHT_PHASES.COUNTDOWN;
+    const destLabel = document.getElementById('flight-dest-current');
+    if (destLabel) {
+      destLabel.textContent = `DEST: ${destination.toUpperCase()}`;
+    }
+    const allDestBtns = document.querySelectorAll('[data-dest]');
+    allDestBtns.forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-dest') === destination.toUpperCase());
+    });
     if (this.dom.destSwitch) {
-      const btns = this.dom.destSwitch.querySelectorAll('[data-dest]');
-      btns.forEach((btn) => {
-        btn.classList.toggle('active', btn.getAttribute('data-dest') === destination.toUpperCase());
-      });
       this.dom.destSwitch.style.display = inOrbit ? 'flex' : 'none';
     }
     if (this.dom.trajSwitch) {

@@ -58,7 +58,7 @@ export class MarsHUD {
   initControlsAndGimbal() {
     // Rover Camera Switcher Tabs (CHASE / COCKPIT / ORBIT)
     if (this.dom.camBar) {
-      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
+      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn, .dropdown-item');
       tabs.forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.preventDefault();
@@ -66,6 +66,13 @@ export class MarsHUD {
           if (!Number.isNaN(modeIdx) && this.options.onSelectRoverCamera) {
             this.options.onSelectRoverCamera(modeIdx);
             tabs.forEach((t) => t.classList.toggle('active', t === btn));
+            const lbl = document.getElementById('rover-cam-current');
+            if (lbl) {
+              const names = ['CHASE', 'COCKPIT', 'ORBIT'];
+              lbl.textContent = names[modeIdx] || 'CHASE';
+            }
+            const menu = document.getElementById('rover-cam-menu');
+            if (menu) menu.classList.remove('open');
           }
         });
       });
@@ -264,10 +271,15 @@ export class MarsHUD {
 
   syncCameraTab(modeIdx) {
     if (!this.dom.camBar) return;
-    const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn');
+    const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn, .dropdown-item');
     tabs.forEach((t) => {
       t.classList.toggle('active', parseInt(t.getAttribute('data-rcam'), 10) === modeIdx);
     });
+    const lbl = document.getElementById('rover-cam-current');
+    if (lbl) {
+      const names = ['CHASE', 'COCKPIT', 'ORBIT'];
+      lbl.textContent = names[modeIdx] || 'CHASE';
+    }
   }
 
   update(activeActor, camera, scatterPOIs = [], context = {}) {

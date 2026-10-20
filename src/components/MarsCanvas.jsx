@@ -136,6 +136,13 @@ export default function MarsCanvas() {
 
       <div id="canvas-container" ref={containerRef} />
 
+      {/* Permanent Live Online Players Counter Badge */}
+      <div id="live-players-badge" className="spx-live-badge" title="Active engineers online in real-time">
+        <span className="live-dot-pulse"></span>
+        <span className="live-txt">LIVE PLAYERS</span>
+        <span id="online-players-count" className="live-num">1</span>
+      </div>
+
       {/* =========================================================
           ROVER & FIRST-PERSON WALKING HUD (SpaceX Glassmorphic UI)
           ========================================================= */}
@@ -146,13 +153,20 @@ export default function MarsCanvas() {
             <div id="rover-mode-badge" className="flight-phase-badge">
               ROVER // STARBASE APPROACH
             </div>
-          </div>
-
-          {/* Rover & Walking Camera Switcher (360° Gimbal Enabled on All) */}
-          <div className="flight-cam-bar" id="rover-cam-bar">
-            <button className="cam-tab-btn active" data-rcam="0">CHASE</button>
-            <button className="cam-tab-btn" data-rcam="1">COCKPIT</button>
-            <button className="cam-tab-btn" data-rcam="2">ORBIT</button>
+            {/* Rover Camera Switcher Dropdown */}
+            <div className="spx-dropdown" id="rover-cam-dropdown">
+              <button className="hud-pill-btn spx-dropdown-trigger" id="rover-cam-btn" aria-label="Rover Camera Menu">
+                <span className="dropdown-icon">📷</span>
+                <span id="rover-cam-current">CHASE</span>
+                <span className="dropdown-arrow">▾</span>
+              </button>
+              <div className="spx-dropdown-menu" id="rover-cam-menu">
+                <button className="dropdown-item active" data-rcam="0">📷 CHASE (THIRD-PERSON)</button>
+                <button className="dropdown-item" data-rcam="1">🧑‍🚀 COCKPIT (FIRST-PERSON)</button>
+                <button className="dropdown-item" data-rcam="2">🪐 ORBIT (FREE-LOOK)</button>
+              </div>
+            </div>
+            <div id="rover-cam-bar" style={{ display: 'none' }}></div>
           </div>
 
           <div className="spx-top-right">
@@ -172,20 +186,19 @@ export default function MarsCanvas() {
             >
               WALK [E]
             </button>
-            <button
-              id="rover-roadster-btn"
-              className="hud-pill-btn roadster-toggle-btn"
-              aria-label="Toggle Flying Roadster"
-              title="Toggle the flying Tesla Roadster"
-            >
-              ROADSTER
-            </button>
-            <button id="map-btn" className="hud-pill-btn" aria-label="Map" title="Expedition Map (Key M)">
-              MAP
-            </button>
-            <button id="esc-btn" className="hud-pill-btn" aria-label="Settings" title="System Settings">
-              SYS
-            </button>
+            {/* Rover Tools Dropdown */}
+            <div className="spx-dropdown" id="rover-actions-dropdown">
+              <button className="hud-pill-btn spx-dropdown-trigger" id="rover-actions-btn" aria-label="Rover Options">
+                <span className="dropdown-icon">⚙️</span>
+                <span>OPTIONS</span>
+                <span className="dropdown-arrow">▾</span>
+              </button>
+              <div className="spx-dropdown-menu" id="rover-actions-menu">
+                <button id="rover-roadster-btn" className="dropdown-item roadster-toggle-btn">🏎️ TESLA ROADSTER</button>
+                <button id="map-btn" className="dropdown-item">🗺️ EXPEDITION MAP [M]</button>
+                <button id="esc-btn" className="dropdown-item">⚙️ SYSTEM SETTINGS</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -362,43 +375,67 @@ export default function MarsCanvas() {
         <div className="spx-top-bar">
           <div className="spx-top-left">
             <div id="flight-phase-badge" className="flight-phase-badge">STARBASE // PAD AWAITING LAUNCH</div>
-          </div>
-
-          {/* All 6 Flight Cameras (Every Camera on 360° Gimbal) */}
-          <div className="flight-cam-bar" id="flight-cam-bar">
-            <button className="cam-tab-btn active" data-cam="CHASE">SHIP</button>
-            <button className="cam-tab-btn" id="flight-track-booster-btn" data-cam="BOOSTER_CAM">BOOSTER</button>
-            <button className="cam-tab-btn" data-cam="GROUND_CAM">GROUND</button>
-            <button className="cam-tab-btn" data-cam="TOWER_CAM">TOWER</button>
-            <button className="cam-tab-btn" data-cam="COCKPIT">COCKPIT</button>
-            <button className="cam-tab-btn" data-cam="FREE_ORBIT">ORBIT</button>
+            {/* Camera Dropdown Menu with 📷 Icon */}
+            <div className="spx-dropdown" id="flight-cam-dropdown">
+              <button className="hud-pill-btn spx-dropdown-trigger" id="flight-cam-btn" aria-label="Camera Options">
+                <span className="dropdown-icon">📷</span>
+                <span id="flight-cam-current">SHIP</span>
+                <span className="dropdown-arrow">▾</span>
+              </button>
+              <div className="spx-dropdown-menu" id="flight-cam-menu">
+                <button className="dropdown-item active" data-cam="CHASE">📷 SHIP (CHASE)</button>
+                <button className="dropdown-item" id="flight-track-booster-btn" data-cam="BOOSTER_CAM">🚀 BOOSTER TRACK</button>
+                <button className="dropdown-item" data-cam="COCKPIT">🧑‍🚀 COCKPIT</button>
+                <button className="dropdown-item" data-cam="TOWER_CAM">🗼 MECHAZILLA TOWER</button>
+                <button className="dropdown-item" data-cam="GROUND_CAM">🔭 GROUND TRACKER</button>
+                <button className="dropdown-item" data-cam="FREE_ORBIT">🪐 ORBIT FREE-LOOK</button>
+              </div>
+            </div>
+            {/* Hidden hook for backward compatibility */}
+            <div id="flight-cam-bar" style={{ display: 'none' }}></div>
           </div>
 
           <div className="spx-top-right">
-            <div className="spx-dest-switch" id="flight-dest-switch" title="Select interplanetary destination">
-              <span className="dest-lbl">DEST</span>
-              <button className="dest-btn" data-dest="MARS">MARS</button>
-              <button className="dest-btn active" data-dest="EARTH">EARTH</button>
+            {/* Mission & Destination Dropdown */}
+            <div className="spx-dropdown" id="flight-mission-dropdown">
+              <button className="hud-pill-btn spx-dropdown-trigger" id="flight-mission-btn" aria-label="Mission Profile & Destination">
+                <span className="dropdown-icon">🎯</span>
+                <span id="flight-dest-current">DEST: EARTH</span>
+                <span className="dropdown-arrow">▾</span>
+              </button>
+              <div className="spx-dropdown-menu" id="flight-mission-menu">
+                <div className="dropdown-section-header">DESTINATION</div>
+                <button className="dropdown-item" data-dest="EARTH">🌍 EARTH STARBASE</button>
+                <button className="dropdown-item" data-dest="MARS">🔴 MARS STARBASE</button>
+                <div className="dropdown-section-header">FLIGHT PROFILE</div>
+                <button className="dropdown-item active traj-opt-btn" data-traj="ORBITAL">🛰️ ORBITAL (88 KM)</button>
+                <button className="dropdown-item traj-opt-btn" data-traj="SUBORBITAL">🎯 SUBORBITAL (50 KM)</button>
+              </div>
             </div>
-            <div className="spx-traj-switch" id="flight-traj-switch" title="Flight Trajectory Profile">
-              <button className="traj-opt-btn active" data-traj="ORBITAL">ORBITAL</button>
-              <button className="traj-opt-btn" data-traj="SUBORBITAL">SUBORBITAL</button>
-            </div>
+            <div id="flight-dest-switch" style={{ display: 'none' }}></div>
+            <div id="flight-traj-switch" style={{ display: 'none' }}></div>
+
             <button id="flight-speed-btn" className="hud-pill-btn flight-speed-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x / 100x / 1000x)">
               1X
             </button>
             <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto or Manual Control">
               AUTO
             </button>
-            <button id="flight-reset-btn" className="hud-pill-btn flight-reset-btn" aria-label="Reset to Launch Pad">
-              PAD
-            </button>
-            <button id="flight-hide-ui-btn" className="hud-pill-btn flight-hide-ui-btn" aria-label="Hide HUD except vitals" title="Hide UI / vitals-only view (H)">
-              HUD
-            </button>
-            <button id="flight-exit-btn" className="hud-pill-btn flight-exit-btn" aria-label="Return to Astronaut / Rover">
-              EVA
-            </button>
+
+            {/* Actions Dropdown */}
+            <div className="spx-dropdown" id="flight-actions-dropdown">
+              <button className="hud-pill-btn spx-dropdown-trigger" id="flight-actions-btn" aria-label="Flight Actions">
+                <span className="dropdown-icon">⚙️</span>
+                <span>ACTIONS</span>
+                <span className="dropdown-arrow">▾</span>
+              </button>
+              <div className="spx-dropdown-menu" id="flight-actions-menu">
+                <button className="dropdown-item" id="flight-reset-btn">🔄 RESET TO PAD</button>
+                <button className="dropdown-item" id="flight-hide-ui-btn">👁️ TOGGLE HUD [H]</button>
+                <button className="dropdown-item" id="flight-roadster-btn">🏎️ TESLA ROADSTER</button>
+                <button className="dropdown-item" id="flight-exit-btn">🧑‍🚀 RETURN TO EVA</button>
+              </div>
+            </div>
           </div>
         </div>
 

@@ -787,26 +787,10 @@ export class PostLaunchSpace {
     this.spaceGroup.add(this.deimosMesh);
 
     // 3. The "Pale Blue Dot" (Distant Earth & Moon in Mars orbital sky)
+    // The old static earthGroup in postLaunchSpace is disabled so that InterplanetaryJourney
+    // acts as the single source of truth for the astronomical Earth, Moon, and Mars.
     this.earthGroup = new THREE.Group();
-    const earthMat = new THREE.MeshBasicMaterial({ color: 0x4da6ff });
-    const earthMesh = new THREE.Mesh(new THREE.SphereGeometry(24.0, 12, 12), earthMat);
-    this.earthGroup.add(earthMesh);
-
-    const earthGlowMat = new THREE.MeshBasicMaterial({
-      color: 0x66ccff,
-      transparent: true,
-      opacity: 0.45,
-      blending: THREE.AdditiveBlending
-    });
-    const earthGlow = new THREE.Mesh(new THREE.SphereGeometry(42.0, 12, 12), earthGlowMat);
-    this.earthGroup.add(earthGlow);
-
-    const moonMat = new THREE.MeshBasicMaterial({ color: 0xeeeeee });
-    const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(6.0, 8, 8), moonMat);
-    moonMesh.position.set(60.0, 22.0, 0);
-    this.earthGroup.add(moonMesh);
-
-    this.earthGroup.position.set(-160000.0, 135000.0, -160000.0);
+    this.earthGroup.visible = false;
     this.spaceGroup.add(this.earthGroup);
   }
 
@@ -860,7 +844,14 @@ export class PostLaunchSpace {
     this.spaceGroup.add(this.satellite);
   }
 
-  update(dt, alt, speed, shipPos) {
+  update(dt, alt, speed, shipPos, isInterplanetary = false) {
+    // During interplanetary transfer, InterplanetaryJourney takes full control of celestial
+    // planets. The local orbital globe must NOT follow the ship into deep space or overlap Earth!
+    if (isInterplanetary) {
+      this.group.visible = false;
+      return;
+    }
+
     // Smooth cross-fade between the 36km regional Martian surface (0 - 14km) and the 165km 3D planetary globe (3km - 100km+)
     const fade = THREE.MathUtils.smoothstep(alt, 3000.0, 12500.0);
     this.group.visible = fade > 0.005;

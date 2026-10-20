@@ -2723,3 +2723,169 @@ html, body {
     bottom: 152px;
   }
 }
+
+/* =========================================================
+   PERMANENT LIVE ONLINE PLAYERS BADGE (Monitored via DSN)
+   ========================================================= */
+.spx-live-badge {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(8, 16, 26, 0.84);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(80, 220, 140, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), 0 0 10px rgba(50, 200, 120, 0.15);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.live-dot-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #39e58c;
+  box-shadow: 0 0 8px #39e58c;
+  animation: livePulse 1.8s infinite ease-in-out;
+}
+
+@keyframes livePulse {
+  0% { transform: scale(0.9); opacity: 0.7; box-shadow: 0 0 4px #39e58c; }
+  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 12px #39e58c, 0 0 20px rgba(57, 229, 140, 0.5); }
+  100% { transform: scale(0.9); opacity: 0.7; box-shadow: 0 0 4px #39e58c; }
+}
+
+.live-txt {
+  color: #a4c9b8;
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.live-num {
+  color: #39e58c;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+/* =========================================================
+   CLEAN SPACEX GLASSMORPHIC DROPDOWN MENUS
+   ========================================================= */
+.spx-dropdown {
+  position: relative;
+  display: inline-block;
+  pointer-events: auto;
+}
+
+.spx-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+
+.dropdown-icon {
+  font-size: 12px;
+}
+
+.dropdown-arrow {
+  font-size: 9px;
+  opacity: 0.75;
+  transition: transform 0.2s ease;
+}
+
+.spx-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 185px;
+  background: rgba(6, 12, 22, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(80, 180, 255, 0.32);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.75), 0 0 18px rgba(40, 120, 200, 0.22);
+  padding: 6px;
+  z-index: 250;
+  flex-direction: column;
+  gap: 3px;
+  animation: dropdownFadeIn 0.16s ease-out;
+}
+
+.spx-dropdown-menu.open {
+  display: flex;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dropdown-section-header {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 800;
+  color: #6a8ea6;
+  letter-spacing: 0.9px;
+  padding: 5px 8px 3px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 2px;
+  text-transform: uppercase;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #cfe2f2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover {
+  background: rgba(60, 150, 240, 0.22);
+  border-color: rgba(80, 180, 255, 0.45);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(60, 150, 240, 0.25);
+}
+
+.dropdown-item.active {
+  background: rgba(40, 140, 230, 0.35);
+  border-color: #4da6ff;
+  color: #ffffff;
+  font-weight: 800;
+  box-shadow: 0 0 12px rgba(60, 160, 255, 0.35);
+}
+
+@media (max-width: 900px) {
+  .spx-live-badge {
+    top: 8px;
+    right: 10px;
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+}
