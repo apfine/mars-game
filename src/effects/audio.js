@@ -217,21 +217,22 @@ export class MarsAudioEngine {
     if (!this.initialized || this.muted) return;
     const t = this.ctx.currentTime;
     if (this.rocketGain) {
-      const rVol = Math.min(0.65, throttle * 0.60);
-      this.rocketGain.gain.setTargetAtTime(rVol, t, 0.04);
-      this.rocketFilter.frequency.setTargetAtTime(110 + throttle * 360, t, 0.04);
+      // Much more banging, powerful launch thrust roar (raised ceiling & punch)
+      const rVol = Math.min(0.95, throttle * 0.90);
+      this.rocketGain.gain.setTargetAtTime(rVol, t, 0.03);
+      this.rocketFilter.frequency.setTargetAtTime(140 + throttle * 480, t, 0.03);
     }
     // Violent air-cracking shock diamond sound: loudest at full throttle in dense atmosphere
     if (this.shockGain) {
-      const atmoFactor = Math.max(0.15, 1.0 - Math.min(1.0, altitude / 45000));
-      const crackleVol = Math.min(0.55, Math.pow(throttle, 1.3) * 0.52 * atmoFactor);
-      this.shockGain.gain.setTargetAtTime(crackleVol, t, 0.03);
-      this.shockFilter.frequency.setTargetAtTime(900 + (Math.random() - 0.5) * 400 + throttle * 600, t, 0.02);
+      const atmoFactor = Math.max(0.2, 1.0 - Math.min(1.0, altitude / 45000));
+      const crackleVol = Math.min(0.85, Math.pow(throttle, 1.15) * 0.80 * atmoFactor);
+      this.shockGain.gain.setTargetAtTime(crackleVol, t, 0.02);
+      this.shockFilter.frequency.setTargetAtTime(800 + (Math.random() - 0.5) * 500 + throttle * 850, t, 0.015);
     }
-    // Sub-bass rumble
+    // Sub-bass 38Hz foundational combustion resonance rumble
     if (this.subRumbleGain) {
-      const subVol = Math.min(0.50, throttle * 0.48);
-      this.subRumbleGain.gain.setTargetAtTime(subVol, t, 0.05);
+      const subVol = Math.min(0.80, throttle * 0.78);
+      this.subRumbleGain.gain.setTargetAtTime(subVol, t, 0.03);
     }
     if (this.plasmaGain) {
       const pVol = Math.min(0.55, heat * 0.52);

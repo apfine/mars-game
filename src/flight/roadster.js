@@ -29,57 +29,122 @@ export class FlyingRoadster {
 
   buildModel() {
     const paint = new THREE.MeshStandardMaterial({
-      color: 0xb5121b,
-      metalness: 0.85,
-      roughness: 0.24
+      color: 0x99000a,
+      metalness: 0.92,
+      roughness: 0.16,
+      envMapIntensity: 1.5
     });
-    const black = new THREE.MeshStandardMaterial({ color: 0x0b0d10, metalness: 0.4, roughness: 0.6 });
+    const carbon = new THREE.MeshStandardMaterial({
+      color: 0x14161a,
+      metalness: 0.6,
+      roughness: 0.35
+    });
+    const black = new THREE.MeshStandardMaterial({ color: 0x07090b, metalness: 0.35, roughness: 0.7 });
     const glass = new THREE.MeshPhysicalMaterial({
-      color: 0x0e2133,
+      color: 0x0a1c2a,
       metalness: 0.1,
-      roughness: 0.06,
+      roughness: 0.04,
       transparent: true,
-      opacity: 0.72,
-      transmission: 0.15
+      opacity: 0.65,
+      transmission: 0.65,
+      ior: 1.52
     });
-    const chrome = new THREE.MeshStandardMaterial({ color: 0xd6dde2, metalness: 0.95, roughness: 0.18 });
-    const white = new THREE.MeshStandardMaterial({ color: 0xf3f5f6, roughness: 0.5, metalness: 0.05 });
+    const chrome = new THREE.MeshStandardMaterial({ color: 0xe6edf3, metalness: 0.98, roughness: 0.12 });
+    const white = new THREE.MeshStandardMaterial({ color: 0xf5f8fa, roughness: 0.45, metalness: 0.08 });
     const visor = new THREE.MeshStandardMaterial({
-      color: 0x0a0c10,
-      metalness: 0.85,
-      roughness: 0.15
+      color: 0x080b0f,
+      metalness: 0.96,
+      roughness: 0.06
     });
 
-    // Wide, low supercar silhouette.
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.5, 4.35), paint);
-    body.position.y = 0.48;
-    body.geometry.translate(0, 0, 0);
+    // Sculpted aerodynamic Midnight Cherry supercar body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.46, 4.38), paint);
+    body.position.y = 0.46;
     this.group.add(body);
 
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.34, 1.1), paint);
-    nose.position.set(0, 0.56, 2.35);
-    nose.rotation.x = -0.06;
+    // Front aerodynamic splitter & aggressive nose cone
+    const splitter = new THREE.Mesh(new THREE.BoxGeometry(2.04, 0.08, 0.9), carbon);
+    splitter.position.set(0, 0.22, 2.3);
+    this.group.add(splitter);
+
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.32, 1.15), paint);
+    nose.position.set(0, 0.54, 2.32);
+    nose.rotation.x = -0.09;
     this.group.add(nose);
 
-    const rear = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.42, 1.0), paint);
-    rear.position.set(0, 0.58, -2.0);
+    // Hood scoop / indentation
+    const hoodScoop = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.06, 1.4), carbon);
+    hoodScoop.position.set(0, 0.62, 1.4);
+    this.group.add(hoodScoop);
+
+    // Rear diffuser and ducktail spoiler
+    const diffuser = new THREE.Mesh(new THREE.BoxGeometry(1.96, 0.18, 0.8), carbon);
+    diffuser.position.set(0, 0.28, -2.15);
+    diffuser.rotation.x = 0.12;
+    this.group.add(diffuser);
+
+    const rear = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.40, 1.05), paint);
+    rear.position.set(0, 0.56, -2.02);
     this.group.add(rear);
 
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.55, 1.85), glass);
+    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.08, 0.42), carbon);
+    spoiler.position.set(0, 0.82, -2.48);
+    spoiler.rotation.x = -0.14;
+    this.group.add(spoiler);
+
+    // Side aero skirts and rocker panels
+    for (const sx of [-1, 1]) {
+      const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 2.9), carbon);
+      skirt.position.set(sx * 1.04, 0.26, 0);
+      this.group.add(skirt);
+
+      // Side mirrors
+      const mirrorArm = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 6), carbon);
+      mirrorArm.rotation.z = sx * 0.8;
+      mirrorArm.position.set(sx * 0.95, 0.96, 0.52);
+      this.group.add(mirrorArm);
+
+      const mirrorHousing = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.14), paint);
+      mirrorHousing.position.set(sx * 1.08, 1.02, 0.52);
+      this.group.add(mirrorHousing);
+    }
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.56, 1.88), glass);
     cabin.position.set(0, 0.92, -0.15);
     this.group.add(cabin);
 
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 1.2), paint);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.09, 1.22), paint);
     roof.position.set(0, 1.21, -0.22);
     this.group.add(roof);
 
-    // Windshield frames
+    // Windshield frames and roll hoop
     for (const side of [-1, 1]) {
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.62, 6), chrome);
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.64, 8), carbon);
       pillar.position.set(side * 0.76, 0.97, 0.64);
       pillar.rotation.x = 0.3;
       this.group.add(pillar);
     }
+    const rollHoop = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.035, 8, 16, Math.PI), carbon);
+    rollHoop.position.set(0, 1.08, -0.75);
+    this.group.add(rollHoop);
+
+    // Luxury Interior: Steering Yoke & Center Touchscreen
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.22, 0.5), black);
+    dash.position.set(0, 0.88, 0.42);
+    this.group.add(dash);
+
+    const centerScreen = new THREE.Mesh(
+      new THREE.BoxGeometry(0.24, 0.34, 0.04),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
+    centerScreen.position.set(0, 0.88, 0.22);
+    centerScreen.rotation.x = -0.32;
+    this.group.add(centerScreen);
+
+    const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.02, 6, 16, Math.PI * 1.3), carbon);
+    yoke.position.set(-0.38, 0.94, 0.22);
+    yoke.rotation.x = -0.35;
+    this.group.add(yoke);
 
     // Wheels with chrome hub caps.
     const wheelPositions = [
@@ -219,10 +284,14 @@ export class FlyingRoadster {
     const targetSpeed = throttle * maxSpeed;
     this.speed = THREE.MathUtils.lerp(this.speed, targetSpeed, Math.min(1.0, dt * (throttle !== 0 ? 4.5 : 2.5)));
 
-    // Vertical flight controls: Space/handbrake to climb, Shift/C to descend
+    // Vertical flight controls:
+    // Shift climbs UP (+Y), Ctrl / Cmd descends DOWN (-Y), Space climbs, C descends
     let targetVy = 0;
-    if (input.handbrake) targetVy = 16.0;
-    else if (input.brake) targetVy = -12.0;
+    if (input.nitro || input.throttleUp || input.handbrake) {
+      targetVy = isBoost ? 24.0 : 16.0;
+    } else if (input.throttleDown || input.brake) {
+      targetVy = -16.0;
+    }
     this.verticalSpeed = THREE.MathUtils.lerp(this.verticalSpeed, targetVy, Math.min(1.0, dt * 6.0));
 
     // Aerodynamic banking into turns

@@ -2107,14 +2107,25 @@ export class StarshipMissionVehicle {
       S.add(shipPin);
     }
 
-    // Cold-gas RCS pods and umbilical plates (merged into the dark-metal draw call)
-    const rcsPodGeo = new THREE.BoxGeometry(0.8, 0.95, 0.7);
+    // Cold-gas RCS Thruster Plumes (for attitude rotation & translation pulses)
+    this.rcsPlumes = [];
+    const rcsMat = new THREE.MeshBasicMaterial({
+      color: 0xe6f4ff,
+      transparent: true,
+      opacity: 0.0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const rcsConeGeo = new THREE.ConeGeometry(0.35, 1.6, 8);
+    rcsConeGeo.rotateX(Math.PI / 2);
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      const pod = new THREE.Mesh(rcsPodGeo, this.matDarkMetal);
-      pod.position.set(Math.cos(a) * (r + 0.3), barrelH + 2.2, Math.sin(a) * (r + 0.3));
-      pod.rotation.y = -a;
-      S.add(pod);
+      const rcsPlume = new THREE.Mesh(rcsConeGeo, rcsMat.clone());
+      rcsPlume.position.set(Math.cos(a) * (r + 0.8), barrelH + 2.2, Math.sin(a) * (r + 0.8));
+      rcsPlume.rotation.y = -a;
+      rcsPlume.visible = false;
+      S.add(rcsPlume);
+      this.rcsPlumes.push(rcsPlume);
     }
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2;
@@ -2124,22 +2135,27 @@ export class StarshipMissionVehicle {
       S.add(plate);
     }
 
-    // 4 Articulating Aerodynamic Flaps with Aerodynamic Hinge Root Fairings
+    // 4 Articulating Aerodynamic Flaps with Structural Hinge Fairings securely welded to hull
     this.forwardFlaps = [];
     this.aftFlaps = [];
 
     const ffGeo = makeBeveledFlapGeometry(0.32, 3.8, 3.2);
-    const ffFairingGeo = new THREE.CylinderGeometry(0.45, 0.55, 4.1, 12);
+    const ffFairingGeo = new THREE.CylinderGeometry(0.55, 0.65, 4.2, 16);
     for (const sx of [-1, 1]) {
+      // Robust structural root hinge fairing that connects directly into the hull
       const fairing = new THREE.Mesh(ffFairingGeo, this.matHeatshield);
-      fairing.position.set(sx * (r - 0.15), barrelH + noseH * 0.45, 0);
+      fairing.position.set(sx * (r - 0.05), barrelH + noseH * 0.45, 0);
       S.add(fairing);
 
+      const rootBracket = new THREE.Mesh(new THREE.BoxGeometry(0.8, 3.6, 1.2), this.matDarkMetal);
+      rootBracket.position.set(sx * (r - 0.25), barrelH + noseH * 0.45, 0);
+      S.add(rootBracket);
+
       const hinge = new THREE.Group();
-      hinge.position.set(sx * (r - 0.2), barrelH + noseH * 0.45, 0);
+      hinge.position.set(sx * (r + 0.15), barrelH + noseH * 0.45, 0);
 
       const flapMesh = new THREE.Mesh(ffGeo, this.matHeatshield);
-      flapMesh.position.set(sx * 1.6, 0, 0);
+      flapMesh.position.set(sx * 1.5, 0, 0);
       hinge.add(flapMesh);
 
       S.add(hinge);
@@ -2147,17 +2163,22 @@ export class StarshipMissionVehicle {
     }
 
     const afGeo = makeBeveledFlapGeometry(0.42, 11.0, 5.2);
-    const afFairingGeo = new THREE.CylinderGeometry(0.62, 0.72, 11.4, 12);
+    const afFairingGeo = new THREE.CylinderGeometry(0.72, 0.85, 11.6, 16);
     for (const sx of [-1, 1]) {
+      // Heavy aft flap aerodynamic strakes & hinges welded flush to barrel
       const fairing = new THREE.Mesh(afFairingGeo, this.matHeatshield);
-      fairing.position.set(sx * (r - 0.1), 6.5, 0);
+      fairing.position.set(sx * (r - 0.02), 6.5, 0);
       S.add(fairing);
 
+      const rootBracket = new THREE.Mesh(new THREE.BoxGeometry(0.9, 10.8, 1.6), this.matDarkMetal);
+      rootBracket.position.set(sx * (r - 0.2), 6.5, 0);
+      S.add(rootBracket);
+
       const hinge = new THREE.Group();
-      hinge.position.set(sx * (r - 0.2), 6.5, 0);
+      hinge.position.set(sx * (r + 0.2), 6.5, 0);
 
       const flapMesh = new THREE.Mesh(afGeo, this.matHeatshield);
-      flapMesh.position.set(sx * 2.6, 0, 0);
+      flapMesh.position.set(sx * 2.5, 0, 0);
       hinge.add(flapMesh);
 
       S.add(hinge);
@@ -2620,6 +2641,19 @@ export class StarshipMissionVehicle {
     }
     for (const a of this.aftFlaps) {
       a.hinge.rotation.z = a.side * aAngle;
+    }
+
+    // Fire cold-gas RCS jets during steering / attitude maneuvers
+    const turning = Math.abs(pitch) > 0.05 || Math.abs(roll) > 0.05;
+    if (this.rcsPlumes) {
+      for (let i = 0; i < this.rcsPlumes.length; i++) {
+        const p = this.rcsPlumes[i];
+        p.visible = turning;
+        if (turning) {
+          p.material.opacity = 0.6 + Math.random() * 0.35;
+          p.scale.set(1.0 + Math.random() * 0.3, 1.0 + Math.random() * 0.4, 1.0);
+        }
+      }
     }
   }
 

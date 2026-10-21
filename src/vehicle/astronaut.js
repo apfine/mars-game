@@ -9,38 +9,38 @@ export class AstronautAvatar {
     this.group.visible = false;
 
     const suitMat = new THREE.MeshStandardMaterial({
-      color: 0xf1f3f4,
-      roughness: 0.55,
-      metalness: 0.05
+      color: 0xf5f7fa,
+      roughness: 0.38,
+      metalness: 0.12
     });
     const fabricMat = new THREE.MeshStandardMaterial({
-      color: 0xd7dde0,
-      roughness: 0.82,
-      metalness: 0.02
+      color: 0x22272e,
+      roughness: 0.75,
+      metalness: 0.18
     });
     const darkMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1d20,
-      roughness: 0.4,
-      metalness: 0.55
+      color: 0x0f1318,
+      roughness: 0.28,
+      metalness: 0.82
     });
     const visorMat = new THREE.MeshStandardMaterial({
-      color: 0x1d3d5c,
-      roughness: 0.08,
-      metalness: 0.92,
-      emissive: new THREE.Color(0x0b2238),
-      emissiveIntensity: 0.35
+      color: 0x11161d,
+      roughness: 0.03,
+      metalness: 0.98,
+      emissive: new THREE.Color(0xd4af37),
+      emissiveIntensity: 0.42
     });
     const accentMat = new THREE.MeshStandardMaterial({
-      color: 0xff7a2f,
-      roughness: 0.5,
-      metalness: 0.1,
-      emissive: new THREE.Color(0x8a2500),
-      emissiveIntensity: 0.18
+      color: 0xff4f1f,
+      roughness: 0.4,
+      metalness: 0.2,
+      emissive: new THREE.Color(0xb32800),
+      emissiveIntensity: 0.35
     });
     const packMat = new THREE.MeshStandardMaterial({
-      color: 0xd9e0e4,
-      roughness: 0.6,
-      metalness: 0.15
+      color: 0xe6ebf0,
+      roughness: 0.45,
+      metalness: 0.25
     });
 
     // Torso and life-support backpack

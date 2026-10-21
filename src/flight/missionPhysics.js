@@ -1493,8 +1493,14 @@ export class StarshipMissionPhysics {
         );
 
         // Predicted downrange miss if we stopped burning now.
+        // User rule: As soon as it detaches, perform boostback until vertical velocity turns negative / starts decreasing,
+        // and cap apogee so it does NOT shoot up to 100km!
         const predictedMiss = horizDist - towardPadVel * tFall * 0.92;
-        const finished = Math.abs(predictedMiss) < 700.0 || this.boosterTimer > 90.0 || this.boosterFuel < 12.0;
+        const reachedApogeeOrFalling = this.boosterVelocity.y <= 0 || (this.boosterPosition.y - this.padElevation) >= 68000;
+        const finished = (Math.abs(predictedMiss) < 700.0 && reachedApogeeOrFalling) ||
+                         this.boosterVelocity.y < -10.0 ||
+                         this.boosterTimer > 45.0 ||
+                         this.boosterFuel < 12.0;
         if (finished) {
           this.boosterState = BOOSTER_STATES.DESCENT;
           this.boosterTimer = 0.0;

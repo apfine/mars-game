@@ -164,21 +164,26 @@ export class StarbaseOperations {
       this.vehicle.setReviewScan('booster', t > 0.45, t);
 
       if (t < 0.45) {
-        this.message = 'FACTORY // RAPTOR REFURBISHMENT · HEAT SHIELD TILES REPAIR';
+        this.message = 'CRANE OPS // HOISTING SUPER HEAVY BOOSTER FIRST ONTO LAUNCH MOUNT';
+        // Crane picks up booster first
+        this.vehicle.setCranePose('launch', 0.2, 14.0, 35.0, true);
       } else if (t < 0.85) {
-        this.message = 'ROBOTIC ARMS // ROLLING REFURBISHED VEHICLES ONTO CONVEYOR';
+        this.message = 'CRANE OPS // BOOSTER SECURED · HOISTING STARSHIP ONTO BOOSTER';
+        // Crane picks up ship next and stacks on top of booster
+        this.vehicle.setCranePose('launch', -0.3, 16.0, 22.0, true);
       } else {
-        this.message = 'ROBOTIC CHOPSTICKS // HOISTING & LOADING BOOSTER ONTO LAUNCH MOUNT';
+        this.message = 'ROBOTIC CHOPSTICKS // STACKING & MATING STARSHIP ONTO BOOSTER';
+        this.vehicle.setCranePose('launch', 0.0, 10.0, 18.0, false);
       }
 
       if (this.buildTimer >= 7.5) {
-        this.message = 'ROBOTIC ARMS // HOISTING & MATING STARSHIP ONTO BOOSTER';
+        this.message = 'STARBASE OPS // STACK MATED · WAITING FOR MANUAL LAUNCH COMMAND';
         p.prepareNextMission();
         this.state = 'READY';
         this.readyTimer = 0;
         this.vehicle.setReviewScan('ship', false);
         this.vehicle.setReviewScan('booster', false);
-        this.vehicle.setLaunchChopsticks(0.0, L.launchTower.armY);
+        this.vehicle.setLaunchChopsticks(1.0, L.launchTower.armY);
         this.vehicle.setErectorAngle(0);
       }
       return;
@@ -186,18 +191,12 @@ export class StarbaseOperations {
 
     if (this.state === 'READY') {
       this.readyTimer += dt;
-      const close = Math.min(1, this.readyTimer / 2.8);
-      this.vehicle.setLaunchChopsticks(close, L.launchTower.armY);
-      this.message = close >= 1
-        ? 'STARBASE OPS // NEW STACK SECURED BY ROBOTIC ARMS · READY FOR LAUNCH'
-        : 'ROBOTIC CHOPSTICKS // MATING STARSHIP STACK · LATCHING UMBILICALS';
+      this.vehicle.setLaunchChopsticks(1.0, L.launchTower.armY);
+      this.message = 'STARBASE OPS // STACK FULLY ARMED ON PAD · PRESS LAUNCH TO LIFTOFF';
 
-      // Continuous AUTO campaign: launch the fresh stack after a short hold so
-      // the reload is visible rather than an instant teleport.
-      if (this.readyTimer > 8.0 && p.autoMission && !this.relaunchRequested) {
-        this.relaunchRequested = true;
-        if (this.options.onRelaunch) this.options.onRelaunch();
-      }
+      // DO NOT AUTOMATICALLY LAUNCH!
+      // Only launch when user explicitly presses LAUNCH or clicks the Physical Pedestal.
+      // (Automatic continuous launching removed as requested)
       if (this.readyTimer > 1.5 && !p.autoMission) {
         // Manual pilots keep the new stack on the pad and take over.
       }
