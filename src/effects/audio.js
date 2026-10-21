@@ -54,7 +54,7 @@ export class MarsAudioEngine {
     this.rocketFilter = this.ctx.createBiquadFilter();
     this.rocketFilter.type = 'lowpass';
     this.rocketFilter.frequency.setValueAtTime(120, this.ctx.currentTime);
-    this.rocketFilter.Q.setValueAtTime(1.8, this.ctx.currentTime);
+    this.rocketFilter.Q.setValueAtTime(2.2, this.ctx.currentTime);
 
     this.rocketGain = this.ctx.createGain();
     this.rocketGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
@@ -63,6 +63,41 @@ export class MarsAudioEngine {
     this.rocketFilter.connect(this.rocketGain);
     this.rocketGain.connect(this.masterGain);
     this.rocketNoise.start();
+
+    // Supersonic air-cracking shock diamond node (violent tearing-canvas sound on booster fire)
+    this.shockNoise = this.ctx.createBufferSource();
+    this.shockNoise.buffer = noiseBuffer;
+    this.shockNoise.loop = true;
+
+    this.shockFilter = this.ctx.createBiquadFilter();
+    this.shockFilter.type = 'highpass';
+    this.shockFilter.frequency.setValueAtTime(850, this.ctx.currentTime);
+    this.shockFilter.Q.setValueAtTime(3.5, this.ctx.currentTime);
+
+    this.shockGain = this.ctx.createGain();
+    this.shockGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+
+    this.shockNoise.connect(this.shockFilter);
+    this.shockFilter.connect(this.shockGain);
+    this.shockGain.connect(this.masterGain);
+    this.shockNoise.start();
+
+    // Sub-bass 33-Raptor combustion resonance (38 Hz foundational rumble)
+    this.subRumbleOsc = this.ctx.createOscillator();
+    this.subRumbleOsc.type = 'sawtooth';
+    this.subRumbleOsc.frequency.setValueAtTime(38, this.ctx.currentTime);
+
+    this.subRumbleFilter = this.ctx.createBiquadFilter();
+    this.subRumbleFilter.type = 'lowpass';
+    this.subRumbleFilter.frequency.setValueAtTime(85, this.ctx.currentTime);
+
+    this.subRumbleGain = this.ctx.createGain();
+    this.subRumbleGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+
+    this.subRumbleOsc.connect(this.subRumbleFilter);
+    this.subRumbleFilter.connect(this.subRumbleGain);
+    this.subRumbleGain.connect(this.masterGain);
+    this.subRumbleOsc.start();
 
     // Re-entry rushing plasma wind sound
     this.plasmaNoise = this.ctx.createBufferSource();
@@ -178,19 +213,118 @@ export class MarsAudioEngine {
     } catch (_) {}
   }
 
-  updateRocket(throttle, altitude, heat) {
+  updateRocket(throttle, altitude = 0, heat = 0) {
     if (!this.initialized || this.muted) return;
     const t = this.ctx.currentTime;
     if (this.rocketGain) {
-      const rVol = Math.min(0.55, throttle * 0.52);
-      this.rocketGain.gain.setTargetAtTime(rVol, t, 0.05);
-      this.rocketFilter.frequency.setTargetAtTime(100 + throttle * 320, t, 0.05);
+      const rVol = Math.min(0.65, throttle * 0.60);
+      this.rocketGain.gain.setTargetAtTime(rVol, t, 0.04);
+      this.rocketFilter.frequency.setTargetAtTime(110 + throttle * 360, t, 0.04);
+    }
+    // Violent air-cracking shock diamond sound: loudest at full throttle in dense atmosphere
+    if (this.shockGain) {
+      const atmoFactor = Math.max(0.15, 1.0 - Math.min(1.0, altitude / 45000));
+      const crackleVol = Math.min(0.55, Math.pow(throttle, 1.3) * 0.52 * atmoFactor);
+      this.shockGain.gain.setTargetAtTime(crackleVol, t, 0.03);
+      this.shockFilter.frequency.setTargetAtTime(900 + (Math.random() - 0.5) * 400 + throttle * 600, t, 0.02);
+    }
+    // Sub-bass rumble
+    if (this.subRumbleGain) {
+      const subVol = Math.min(0.50, throttle * 0.48);
+      this.subRumbleGain.gain.setTargetAtTime(subVol, t, 0.05);
     }
     if (this.plasmaGain) {
-      const pVol = Math.min(0.48, heat * 0.45);
+      const pVol = Math.min(0.55, heat * 0.52);
       this.plasmaGain.gain.setTargetAtTime(pVol, t, 0.08);
-      this.plasmaFilter.frequency.setTargetAtTime(400 + heat * 900, t, 0.08);
+      this.plasmaFilter.frequency.setTargetAtTime(450 + heat * 1100, t, 0.08);
     }
+  }
+
+  playCollisionSound(material = 'metal', intensity = 0.5) {
+    if (!this.initialized || this.muted) return;
+    try {
+      const t = this.ctx.currentTime;
+      const clampedInt = Math.max(0.15, Math.min(1.0, intensity));
+
+      if (material === 'metal') {
+        // Sharp metallic clang with dual resonant chime
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc1.type = 'sawtooth';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(1420, t);
+        osc1.frequency.exponentialRampToValueAtTime(820, t + 0.28);
+        osc2.frequency.setValueAtTime(2640, t);
+        osc2.frequency.exponentialRampToValueAtTime(1860, t + 0.22);
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(1600, t);
+        filter.Q.setValueAtTime(4.5, t);
+
+        gain.gain.setValueAtTime(clampedInt * 0.48, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+
+        osc1.connect(filter);
+        osc2.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc1.start(t);
+        osc2.start(t);
+        osc1.stop(t + 0.33);
+        osc2.stop(t + 0.33);
+      } else if (material === 'rock') {
+        // Heavy rock thud with coarse granular gravel scatter
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(140, t);
+        osc.frequency.exponentialRampToValueAtTime(32, t + 0.22);
+        gain.gain.setValueAtTime(clampedInt * 0.42, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(t);
+        osc.stop(t + 0.25);
+
+        // Gravel spray burst
+        const bufSize = Math.floor(this.ctx.sampleRate * 0.18);
+        const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.3));
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buf;
+        const bFilter = this.ctx.createBiquadFilter();
+        bFilter.type = 'bandpass';
+        bFilter.frequency.setValueAtTime(650, t);
+        bFilter.Q.setValueAtTime(1.2, t);
+        const nGain = this.ctx.createGain();
+        nGain.gain.setValueAtTime(clampedInt * 0.35, t);
+        nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        noise.connect(bFilter);
+        bFilter.connect(nGain);
+        nGain.connect(this.masterGain);
+        noise.start(t);
+      } else {
+        // Concrete impact: solid heavy slab thud
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(180, t);
+        osc.frequency.exponentialRampToValueAtTime(45, t + 0.16);
+        gain.gain.setValueAtTime(clampedInt * 0.38, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(t);
+        osc.stop(t + 0.19);
+      }
+    } catch (_) {}
   }
 
   ensureRunning() {

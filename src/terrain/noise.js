@@ -160,27 +160,37 @@ function rawHeight(x, z) {
   const terraces = (f + sstep(0.42, 0.58, t - f)) * 1.1;
   const slabTilt = simplex2D(x * 0.07, z * 0.07) * 0.22 + simplex2D(x * 0.19, z * 0.19) * 0.07;
 
-  // Sand drifts in the lee of obstacles (shallow wind dunes in an erg mask)
+  // Sand drifts and sweeping Martian mega-dunes with sharp asymmetric slip-faces
   const wx = x * COS_DUNE - z * SIN_DUNE;
   const wz = x * SIN_DUNE + z * COS_DUNE;
-  const ergMask = sstep(0.55, 0.95, (simplex2D(x * 0.0012, z * 0.0012) + 1.0) * 0.5);
+  const ergMask = sstep(0.48, 0.92, (simplex2D(x * 0.0011, z * 0.0011) + 1.0) * 0.5);
   let dunes = 0;
   if (ergMask > 0.001) {
-    const duneWarp = simplex2D(wx * 0.003, wz * 0.003) * 10.0;
-    const duneProfile = Math.pow((Math.sin((wz + duneWarp) * 0.015) + 1.0) * 0.5, 1.35);
-    dunes = duneProfile * 6.0 * ergMask;
+    // Primary transverse dune wave with undulating crestlines
+    const duneWarp = simplex2D(wx * 0.0028, wz * 0.0028) * 16.0;
+    const wavePhase = (wz + duneWarp) * 0.014;
+    const waveSin = Math.sin(wavePhase);
+    // Asymmetric barchan slip-face: gentle windward ramp (power 1.6), steep lee drop
+    const windward = Math.pow(Math.max(0.0, (waveSin + 1.0) * 0.5), 1.85);
+    const slipFace = (waveSin < -0.2) ? Math.pow(Math.max(0.0, -waveSin - 0.2) / 0.8, 1.4) * 0.35 : 0.0;
+    // Secondary cross-dune crest ripples
+    const crossWave = Math.sin(wx * 0.022 + simplex2D(x * 0.006, z * 0.006) * 4.0) * 0.28;
+    const duneProfile = windward - slipFace + crossWave * windward;
+    dunes = duneProfile * 16.5 * ergMask;
   }
 
   // Steep dune/ridge walls (up to ~40 degrees) to climb and fall from, in sparse regions
-  const steepMask = sstep(0.5, 0.82, (simplex2D(x * 0.0019 - 5, z * 0.0019 + 3) + 1.0) * 0.5);
+  const steepMask = sstep(0.48, 0.82, (simplex2D(x * 0.0018 - 5, z * 0.0018 + 3) + 1.0) * 0.5);
   let steep = 0;
   if (steepMask > 0.001) {
-    const r = Math.max(0, 1 - Math.abs(simplex2D(x * 0.0065 + 11, z * 0.0065 - 7)));
+    const r = Math.max(0, 1 - Math.abs(simplex2D(x * 0.006 + 11, z * 0.006 - 7)));
     const r2 = r * r;
-    steep = (r2 * r2 * r) * 15.0 * steepMask;
+    steep = (r2 * r2 * r) * 18.0 * steepMask;
   }
 
-  const ripples = Math.sin(wz * 0.2 + simplex2D(x * 0.015, z * 0.015) * 2.0) * 0.05;
+  // Micro wind ripples on sand surfaces
+  const ripples = (Math.sin(wz * 0.35 + simplex2D(x * 0.03, z * 0.03) * 3.0) * 0.075 +
+                   Math.sin(wz * 0.8) * 0.035) * Math.max(0.3, ergMask);
 
   return macro + terraces + slabTilt + dunes + steep + rampHeight(x, z) + ripples;
 }
@@ -189,18 +199,18 @@ function rawHeight(x, z) {
 export function getMarsHeightFast(x, z) {
   const macro = fbm(x * 0.0004, z * 0.0004, 2, 2.0, 0.45) * 30.0;
   const bed = fbm(x * 0.009 + 40, z * 0.009 - 17, 2, 2.0, 0.5) * 6.0;
-  const ergMask = sstep(0.55, 0.95, (simplex2D(x * 0.0012, z * 0.0012) + 1.0) * 0.5);
+  const ergMask = sstep(0.48, 0.92, (simplex2D(x * 0.0011, z * 0.0011) + 1.0) * 0.5);
   let dunes = 0;
   if (ergMask > 0.01) {
     const wz = x * SIN_DUNE + z * COS_DUNE;
-    dunes = ((Math.sin(wz * 0.015) + 1.0) * 0.5) * 6.0 * ergMask;
+    dunes = Math.pow((Math.sin(wz * 0.014) + 1.0) * 0.5, 1.85) * 16.5 * ergMask;
   }
-  const steepMask = sstep(0.5, 0.82, (simplex2D(x * 0.0019 - 5, z * 0.0019 + 3) + 1.0) * 0.5);
+  const steepMask = sstep(0.48, 0.82, (simplex2D(x * 0.0018 - 5, z * 0.0018 + 3) + 1.0) * 0.5);
   let steep = 0;
   if (steepMask > 0.01) {
-    const r = Math.max(0, 1 - Math.abs(simplex2D(x * 0.0065 + 11, z * 0.0065 - 7)));
+    const r = Math.max(0, 1 - Math.abs(simplex2D(x * 0.006 + 11, z * 0.006 - 7)));
     const r2 = r * r;
-    steep = (r2 * r2 * r) * 15.0 * steepMask;
+    steep = (r2 * r2 * r) * 18.0 * steepMask;
   }
   return macro + bed + dunes + steep;
 }

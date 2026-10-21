@@ -125,6 +125,11 @@ export class MissionFlightHUD {
         e.preventDefault();
         const dest = btn.getAttribute('data-dest');
         if (dest && this.options.onSelectDestination) this.options.onSelectDestination(dest);
+        destBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        const curLbl = document.getElementById('flight-dest-current');
+        if (curLbl) curLbl.textContent = `DEST: ${dest.toUpperCase()}`;
+        if (this.dom.transferBtn) this.dom.transferBtn.textContent = `TRANSFER · ${dest.toUpperCase()}`;
         const menu = document.getElementById('flight-mission-menu');
         if (menu) menu.classList.remove('open');
       });
@@ -151,20 +156,47 @@ export class MissionFlightHUD {
       });
     }
 
-    if (this.dom.camBar) {
-      const tabs = this.dom.camBar.querySelectorAll('.cam-tab-btn, .dropdown-item');
-      tabs.forEach((tab) => {
-        tab.addEventListener('click', (e) => {
-          e.preventDefault();
-          const cam = tab.getAttribute('data-cam');
-          if (cam && this.options.onSelectCamera) {
-            this.options.onSelectCamera(cam);
-          }
-          const menu = document.getElementById('flight-cam-menu');
-          if (menu) menu.classList.remove('open');
-        });
+    // Camera Switcher Dropdown Buttons
+    const camBtns = document.querySelectorAll('[data-cam]');
+    camBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const cam = btn.getAttribute('data-cam');
+        if (cam && this.options.onSelectCamera) {
+          this.options.onSelectCamera(cam);
+        }
+        camBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        const curLbl = document.getElementById('flight-cam-current');
+        if (curLbl) {
+          const readable = cam.replace('_CAM', '').replace('FREE_', '');
+          curLbl.textContent = readable;
+        }
+        const menu = document.getElementById('flight-cam-menu');
+        if (menu) menu.classList.remove('open');
       });
-    }
+    });
+
+    // Rover Camera Switcher Buttons
+    const rcamBtns = document.querySelectorAll('[data-rcam]');
+    rcamBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const idx = parseInt(btn.getAttribute('data-rcam'), 10);
+        if (!isNaN(idx) && this.options.onSelectRoverCamera) {
+          this.options.onSelectRoverCamera(idx);
+        }
+        rcamBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        const curLbl = document.getElementById('rover-cam-current');
+        if (curLbl) {
+          const names = ['CHASE', 'COCKPIT', 'ORBIT'];
+          curLbl.textContent = names[idx] || 'CAMERA';
+        }
+        const menu = document.getElementById('rover-cam-menu');
+        if (menu) menu.classList.remove('open');
+      });
+    });
 
     // Generic Dropdown Toggle Handlers
     const bindDropdown = (triggerId, menuId) => {
@@ -183,6 +215,7 @@ export class MissionFlightHUD {
     bindDropdown('flight-mission-btn', 'flight-mission-menu');
     bindDropdown('flight-actions-btn', 'flight-actions-menu');
     bindDropdown('rover-cam-btn', 'rover-cam-menu');
+    bindDropdown('rover-actions-btn', 'rover-actions-menu');
 
     if (typeof window !== 'undefined') {
       window.addEventListener('click', () => {
@@ -190,21 +223,24 @@ export class MissionFlightHUD {
       });
     }
 
-    const bindTrajButtons = (rootEl, selector) => {
-      if (!rootEl) return;
-      const btns = rootEl.querySelectorAll(selector);
-      btns.forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          const mode = btn.getAttribute('data-traj');
-          if (mode && this.options.onSelectTrajectory) {
-            this.options.onSelectTrajectory(mode);
-          }
+    // Trajectory Mode Selection Buttons (Orbital vs Suborbital)
+    const trajBtns = document.querySelectorAll('[data-traj]');
+    trajBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const mode = btn.getAttribute('data-traj');
+        if (mode && this.options.onSelectTrajectory) {
+          this.options.onSelectTrajectory(mode);
+        }
+        trajBtns.forEach((b) => {
+          if (b.getAttribute('data-traj') === mode) b.classList.add('active');
+          else b.classList.remove('active');
         });
+        const menu = document.getElementById('flight-mission-menu');
+        if (menu) menu.classList.remove('open');
+        if (this.dom.trajectoryPrompt) this.dom.trajectoryPrompt.style.display = 'none';
       });
-    };
-    bindTrajButtons(this.dom.trajSwitch, '.traj-opt-btn');
-    bindTrajButtons(this.dom.trajectoryPrompt, '.traj-prompt-btn');
+    });
 
     // Universal 360° Gimbal continuous hold & tap controls
     const bindGimbalBtn = (btn, dYaw, dPitch) => {

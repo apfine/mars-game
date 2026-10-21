@@ -254,9 +254,16 @@ export class StarbaseOperations {
       if (isBooster) {
         p.boosterPosition.y = y;
         this.vehicle.setBoosterChopsticks(grip, carriage);
+        // Tower Crane hoist cable extends down with the vehicle lifting lugs
+        const cranePivotY = L.boosterTower.height + 4.2;
+        const cableLen = Math.max(8.0, cranePivotY - (y + 65.5));
+        this.vehicle.setCranePose?.('booster', -Math.PI / 2, 26.5, cableLen, t < 0.95);
       } else {
         p.position.y = y;
         this.vehicle.setShipChopsticks(grip, carriage);
+        const cranePivotY = L.shipTower.height + 4.2;
+        const cableLen = Math.max(8.0, cranePivotY - (y + 31.8));
+        this.vehicle.setCranePose?.('ship', -Math.PI / 2, 26.5, cableLen, t < 0.95);
       }
       if (crawler) {
         crawler.group.position.set(

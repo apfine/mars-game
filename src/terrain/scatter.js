@@ -825,7 +825,7 @@ export class MarsScatterManager {
       if (d2 >= min * min || top <= feetY + 0.45) return;
       const d = Math.sqrt(d2) || 0.001;
       const pen = min - d;
-      if (!best || pen > best.pen) best = { nx: dx / d, nz: dz / d, pen };
+      if (!best || pen > best.pen) best = { nx: dx / d, nz: dz / d, pen, material: 'rock' };
     };
     for (let i = -1; i <= 1; i++) {
       for (let j = -1; j <= 1; j++) {

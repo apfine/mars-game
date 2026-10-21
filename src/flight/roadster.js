@@ -186,9 +186,88 @@ export class FlyingRoadster {
     this.planetId = planetId;
   }
 
+  board(startPos, startYaw = 0) {
+    this.enabled = true;
+    this.isPiloted = true;
+    this.group.visible = true;
+    this.speed = 0;
+    this.verticalSpeed = 0;
+    this.yaw = startYaw;
+    this.pitch = 0;
+    this.roll = 0;
+    this.group.position.set(startPos.x, startPos.y + 1.5, startPos.z);
+    return true;
+  }
+
+  disembark() {
+    this.isPiloted = false;
+    return this.group.position.clone();
+  }
+
+  updatePiloted(dt, input, getSurfaceHeight = null, resolveCollisions = null) {
+    this.time += dt;
+    const isBoost = Boolean(input.nitro);
+    const maxSpeed = isBoost ? 82.0 : 48.0;
+
+    // Steering & Yaw rotation
+    if (Math.abs(input.steer) > 0.02) {
+      this.yaw += -input.steer * 2.2 * dt;
+    }
+
+    // Forward/Backward acceleration
+    const throttle = input.throttle || (input.forward ? 1 : input.backward ? -0.6 : 0);
+    const targetSpeed = throttle * maxSpeed;
+    this.speed = THREE.MathUtils.lerp(this.speed, targetSpeed, Math.min(1.0, dt * (throttle !== 0 ? 4.5 : 2.5)));
+
+    // Vertical flight controls: Space/handbrake to climb, Shift/C to descend
+    let targetVy = 0;
+    if (input.handbrake) targetVy = 16.0;
+    else if (input.brake) targetVy = -12.0;
+    this.verticalSpeed = THREE.MathUtils.lerp(this.verticalSpeed, targetVy, Math.min(1.0, dt * 6.0));
+
+    // Aerodynamic banking into turns
+    const targetRoll = THREE.MathUtils.clamp(-input.steer * 0.42, -0.6, 0.6);
+    this.roll = THREE.MathUtils.lerp(this.roll, targetRoll, dt * 7.0);
+    const targetPitch = THREE.MathUtils.clamp((this.speed / maxSpeed) * -0.15 + (targetVy * 0.02), -0.3, 0.3);
+    this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch, dt * 5.0);
+
+    // Apply movement
+    const sinY = Math.sin(this.yaw);
+    const cosY = Math.cos(this.yaw);
+    this.group.position.x += sinY * this.speed * dt;
+    this.group.position.z += cosY * this.speed * dt;
+    this.group.position.y += this.verticalSpeed * dt;
+
+    // Solid obstacle collisions
+    if (resolveCollisions) {
+      resolveCollisions(this.group.position, 1.8, this.group.position.y);
+    }
+
+    // Floor terrain constraint
+    if (getSurfaceHeight) {
+      const groundY = getSurfaceHeight(this.group.position.x, this.group.position.z);
+      if (this.group.position.y < groundY + 1.2) {
+        this.group.position.y = groundY + 1.2;
+        if (this.verticalSpeed < 0) this.verticalSpeed = 0;
+      }
+    }
+
+    // Orient mesh
+    this.group.rotation.set(this.pitch, this.yaw, this.roll, 'YXZ');
+
+    // Thruster flames flare dynamically
+    const thrustLevel = Math.max(0.2, Math.abs(throttle) + (this.verticalSpeed > 0 ? 0.6 : 0));
+    for (let i = 0; i < this.flames.length; i++) {
+      const f = this.flames[i];
+      f.scale.y = (0.7 + thrustLevel * 0.9) + Math.sin(this.time * 24 + i * 2.0) * 0.18;
+      const mat = this.thrusterMats[i];
+      mat.opacity = THREE.MathUtils.clamp(0.4 + thrustLevel * 0.55, 0.0, 1.0);
+    }
+  }
+
   update(dt, active) {
     this.time += dt;
-    if (!this.enabled) return;
+    if (!this.enabled || this.isPiloted) return;
 
     const p = this.physics;
     const inSpace = p.phase === FLIGHT_PHASES.INTERPLANETARY || p.phase === FLIGHT_PHASES.ORBIT;

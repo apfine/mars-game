@@ -548,13 +548,20 @@ function createPlumeMaterial({ core = 0xffffff, mid = 0xffaa33, outer = 0xff4411
         float turb = sin(ang * 3.0 + uTime * 47.0) * sin(ang * 5.0 - uTime * 31.0 + 1.7);
         float flicker = 0.82 + 0.18 * turb;
         float diamonds = pow(max(0.0, sin(t * 34.0 - uTime * 20.0)), 8.0) * smoothstep(0.0, 0.10, t) * (1.0 - t);
-        float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.4);
+        
+        // Diffused plume geometry without strict cone boundary:
+        // Soft interior-weighted core with gentle exponential feathering to the boundary
+        float viewDot = max(0.0, dot(normalize(vN), normalize(vV)));
+        float edgeSoft = smoothstep(0.02, 0.52, viewDot);
+        float turbulentEdge = 0.85 + 0.15 * sin(ang * 4.0 + t * 14.0 - uTime * 18.0);
+        float diffuseProfile = pow(edgeSoft * turbulentEdge, 0.85);
+
         float body = smoothstep(0.0, 0.055, t) * pow(1.0 - t, 1.22);
         vec3 col = mix(uCore, uMid, smoothstep(0.0, 0.45, t));
         col = mix(col, uOuter, smoothstep(0.45, 1.0, t));
         col += uCore * diamonds * 1.5;
-        col *= (1.0 + uVacuum * 0.35) * (1.25 + fres * 0.9);
-        float alpha = (body * (0.42 + fres * 0.95) * flicker + diamonds * 0.85) * uThrottle * 0.62;
+        col *= (1.0 + uVacuum * 0.35) * (1.20 + diffuseProfile * 0.85);
+        float alpha = (body * (0.35 + 0.65 * diffuseProfile) * flicker + diamonds * 0.85) * uThrottle * 0.64 * diffuseProfile;
         gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
       }
     `
@@ -790,8 +797,12 @@ export class StarshipMissionVehicle {
     this.leftChopstickHinge = this.towers.launch.leftHinge;
     this.rightChopstickHinge = this.towers.launch.rightHinge;
 
-    // Automated stacking crane mounted on the launch tower.
-    this.buildStackerCrane(pad);
+    // Automated heavy-lift cranes mounted on all three towers (Launch tower & Catch towers)
+    this.cranes = {};
+    this.buildStackerCrane(pad, 'launch');
+    this.buildStackerCrane(pad, 'booster');
+    this.buildStackerCrane(pad, 'ship');
+    this.stacker = this.cranes.launch;
 
     // Build the broader Mars Starbase complex (Ref Images 2 & 3)
     this.buildExpandedMarsStarbase(pad);
@@ -803,6 +814,7 @@ export class StarshipMissionVehicle {
     // Every animated carriage, crane, crawler and scanner is excluded.
     const dynamicRoots = [];
     for (const t of Object.values(this.towers)) dynamicRoots.push(t.carriage);
+    for (const c of Object.values(this.cranes)) dynamicRoots.push(c.yaw);
     mergeStaticGroup(pad, dynamicRoots);
   }
 
@@ -862,15 +874,6 @@ export class StarshipMissionVehicle {
     const deck = new THREE.Mesh(new THREE.BoxGeometry(towerWidth + 4, 1.2, towerWidth + 4), this.matTower);
     deck.position.set(x, height + 0.6, z);
     pad.add(deck);
-
-    if (withCrane) {
-      const craneBoom = new THREE.Mesh(new THREE.BoxGeometry(24, 1.8, 1.8), this.matTower);
-      craneBoom.position.set(x - 6, height + 3.2, z);
-      pad.add(craneBoom);
-      const craneCounter = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 3.2), this.matDarkMetal);
-      craneCounter.position.set(x + 9, height + 3.2, z);
-      pad.add(craneCounter);
-    }
 
     if (withQD) {
       const qdArm = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 1.8), this.matTower);
@@ -961,12 +964,13 @@ export class StarshipMissionVehicle {
   }
 
   // -------------------------------------------------------------
-  // AUTONOMOUS STACKING CRANE ON THE LAUNCH TOWER
+  // AUTONOMOUS CRANES ON ALL THREE TOWERS (Launch + Catch Towers)
   // -------------------------------------------------------------
-  buildStackerCrane(pad) {
-    const pivotY = L.launchTower.height + 4.2;
+  buildStackerCrane(pad, key = 'launch') {
+    const tCfg = key === 'booster' ? L.boosterTower : key === 'ship' ? L.shipTower : L.launchTower;
+    const pivotY = tCfg.height + 4.2;
     const yaw = new THREE.Group();
-    yaw.position.set(L.launchTower.x, pivotY, L.launchTower.z);
+    yaw.position.set(tCfg.x, pivotY, tCfg.z);
     yaw.userData.noMerge = true;
     pad.add(yaw);
 
@@ -974,7 +978,7 @@ export class StarshipMissionVehicle {
     kingpost.position.y = 2.5;
     yaw.add(kingpost);
 
-    const boomLength = 82.0;
+    const boomLength = key === 'launch' ? 82.0 : 66.0;
     const boom = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.8, boomLength), this.matTower);
     boom.position.set(0, 3.4, boomLength / 2);
     boom.castShadow = true;
@@ -990,7 +994,7 @@ export class StarshipMissionVehicle {
 
     // Trolley, variable-length cable and capture clamp
     const trolley = new THREE.Group();
-    trolley.position.set(0, 3.2, 40);
+    trolley.position.set(0, 3.2, key === 'launch' ? 40 : 30);
     yaw.add(trolley);
     const trolleyBody = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.4, 3.2), this.matDarkMetal);
     trolley.add(trolleyBody);
@@ -1021,7 +1025,9 @@ export class StarshipMissionVehicle {
       clamp.add(lamp);
     }
 
-    this.stacker = {
+    const defaultYaw = key === 'launch' ? -Math.PI / 2 : (key === 'booster' ? Math.PI * 0.8 : -Math.PI * 0.4);
+    const craneObj = {
+      key,
       yaw,
       trolley,
       cable,
@@ -1029,15 +1035,20 @@ export class StarshipMissionVehicle {
       pivotY,
       boomLength,
       clampLampMat,
-      // Start stowed pointing at the pad centre.
-      targetYaw: -Math.PI / 2,
-      currentYaw: -Math.PI / 2
+      targetYaw: defaultYaw,
+      currentYaw: defaultYaw
     };
-    yaw.rotation.y = this.stacker.currentYaw;
+    yaw.rotation.y = defaultYaw;
+
+    if (!this.cranes) this.cranes = {};
+    this.cranes[key] = craneObj;
+    if (key === 'launch') this.stacker = craneObj;
+    return craneObj;
   }
 
   // -------------------------------------------------------------
-  // STARSHIP FACTORY, CONVEYOR, ERECTOR & INSPECTION YARD
+  // DUAL 155m MEGA BAYS: PRODUCTION & REPAIR (Taller than Mated Stack)
+  // Both bays feature open walk-in portals, internal bridge cranes & work platforms
   // -------------------------------------------------------------
   buildProductionComplex(pad) {
     this.buildFactory(pad);
@@ -1050,134 +1061,149 @@ export class StarshipMissionVehicle {
 
   buildFactory(pad) {
     const f = L.factory;
+    const bayHeight = f.height || 155.0; // 155m: Taller than Ship (50m) + Booster (71m) = 121m
     const group = new THREE.Group();
     group.position.set(f.x, 0, f.z);
 
+    // Foundation concrete slab covering the whole complex
     const slab = new THREE.Mesh(new THREE.BoxGeometry(f.width + 16, 1.2, f.depth + 16), this.matConcrete);
     slab.position.y = 0.6;
     slab.receiveShadow = true;
     group.add(slab);
 
     const hallMat = new THREE.MeshStandardMaterial({
-      color: 0xa9b2bd,
-      metalness: 0.62,
-      roughness: 0.46,
+      color: 0x98a2ad,
+      metalness: 0.65,
+      roughness: 0.44,
       envMapIntensity: 0.8
     });
-    const hall = new THREE.Mesh(new THREE.BoxGeometry(f.width, 34, f.depth), hallMat);
-    hall.position.y = 17.6;
-    hall.castShadow = hall.receiveShadow = true;
-    group.add(hall);
+    const frameMat = this.matTower;
+    const darkMat = this.matDarkMetal;
 
-    // Corrugated wall ribs
-    const ribGeo = new THREE.BoxGeometry(0.5, 32, 0.5);
-    for (let x = -f.width / 2 + 4; x <= f.width / 2 - 4; x += 8) {
+    // Build the two massive twin high-bay hangars:
+    // Bay 1: Production Mega Bay (West: local x = -45)
+    // Bay 2: Repair Mega Bay (East: local x = 45)
+    const bayW = 68.0;
+    const bayD = f.depth;
+    const doorW = 26.0;
+    const doorH = 88.0;
+
+    for (const [bayIdx, bayName, localX, signTitle, signSub, signColor] of [
+      [1, 'PRODUCTION', -45.0, 'STARBASE MEGA BAY 1', 'HIGH-BAY PRODUCTION // SHIP & BOOSTER STACKING', '#38e8ff'],
+      [2, 'REPAIR', 45.0, 'STARBASE MEGA BAY 2', 'HIGH-BAY REFURBISHMENT // HEATSHIELD & RAPTOR SERVICE', '#ffb547']
+    ]) {
+      const bayGroup = new THREE.Group();
+      bayGroup.position.set(localX, 0, 0);
+
+      // 1. Exterior side walls (West & East of this bay)
       for (const side of [-1, 1]) {
-        const rib = new THREE.Mesh(ribGeo, this.matTower);
-        rib.position.set(x, 17.6, side * (f.depth / 2 + 0.2));
-        group.add(rib);
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(1.6, bayHeight, bayD), hallMat);
+        wall.position.set(side * (bayW / 2 - 0.8), bayHeight / 2, 0);
+        wall.castShadow = wall.receiveShadow = true;
+        bayGroup.add(wall);
+
+        // Vertical external structural pilasters/ribs
+        for (let z = -bayD / 2 + 8; z <= bayD / 2 - 8; z += 16) {
+          const rib = new THREE.Mesh(new THREE.BoxGeometry(2.4, bayHeight, 1.4), frameMat);
+          rib.position.set(side * (bayW / 2 + 0.4), bayHeight / 2, z);
+          bayGroup.add(rib);
+        }
       }
+
+      // 2. Rear (South) Wall - solid high-bay wall
+      const rearWall = new THREE.Mesh(new THREE.BoxGeometry(bayW, bayHeight, 1.6), hallMat);
+      rearWall.position.set(0, bayHeight / 2, bayD / 2 - 0.8);
+      rearWall.castShadow = rearWall.receiveShadow = true;
+      bayGroup.add(rearWall);
+
+      // 3. Front (North) Wall with GIANT OPEN WALK-IN ENTRANCE PORTAL
+      const sideFlankW = (bayW - doorW) / 2;
+      for (const side of [-1, 1]) {
+        const flank = new THREE.Mesh(new THREE.BoxGeometry(sideFlankW, bayHeight, 1.6), hallMat);
+        flank.position.set(side * (doorW / 2 + sideFlankW / 2), bayHeight / 2, -bayD / 2 + 0.8);
+        bayGroup.add(flank);
+      }
+      // Top header lintel above the portal door
+      const lintelH = bayHeight - doorH;
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.8, lintelH, 1.8), hallMat);
+      lintel.position.set(0, doorH + lintelH / 2, -bayD / 2 + 0.8);
+      bayGroup.add(lintel);
+
+      // Glowing hazard portal trim on walk-in opening
+      const trimMat = new THREE.MeshStandardMaterial({
+        color: 0x11161d,
+        emissive: new THREE.Color(signColor),
+        emissiveIntensity: 0.6,
+        metalness: 0.5,
+        roughness: 0.3
+      });
+      const trimL = new THREE.Mesh(new THREE.BoxGeometry(1.2, doorH, 2.2), trimMat);
+      trimL.position.set(-doorW / 2 - 0.6, doorH / 2, -bayD / 2 + 0.8);
+      bayGroup.add(trimL);
+      const trimR = new THREE.Mesh(new THREE.BoxGeometry(1.2, doorH, 2.2), trimMat);
+      trimR.position.set(doorW / 2 + 0.6, doorH / 2, -bayD / 2 + 0.8);
+      bayGroup.add(trimR);
+      const trimTop = new THREE.Mesh(new THREE.BoxGeometry(doorW + 2.4, 1.6, 2.2), trimMat);
+      trimTop.position.set(0, doorH + 0.8, -bayD / 2 + 0.8);
+      bayGroup.add(trimTop);
+
+      // 4. Roof Truss & Weather Deck at 155m
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(bayW + 2, 2.4, bayD + 2), darkMat);
+      roof.position.set(0, bayHeight + 1.2, 0);
+      bayGroup.add(roof);
+
+      // 5. High-Bay Overhead Bridge Crane Gantry at 145m inside the bay
+      const craneGantry = new THREE.Mesh(new THREE.BoxGeometry(bayW - 4, 3.2, 5.0), frameMat);
+      craneGantry.position.set(0, 144.0, 0);
+      bayGroup.add(craneGantry);
+      const trolleyMesh = new THREE.Mesh(new THREE.BoxGeometry(8, 2.0, 6.0), darkMat);
+      trolleyMesh.position.set(0, 142.5, 0);
+      bayGroup.add(trolleyMesh);
+
+      // 6. Multi-Level Internal Walkway Catwalks at 30m, 65m, 105m
+      for (const catH of [32.0, 68.0, 108.0]) {
+        for (const side of [-1, 1]) {
+          const walk = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.45, bayD - 6), darkMat);
+          walk.position.set(side * (bayW / 2 - 2.5), catH, 0);
+          bayGroup.add(walk);
+        }
+      }
+
+      // 7. Interior High-Bay Industrial Floodlights
+      for (const lz of [-24, 0, 24]) {
+        const workLight = new THREE.PointLight(0xfff5e6, 0.85, 95, 1.6);
+        workLight.position.set(0, 138, lz);
+        bayGroup.add(workLight);
+      }
+
+      // 8. Illuminated Exterior Signage above the Walk-in Portal
+      const sign = new THREE.Mesh(
+        new THREE.PlaneGeometry(36, 9.0),
+        new THREE.MeshBasicMaterial({
+          map: createLabelTexture(signTitle, signSub, signColor),
+          transparent: true,
+          side: THREE.DoubleSide
+        })
+      );
+      sign.position.set(0, doorH + 14.0, -bayD / 2 - 0.2);
+      bayGroup.add(sign);
+
+      group.add(bayGroup);
     }
 
-    // Sawtooth roof with north-light glazing
-    const sawMat = new THREE.MeshStandardMaterial({
-      color: 0x2c3540,
-      metalness: 0.7,
-      roughness: 0.5
-    });
-    const glowMat = new THREE.MeshStandardMaterial({
-      color: 0x1b2b33,
-      emissive: new THREE.Color(0x7fd6ff),
-      emissiveIntensity: 0.55,
-      roughness: 0.35,
-      metalness: 0.2
-    });
-    for (let i = 0; i < 8; i++) {
-      const z = -f.depth / 2 + 6 + i * 10;
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(f.width - 2, 1.0, 11.5), sawMat);
-      roof.position.set(0, 36.4, z);
-      roof.rotation.x = -0.28;
-      group.add(roof);
-      const glazing = new THREE.Mesh(new THREE.BoxGeometry(f.width - 3, 0.7, 3.2), glowMat);
-      glazing.position.set(0, 34.6, z + 5.0);
-      group.add(glazing);
-    }
-
-    // Main conveyor door on the west face
-    const doorGlow = new THREE.Mesh(
-      new THREE.BoxGeometry(0.4, 15, 18),
-      new THREE.MeshStandardMaterial({
-        color: 0x0b1016,
-        emissive: new THREE.Color(0x6ad8ff),
-        emissiveIntensity: 0.7,
-        metalness: 0.4,
-        roughness: 0.4
-      })
-    );
-    doorGlow.position.set(-f.width / 2 + 0.1, 10.5, f.conveyorDoorZ - f.z);
-    group.add(doorGlow);
-    this.factoryDoorGlowMat = doorGlow.material;
-
-    const doorFrameGeo = new THREE.BoxGeometry(1.2, 17, 1.6);
-    for (const dz of [-9.6, 9.6]) {
-      const frame = new THREE.Mesh(doorFrameGeo, this.matTower);
-      frame.position.set(-f.width / 2 - 0.2, 10.5, f.conveyorDoorZ - f.z + dz);
-      group.add(frame);
-    }
-    const doorLintel = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.8, 21), this.matTower);
-    doorLintel.position.set(-f.width / 2 - 0.2, 19.5, f.conveyorDoorZ - f.z);
-    group.add(doorLintel);
-
-    // Recovery door on the south face
-    const recoveryGlow = new THREE.Mesh(
-      new THREE.BoxGeometry(20, 18, 0.4),
-      new THREE.MeshStandardMaterial({
-        color: 0x0b1016,
-        emissive: new THREE.Color(0xff9d3c),
-        emissiveIntensity: 0.55,
-        roughness: 0.5,
-        metalness: 0.3
-      })
-    );
-    recoveryGlow.position.set(f.recoveryDoorX - f.x, 10.2, f.depth / 2 + 0.05);
-    group.add(recoveryGlow);
-
-    // Factory signage
-    const signMat = new THREE.MeshBasicMaterial({
-      map: createLabelTexture('STARSHIP FABRICATION', 'AUTONOMOUS PRODUCTION LINE // BAYS 01-04', '#38e8ff'),
-      transparent: true,
-      side: THREE.DoubleSide
-    });
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(46, 11.5), signMat);
-    sign.position.set(-f.width / 2 - 0.3, 28, f.conveyorDoorZ - f.z);
-    sign.rotation.y = -Math.PI / 2;
-    group.add(sign);
-
-    // Roof vents and aviation beacons
-    const ventGeo = new THREE.CylinderGeometry(2.4, 3.0, 7, 12);
-    for (const [vx, vz] of [[-32, -20], [0, 12], [34, -6], [18, 28]]) {
-      const vent = new THREE.Mesh(ventGeo, this.matDarkMetal);
-      vent.position.set(vx, 40, vz);
-      group.add(vent);
-    }
-    this.factoryBeaconMat = new THREE.MeshBasicMaterial({ color: 0xff4b2e });
-    const beaconGeo = new THREE.SphereGeometry(0.8, 8, 6);
-    for (const [bx, bz] of [[-f.width / 2, -f.depth / 2], [f.width / 2, -f.depth / 2], [f.width / 2, f.depth / 2], [-f.width / 2, f.depth / 2]]) {
+    // 4 High-Altitude Red Flashing Aviation Safety Beacons at the 155m roof corners
+    this.factoryBeaconMat = new THREE.MeshBasicMaterial({ color: 0xff3b20 });
+    const beaconGeo = new THREE.SphereGeometry(1.2, 8, 6);
+    for (const [bx, bz] of [
+      [-f.width / 2, -f.depth / 2],
+      [f.width / 2, -f.depth / 2],
+      [f.width / 2, f.depth / 2],
+      [-f.width / 2, f.depth / 2]
+    ]) {
       const beacon = new THREE.Mesh(beaconGeo, this.factoryBeaconMat);
-      beacon.position.set(bx, 35.8, bz);
+      beacon.position.set(bx, bayHeight + 3.2, bz);
       group.add(beacon);
     }
-
-    // Internal gantry visible through the open door
-    const gantryMat = this.matDarkMetal;
-    for (let gx = -40; gx <= 40; gx += 20) {
-      const mast = new THREE.Mesh(new THREE.BoxGeometry(1.6, 30, 1.6), gantryMat);
-      mast.position.set(gx, 15.6, 34);
-      group.add(mast);
-    }
-    const gantryRail = new THREE.Mesh(new THREE.BoxGeometry(84, 2.2, 2.2), gantryMat);
-    gantryRail.position.set(0, 31, 34);
-    group.add(gantryRail);
 
     pad.add(group);
     this.factoryGroup = group;
@@ -2362,27 +2388,33 @@ export class StarshipMissionVehicle {
 
         void main() {
           if (uHeat <= 0.005) discard;
-          // Sequential color temperature progression from incipient orange/violet to white-hot stagnation
-          vec3 incipientOrange = vec3(1.0, 0.42, 0.12);
-          vec3 ionizedMagenta = vec3(0.96, 0.22, 0.72);
-          vec3 ionizedViolet = vec3(0.55, 0.25, 1.0);
-          vec3 stagnationWhite = vec3(1.0, 0.96, 0.82);
+          // Multi-spectral atmospheric ionization sheath:
+          // Leading detached bow shock ionizes to brilliant neon cyan/turquoise and electric violet;
+          // Stagnation front compresses into blazing incandescent white-gold;
+          // Downstream wake expands into deep solar orange and glowing amber.
+          vec3 leadingCyan = vec3(0.18, 0.94, 0.98);
+          vec3 ionizedViolet = vec3(0.70, 0.20, 1.0);
+          vec3 stagnationWhite = vec3(1.0, 0.98, 0.88);
+          vec3 amberWake = vec3(1.0, 0.46, 0.08);
 
           // Windward wrap factor: strongest directly on +Z belly center (vPos.z > 0), fading at side edges
           float bellyCenter = clamp(vPos.z / 5.0, 0.0, 1.0);
           float axialDist = abs(vPos.y - 24.0) / 26.0;
           float envelope = clamp(bellyCenter * (1.15 - axialDist * 0.45), 0.0, 1.0);
 
-          // Sequential coverage: at low uHeat, only the stagnation belly center glows; at peak uHeat, full sheath ignites
+          // Sequential coverage: at low uHeat, only stagnation zone glows; at peak uHeat, full sheath ignites
           float activeMask = smoothstep(1.0 - uHeat * 0.95, 1.05, envelope + uHeat * 0.35);
-          float stream = 0.88 + 0.12 * sin(vPos.y * 0.7 - uTime * 28.0 + vPos.x * 1.5);
+          float stream = 0.86 + 0.14 * sin(vPos.y * 0.7 - uTime * 28.0 + vPos.x * 1.5);
 
-          vec3 lowHeatCol = mix(ionizedViolet, incipientOrange, bellyCenter);
-          vec3 highHeatCol = mix(ionizedMagenta, stagnationWhite, pow(bellyCenter, 1.4));
-          vec3 plasmaCol = mix(lowHeatCol, highHeatCol, smoothstep(0.2, 0.85, uHeat));
+          // Shock front detached boundary vs compressed stagnation zone
+          float edgeShock = pow(1.0 - abs(vNormal.z), 1.3);
+          vec3 shockEdgeCol = mix(leadingCyan, ionizedViolet, edgeShock);
+          vec3 coreCol = mix(amberWake, stagnationWhite, pow(bellyCenter, 1.5));
+          vec3 plasmaCol = mix(shockEdgeCol, coreCol, bellyCenter * 0.72 + 0.28);
+          plasmaCol = mix(plasmaCol, stagnationWhite, smoothstep(0.60, 0.98, uHeat) * bellyCenter);
 
-          float rim = 0.35 + 0.65 * (1.0 - abs(vNormal.z));
-          float alpha = clamp(activeMask * rim * stream * pow(uHeat, 1.15) * 1.25, 0.0, 0.92);
+          float rim = 0.38 + 0.62 * (1.0 - abs(vNormal.z));
+          float alpha = clamp(activeMask * rim * stream * pow(uHeat, 1.1) * 1.35, 0.0, 0.95);
           gl_FragColor = vec4(plasmaCol, alpha);
         }
       `
@@ -2600,12 +2632,12 @@ export class StarshipMissionVehicle {
   // -------------------------------------------------------------
   // AUTOMATED YARD RIGGING INTERFACE (used by StarbaseOperations)
   // -------------------------------------------------------------
-  setStackerPose(yaw, trolleyDistance, cableLength, clampClosed = false) {
-    const s = this.stacker;
+  setCranePose(key, yaw, trolleyDistance, cableLength, clampClosed = false) {
+    const s = this.cranes?.[key] || (key === 'launch' ? this.stacker : null);
     if (!s) return;
     s.yaw.rotation.y = yaw;
     s.currentYaw = yaw;
-    s.trolley.position.z = THREE.MathUtils.clamp(trolleyDistance, 8.0, s.boomLength - 4.0);
+    s.trolley.position.z = THREE.MathUtils.clamp(trolleyDistance, 6.0, s.boomLength - 4.0);
     const length = Math.max(4.0, cableLength);
     s.cable.scale.y = length;
     s.clamp.position.y = -length;
@@ -2615,6 +2647,10 @@ export class StarshipMissionVehicle {
         child.position.x = clampClosed ? (child.position.x > 0 ? 3.1 : -3.1) : (child.position.x > 0 ? 4.4 : -4.4);
       }
     }
+  }
+
+  setStackerPose(yaw, trolleyDistance, cableLength, clampClosed = false) {
+    this.setCranePose('launch', yaw, trolleyDistance, cableLength, clampClosed);
   }
 
   setErectorAngle(angle) {

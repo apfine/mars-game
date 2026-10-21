@@ -211,6 +211,31 @@ export class MarsCameraController {
     this.camera.lookAt(this.currentLook);
   }
 
+  updateRoadster(dt, roadster) {
+    if (dt <= 0 || !roadster?.group) return;
+    this.activeSimMode = 'roadster';
+    const rPos = roadster.group.position;
+    const rYaw = roadster.yaw || 0;
+    const totalYaw = rYaw + this.gimbalYaw;
+    const chaseDist = 8.5;
+    const chaseHeight = 2.8;
+
+    this.targetPos.set(
+      rPos.x - Math.sin(totalYaw) * chaseDist,
+      rPos.y + chaseHeight - Math.sin(this.gimbalPitch) * 2.5,
+      rPos.z - Math.cos(totalYaw) * chaseDist
+    );
+    this.currentPos.lerp(this.targetPos, Math.min(1.0, dt * 8.0));
+    this.currentLook.set(
+      rPos.x + Math.sin(totalYaw) * 12.0,
+      rPos.y + 1.2 + Math.sin(this.gimbalPitch) * 6.0,
+      rPos.z + Math.cos(totalYaw) * 12.0
+    );
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.copy(this.currentPos);
+    this.camera.lookAt(this.currentLook);
+  }
+
   update(dt, physics) {
     if (dt <= 0) return;
     this.activeSimMode = 'rover';

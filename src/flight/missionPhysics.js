@@ -941,6 +941,19 @@ export class StarshipMissionPhysics {
       const centrifugalUp = (this.horizontalSpeed * this.horizontalSpeed) / rFromCenter;
       const effectiveGravityVec = this._gravityVec.set(0, centrifugalUp - localGravity, 0);
 
+      // In stable orbit (FLIGHT_PHASES.ORBIT): centrifugal force balances local gravity exactly (zero altitude decay)
+      if (this.phase === FLIGHT_PHASES.ORBIT) {
+        effectiveGravityVec.set(0, 0, 0);
+        this.velocity.y *= Math.pow(0.01, dt);
+        const orbitalCircSpeed = Math.sqrt(localGravity * rFromCenter);
+        if (this.horizontalSpeed < orbitalCircSpeed * 0.95 || this.horizontalSpeed > orbitalCircSpeed * 1.05) {
+          const horizDirX = this.horizontalSpeed > 0.001 ? this.velocity.x / this.horizontalSpeed : 1.0;
+          const horizDirZ = this.horizontalSpeed > 0.001 ? this.velocity.z / this.horizontalSpeed : 0.0;
+          this.velocity.x = horizDirX * orbitalCircSpeed;
+          this.velocity.z = horizDirZ * orbitalCircSpeed;
+        }
+      }
+
       // D. SUM NON-GRAVITATIONAL (PROPER) & TOTAL KINEMATIC ACCELERATIONS
       this.properAcceleration.copy(thrustAccel).add(aeroAccel);
       this.acceleration.copy(this.properAcceleration).add(effectiveGravityVec);

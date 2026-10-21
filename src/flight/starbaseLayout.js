@@ -52,10 +52,13 @@ export const STARBASE_LAYOUT = {
   },
 
   factory: {
-    x: 170.0,
+    x: 150.0,
     z: 240.0,
-    width: 120.0,
-    depth: 80.0,
+    width: 150.0,
+    depth: 95.0,
+    height: 155.0, // Taller than mated Ship (50m) + Booster (71m) = 121m
+    productionX: 105.0,
+    repairX: 195.0,
     conveyorDoorX: 110.0,
     conveyorDoorZ: 230.0,
     recoveryDoorX: 170.0,

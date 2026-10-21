@@ -759,7 +759,7 @@ export class MarsAtmosphere {
     this.isFlight = isFlight;
     const isMars = this.planetId !== 'earth';
     if (this.dustPoints) this.dustPoints.visible = !isFlight && isMars;
-    if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = !isFlight && isMars;
+    if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = isMars;
     if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight && isMars && this.dustDensity > 0.45;
     if (this.tracks) this.tracks.visible = !isFlight && isMars;
     if (this.phobos) this.phobos.visible = !isFlight && isMars;
@@ -1038,6 +1038,22 @@ export class MarsAtmosphere {
         pos.x + Math.cos(a) * 0.8, pos.y + 0.2, pos.z + Math.sin(a) * 0.8,
         Math.cos(a) * sp, 1.0 + Math.random() * 3.0 * strength, Math.sin(a) * sp,
         0.8, 4.5 + Math.random() * 2.5, 0.5, 1.0 + Math.random() * 0.9
+      );
+    }
+  }
+
+  // Violent radial dust & regolith blast plume on Raptor booster ignition
+  burstLaunchDust(pos, throttle = 1.0) {
+    if (this.planetId === 'earth') return;
+    const n = Math.floor(40 * Math.min(1.0, throttle));
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const dist = 6.0 + Math.random() * 28.0;
+      const sp = (18.0 + Math.random() * 32.0) * throttle;
+      this.emitDust(
+        pos.x + Math.cos(a) * dist, pos.y + 0.5 + Math.random() * 2.5, pos.z + Math.sin(a) * dist,
+        Math.cos(a) * sp, 2.0 + Math.random() * 9.0 * throttle, Math.sin(a) * sp,
+        3.5, 18.0 + Math.random() * 16.0, 0.65, 2.2 + Math.random() * 2.5
       );
     }
   }

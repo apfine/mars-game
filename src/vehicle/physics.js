@@ -186,6 +186,7 @@ export class MarsRoverPhysics {
     if (this.collider) {
       const hit = this.collider.resolve(this.position, this.collisionRadius, this.position.y - this.rideHeight);
       if (hit) {
+        this.lastCollisionMaterial = hit.material || 'metal';
         this.position.x += hit.nx * hit.pen;
         this.position.z += hit.nz * hit.pen;
         const vx = sinY * this.speed + cosY * this.lateralVelocity;

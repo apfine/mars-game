@@ -35,6 +35,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'cylinder',
         name: 'OLM_TABLE',
+        material: 'metal',
         x: ox,
         z: oz,
         radius: 12.0,
@@ -46,6 +47,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'box',
         name: 'LAUNCH_TOWER',
+        material: 'metal',
         minX: ox + L.launchTower.x - 7.5,
         maxX: ox + L.launchTower.x + 7.5,
         minZ: oz + L.launchTower.z - 7.5,
@@ -58,6 +60,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'box',
         name: 'BOOSTER_TOWER',
+        material: 'metal',
         minX: ox + L.boosterTower.x - 7.0,
         maxX: ox + L.boosterTower.x + 7.0,
         minZ: oz + L.boosterTower.z - 7.0,
@@ -70,6 +73,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'box',
         name: 'SHIP_TOWER',
+        material: 'metal',
         minX: ox + L.shipTower.x - 7.0,
         maxX: ox + L.shipTower.x + 7.0,
         minZ: oz + L.shipTower.z - 7.0,
@@ -78,22 +82,98 @@ export class StarbaseObstacleSystem {
         maxY: L.shipTower.height + 10.0
       },
 
-      // 5. Starbase Factory / Mega Bay (solid hangar walls)
+      // 5. Dual 155m Mega Bays: Production Bay (West) & Repair Bay (East)
+      // Perimeter walls are solid colliders, while entrance doors remain open for walk-in access!
+      // Mega Bay West Wall
       {
         type: 'box',
-        name: 'MEGA_BAY_FACTORY',
-        minX: ox + L.factory.x - L.factory.width * 0.5,
-        maxX: ox + L.factory.x + L.factory.width * 0.5,
+        name: 'MEGA_BAY_WEST_WALL',
+        material: 'metal',
+        minX: ox + L.factory.x - L.factory.width * 0.5 - 2.0,
+        maxX: ox + L.factory.x - L.factory.width * 0.5 + 2.0,
         minZ: oz + L.factory.z - L.factory.depth * 0.5,
         maxZ: oz + L.factory.z + L.factory.depth * 0.5,
         minY: -5,
-        maxY: 85.0
+        maxY: L.factory.height + 2.0
+      },
+      // Mega Bay East Wall
+      {
+        type: 'box',
+        name: 'MEGA_BAY_EAST_WALL',
+        material: 'metal',
+        minX: ox + L.factory.x + L.factory.width * 0.5 - 2.0,
+        maxX: ox + L.factory.x + L.factory.width * 0.5 + 2.0,
+        minZ: oz + L.factory.z - L.factory.depth * 0.5,
+        maxZ: oz + L.factory.z + L.factory.depth * 0.5,
+        minY: -5,
+        maxY: L.factory.height + 2.0
+      },
+      // Mega Bay South Wall (Full solid rear wall)
+      {
+        type: 'box',
+        name: 'MEGA_BAY_SOUTH_WALL',
+        material: 'metal',
+        minX: ox + L.factory.x - L.factory.width * 0.5,
+        maxX: ox + L.factory.x + L.factory.width * 0.5,
+        minZ: oz + L.factory.z + L.factory.depth * 0.5 - 2.0,
+        maxZ: oz + L.factory.z + L.factory.depth * 0.5 + 2.0,
+        minY: -5,
+        maxY: L.factory.height + 2.0
+      },
+      // Mega Bay North Wall Left Section (flanking Production walk-in portal)
+      {
+        type: 'box',
+        name: 'MEGA_BAY_NORTH_WALL_LEFT',
+        material: 'metal',
+        minX: ox + L.factory.x - L.factory.width * 0.5,
+        maxX: ox + L.factory.productionX - 14.0,
+        minZ: oz + L.factory.z - L.factory.depth * 0.5 - 2.0,
+        maxZ: oz + L.factory.z - L.factory.depth * 0.5 + 2.0,
+        minY: -5,
+        maxY: L.factory.height + 2.0
+      },
+      // Mega Bay North Wall Center Section (between Production and Repair portals)
+      {
+        type: 'box',
+        name: 'MEGA_BAY_NORTH_WALL_MID',
+        material: 'metal',
+        minX: ox + L.factory.productionX + 14.0,
+        maxX: ox + L.factory.repairX - 14.0,
+        minZ: oz + L.factory.z - L.factory.depth * 0.5 - 2.0,
+        maxZ: oz + L.factory.z - L.factory.depth * 0.5 + 2.0,
+        minY: -5,
+        maxY: L.factory.height + 2.0
+      },
+      // Mega Bay North Wall Right Section (flanking Repair walk-in portal)
+      {
+        type: 'box',
+        name: 'MEGA_BAY_NORTH_WALL_RIGHT',
+        material: 'metal',
+        minX: ox + L.factory.repairX + 14.0,
+        maxX: ox + L.factory.x + L.factory.width * 0.5,
+        minZ: oz + L.factory.z - L.factory.depth * 0.5 - 2.0,
+        maxZ: oz + L.factory.z - L.factory.depth * 0.5 + 2.0,
+        minY: -5,
+        maxY: L.factory.height + 2.0
+      },
+      // Central dividing column between Production and Repair Bays
+      {
+        type: 'box',
+        name: 'MEGA_BAY_DIVIDER',
+        material: 'metal',
+        minX: ox + L.factory.x - 2.0,
+        maxX: ox + L.factory.x + 2.0,
+        minZ: oz + L.factory.z - L.factory.depth * 0.5 + 18.0,
+        maxZ: oz + L.factory.z + L.factory.depth * 0.5 - 18.0,
+        minY: -5,
+        maxY: L.factory.height + 2.0
       },
 
       // 6. Cryogenic Tank Farm (Methane & LOX vertical cylinders & vacuum spheres)
       {
         type: 'cylinder',
         name: 'CRYO_TANK_LOX_1',
+        material: 'metal',
         x: ox - 58.0,
         z: oz - 110.0,
         radius: 9.0,
@@ -103,6 +183,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'cylinder',
         name: 'CRYO_TANK_LOX_2',
+        material: 'metal',
         x: ox - 82.0,
         z: oz - 110.0,
         radius: 9.0,
@@ -112,6 +193,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'cylinder',
         name: 'CRYO_TANK_CH4_1',
+        material: 'metal',
         x: ox - 58.0,
         z: oz - 138.0,
         radius: 9.0,
@@ -121,6 +203,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'cylinder',
         name: 'CRYO_TANK_CH4_2',
+        material: 'metal',
         x: ox - 82.0,
         z: oz - 138.0,
         radius: 9.0,
@@ -130,6 +213,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'cylinder',
         name: 'CRYO_SPHERE_1',
+        material: 'metal',
         x: ox - 112.0,
         z: oz - 124.0,
         radius: 11.5,
@@ -141,6 +225,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'cylinder',
         name: 'LAUNCH_PEDESTAL',
+        material: 'concrete',
         x: ox - 38.0,
         z: oz - 38.0,
         radius: 2.2,
@@ -152,6 +237,7 @@ export class StarbaseObstacleSystem {
       {
         type: 'cylinder',
         name: 'ERECTOR_BASE',
+        material: 'metal',
         x: ox + L.erector.x,
         z: oz + L.erector.z,
         radius: 7.0,
@@ -166,6 +252,7 @@ export class StarbaseObstacleSystem {
       this.obstacles.push({
         type: 'cylinder',
         name: `CONVEYOR_PIER_${i}`,
+        material: 'metal',
         x: ox + p.x,
         z: oz + p.z,
         radius: 2.8,
@@ -182,6 +269,8 @@ export class StarbaseObstacleSystem {
     let totalNx = 0;
     let totalNz = 0;
     let maxPen = 0;
+
+    let hitMaterial = 'metal';
 
     for (const obs of this.obstacles) {
       // Height check
@@ -205,6 +294,7 @@ export class StarbaseObstacleSystem {
           totalNz += nz;
           maxPen = Math.max(maxPen, pen);
           hitAny = true;
+          hitMaterial = obs.material || 'metal';
         }
       } else if (obs.type === 'box') {
         // Nearest point on AABB
@@ -235,6 +325,7 @@ export class StarbaseObstacleSystem {
           totalNz += nz;
           maxPen = Math.max(maxPen, pen);
           hitAny = true;
+          hitMaterial = obs.material || 'metal';
         } else if (distSq < radius * radius) {
           // Outside but touching corner/edge
           const dist = Math.sqrt(distSq) || 0.001;
@@ -247,6 +338,7 @@ export class StarbaseObstacleSystem {
           totalNz += nz;
           maxPen = Math.max(maxPen, pen);
           hitAny = true;
+          hitMaterial = obs.material || 'metal';
         }
       }
     }
@@ -255,6 +347,7 @@ export class StarbaseObstacleSystem {
       const len = Math.hypot(totalNx, totalNz) || 1.0;
       return {
         hit: true,
+        material: hitMaterial,
         nx: totalNx / len,
         nz: totalNz / len,
         pen: maxPen

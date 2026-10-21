@@ -416,10 +416,11 @@ export class MarsGameEngine {
     const physics = this.missionPhysics;
     const target = physics.destination || (physics.planetId === 'mars' ? 'earth' : 'mars');
 
-    // If on pad or landed on either world, launch into orbit first
+    // If on pad or landed on either world, launch into orbit first and queue transfer
     if (physics.phase === FLIGHT_PHASES.ON_PAD || physics.phase === FLIGHT_PHASES.LANDED) {
       physics.opsMessage = `LAUNCHING TO ORBIT // DESTINATION: ${target.toUpperCase()}`;
       physics.setDestination(target);
+      physics.pendingTransfer = target;
       this.operations.reset();
       physics.startLaunch();
       this.setMode('starship');
@@ -428,22 +429,19 @@ export class MarsGameEngine {
     }
 
     if (physics.phase !== FLIGHT_PHASES.ORBIT) {
-      physics.opsMessage = 'TRANSFER WINDOW // ASCENDING TO ORBIT';
+      physics.opsMessage = `TRANSFER QUEUED // ASCENDING TO ORBIT -> ${target.toUpperCase()}`;
+      physics.pendingTransfer = target;
       return;
     }
-    if (this.tankerOps.active) {
-      physics.opsMessage = 'TRANSFER HOLD // ORBITAL TANKER IN PROGRESS';
-      return;
-    }
+
     if (!target || target === physics.planetId) {
       this.beginDeorbit();
       return;
     }
-    const required = this.getTransferFuelRequirement(target);
-    if (physics.starshipFuel < required - 0.25) {
-      this.beginOrbitalRefuel(target);
-      return;
-    }
+
+    // Direct automated injection burn: ensure nominal propellant and initiate transfer
+    physics.starshipFuel = Math.max(physics.starshipFuel, 95);
+    physics.pendingTransfer = null;
     this.startInterplanetaryTransfer(target);
   }
 
@@ -554,6 +552,12 @@ export class MarsGameEngine {
   }
 
   ensureTransferStarted() {
+    if (this.missionPhysics.pendingTransfer && this.missionPhysics.phase === FLIGHT_PHASES.ORBIT) {
+      const target = this.missionPhysics.pendingTransfer;
+      this.missionPhysics.pendingTransfer = null;
+      this.startInterplanetaryTransfer(target);
+      return;
+    }
     if (this.missionPhysics.phase !== FLIGHT_PHASES.INTERPLANETARY) return;
     if (this.journey.active || this.journey.arrived) return;
     const target = this.missionPhysics.transferTarget || this.missionPhysics.destination;
@@ -595,6 +599,20 @@ export class MarsGameEngine {
 
   toggleRoadster() {
     if (!this.roadster) return;
+    if (this.mode === 'roadster') {
+      const exitPos = this.roadster.disembark();
+      const wy = this.getSurfaceHeight(exitPos.x, exitPos.z);
+      this.walker.position.set(exitPos.x, wy, exitPos.z);
+      this.setMode('walking');
+      return;
+    }
+    if (this.mode === 'walking' || this.mode === 'rover') {
+      const startPos = this.mode === 'walking' ? this.walker.position : this.physics.position;
+      const startYaw = this.mode === 'walking' ? this.walker.yaw : this.physics.yaw;
+      this.roadster.board(startPos, startYaw);
+      this.setMode('roadster');
+      return;
+    }
     const on = this.roadster.toggle();
     this.flightHud?.notifyRoadster(on);
     const btn = document.getElementById('rover-roadster-btn');
@@ -695,6 +713,26 @@ export class MarsGameEngine {
       if (this.scatter?.group) this.scatter.group.visible = !onEarth;
 
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
+    } else if (this.mode === 'roadster') {
+      this.camera.near = 0.22;
+      this.camera.far = 8000;
+      this.camera.updateProjectionMatrix();
+      this.cameraController.initialized = false;
+
+      if (this.astronaut) this.astronaut.group.visible = false;
+      if (this.roadster) {
+        this.roadster.enabled = true;
+        this.roadster.group.visible = true;
+      }
+      this.roverModel.group.visible = true;
+      this.starship.group.visible = true;
+
+      this.flightHud.show(false);
+      if (roverHud) roverHud.style.display = 'block';
+      const roverBadge = document.getElementById('rover-mode-badge');
+      if (roverBadge) roverBadge.textContent = 'TESLA ROADSTER // PILOTING';
+      const roverTitle = document.getElementById('rover-left-title');
+      if (roverTitle) roverTitle.textContent = 'FLYING ROADSTER';
     } else {
       // 'rover' or 'walking'
       this.camera.near = 0.22;
@@ -910,7 +948,12 @@ export class MarsGameEngine {
     this.walker.position.z += moveZ;
 
     // Solid obstacle collision resolution for astronaut on foot (cannot walk through towers, walls, or tanks)
-    this.resolveWorldCollisions(this.walker.position, 0.45, this.walker.position.y);
+    const walkHit = this.resolveWorldCollisions(this.walker.position, 0.45, this.walker.position.y);
+    if (walkHit && Math.abs(this.walker.speed) > 1.5) {
+      if (!this.audio.initialized) this.audio.init();
+      this.audio.ensureRunning();
+      this.audio.playCollisionSound(walkHit.material || 'metal', 0.35);
+    }
 
     const groundY = this.getSurfaceHeight(this.walker.position.x, this.walker.position.z);
     this.walker.position.y = Math.max(this.walker.position.y, groundY);
@@ -1019,6 +1062,10 @@ export class MarsGameEngine {
       this.cameraController.updateFlight(scaledDt, this.missionPhysics);
       this.flightHud.update(this.missionPhysics);
       this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
+      const onMarsLaunch = this.missionPhysics.planetId === 'mars';
+      if (this.missionPhysics.throttle > 0.25 && this.missionPhysics.altitude < 140 && onMarsLaunch) {
+        this.atmosphere.burstLaunchDust(this.missionPhysics.position, this.missionPhysics.throttle);
+      }
 
       const camAltitude = Math.max(0, this.camera.position.y - this.missionPhysics.padElevation);
       const targetNear = camAltitude > 2500 ? 4.5 : camAltitude > 400 ? 1.5 : 0.4;
@@ -1134,15 +1181,48 @@ export class MarsGameEngine {
         terminalPos: this.missionPhysics.terminalPosition,
         roverPos: this.physics.position
       });
+    } else if (this.mode === 'roadster') {
+      if (this.input.consumeSinglePress('walkToggle')) {
+        this.toggleRoadster();
+        return;
+      }
+      this.roadster.updatePiloted(
+        dt,
+        this.input.state,
+        (x, z) => this.getSurfaceHeight(x, z),
+        (pos, r, y) => this.resolveWorldCollisions(pos, r, y)
+      );
+      this.cameraController.updateRoadster(scaledDt, this.roadster);
+      const activePos = this.roadster.group.position;
+      const onMars = this.missionPhysics.planetId === 'mars';
+      if (onMars) {
+        this.scatter.setVisible(true);
+        this.terrain.update(activePos);
+        this.scatter.update(activePos);
+      }
+      this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
+      this.atmosphere.update(scaledDt, activePos, {
+        speed: Math.abs(this.roadster.speed),
+        speedKmh: Math.abs(this.roadster.speed * 3.6),
+        velocity: new THREE.Vector3(Math.sin(this.roadster.yaw) * this.roadster.speed, this.roadster.verticalSpeed, Math.cos(this.roadster.yaw) * this.roadster.speed),
+        isNitroActive: Boolean(this.input.state.nitro),
+        onGroundCount: 0,
+        timeScale: this.timeScale
+      });
+      const speedNum = document.getElementById('speed-val');
+      if (speedNum) speedNum.textContent = Math.round(Math.abs(this.roadster.speed * 3.6));
+      const altNum = document.getElementById('alt-val');
+      if (altNum) altNum.textContent = Math.round(activePos.y - this.missionPhysics.padGroundY);
     } else {
       // Rover Driving Mode
       for (let s = 0; s < steps; s++) {
         this.physics.update(dt, this.input.state);
       }
 
-      if (this.physics.impact > 2.0) {
+      if (this.physics.impact > 1.8) {
         const k = Math.min(2.0, this.physics.impact / 10.0);
-        this.audio.playImpact(k);
+        const mat = this.physics.lastCollisionMaterial || 'rock';
+        this.audio.playCollisionSound(mat, k);
         this.cameraController.addShake(this.physics.impact * 0.1);
         this.atmosphere.burstDust(this.physics.position, k * 0.7);
       }
