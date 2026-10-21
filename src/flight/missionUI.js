@@ -407,9 +407,9 @@ export class MissionFlightHUD {
         tab.classList.toggle('active', tab.getAttribute('data-cam') === modeName);
       });
     }
-    // All cameras are on a 360° gimbal
+    // All cameras are on a 360° gimbal via direct touch/mouse dragging on the canvas
     if (this.dom.gimbalBar) {
-      this.dom.gimbalBar.style.display = 'flex';
+      this.dom.gimbalBar.style.display = 'none';
     }
   }
 

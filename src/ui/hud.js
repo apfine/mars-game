@@ -91,6 +91,16 @@ export class MarsHUD {
     const mobileWalkBtn = document.getElementById('btn-walk-mobile');
     if (mobileWalkBtn) mobileWalkBtn.addEventListener('click', handleWalkToggle);
 
+    const mobileLaunchBtn = document.getElementById('btn-launch-mobile');
+    if (mobileLaunchBtn) {
+      mobileLaunchBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.options.onPressPhysicalLaunch) {
+          this.options.onPressPhysicalLaunch();
+        }
+      });
+    }
+
     // Physical Launch Button Trigger (Available when walking right up to the Launch Pedestal)
     if (this.dom.physicalLaunchBtn) {
       this.dom.physicalLaunchBtn.addEventListener('click', (e) => {
@@ -354,6 +364,10 @@ export class MarsHUD {
       const canPressButton = isWalking && distToTerminal <= 8.5;
       if (this.dom.physicalLaunchBtn) {
         this.dom.physicalLaunchBtn.style.display = canPressButton ? 'inline-flex' : 'none';
+      }
+      const mobileLaunchBtn = document.getElementById('btn-launch-mobile');
+      if (mobileLaunchBtn) {
+        mobileLaunchBtn.style.display = canPressButton ? 'inline-flex' : 'none';
       }
 
       if (this.dom.padPrompt) {

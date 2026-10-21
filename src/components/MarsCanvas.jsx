@@ -202,18 +202,6 @@ export default function MarsCanvas() {
           </div>
         </div>
 
-        {/* 360° Gimbal Optics Bar for Rover & Walking Cameras */}
-        <div id="rover-gimbal-bar" className="spx-gimbal-bar">
-          <span className="gimbal-lbl">360° GIMBAL</span>
-          <div className="gimbal-pad-btns">
-            <button id="rover-gimbal-left" className="gimbal-btn" aria-label="Pan Left">◀</button>
-            <button id="rover-gimbal-up" className="gimbal-btn" aria-label="Tilt Up">▲</button>
-            <button id="rover-gimbal-down" className="gimbal-btn" aria-label="Tilt Down">▼</button>
-            <button id="rover-gimbal-right" className="gimbal-btn" aria-label="Pan Right">▶</button>
-            <button id="rover-gimbal-reset" className="gimbal-reset-btn" aria-label="Center Gimbal">CENTER</button>
-          </div>
-        </div>
-
         {/* First-Person Walking Reticle (Visible only while walking on foot) */}
         <div id="walk-reticle" className="walk-reticle" style={{ display: 'none' }}>
           <span className="reticle-ring"></span>
@@ -348,21 +336,22 @@ export default function MarsCanvas() {
         </div>
 
         {/* Mobile Touch Controls for Rover & Walking */}
-        <div id="mobile-controls" style={{ display: 'none' }}>
+        <div id="mobile-controls" className="touch-controls-layer">
           <div className="touch-cluster left-cluster">
             <button id="btn-left" className="touch-btn steer-btn" aria-label="Steer Left">◀</button>
             <button id="btn-right" className="touch-btn steer-btn" aria-label="Steer Right">▶</button>
           </div>
 
           <div className="touch-cluster right-cluster">
-            <button id="btn-gas" className="touch-btn pedal-btn gas-btn" aria-label="Forward">▲</button>
-            <button id="btn-brake" className="touch-btn pedal-btn brake-btn" aria-label="Reverse">▼</button>
+            <button id="btn-gas" className="touch-btn pedal-btn gas-btn" aria-label="Forward / Walk">▲</button>
+            <button id="btn-brake" className="touch-btn pedal-btn brake-btn" aria-label="Reverse / Back">▼</button>
           </div>
 
           <div className="touch-action-bar">
             <button id="btn-nitro" className="touch-pill-btn nitro-pill" aria-label="Boost">BOOST</button>
             <button id="btn-handbrake" className="touch-pill-btn" aria-label="Brake">BRAKE</button>
-            <button id="btn-walk-mobile" className="touch-pill-btn" aria-label="Walk">WALK</button>
+            <button id="btn-walk-mobile" className="touch-pill-btn" aria-label="Walk Toggle">WALK</button>
+            <button id="btn-launch-mobile" className="touch-pill-btn launch-pill" style={{ display: 'none' }} aria-label="Launch Starship">LAUNCH 🚀</button>
           </div>
         </div>
       </div>
@@ -459,18 +448,6 @@ export default function MarsCanvas() {
           <div className="traj-prompt-actions">
             <button className="traj-prompt-btn active" data-traj="ORBITAL">ORBITAL INSERTION (88 KM)</button>
             <button className="traj-prompt-btn" data-traj="SUBORBITAL">SUBORBITAL RTLS CATCH (50 KM)</button>
-          </div>
-        </div>
-
-        {/* Universal 360° Gimbal Control Bar (Active across ALL Flight Cameras) */}
-        <div id="flight-gimbal-bar" className="spx-gimbal-bar">
-          <span className="gimbal-lbl">360° GIMBAL</span>
-          <div className="gimbal-pad-btns">
-            <button id="gimbal-left" className="gimbal-btn" aria-label="Pan Left">◀</button>
-            <button id="gimbal-up" className="gimbal-btn" aria-label="Tilt Up">▲</button>
-            <button id="gimbal-down" className="gimbal-btn" aria-label="Tilt Down">▼</button>
-            <button id="gimbal-right" className="gimbal-btn" aria-label="Pan Right">▶</button>
-            <button id="gimbal-reset" className="gimbal-reset-btn" aria-label="Reset Gimbal">CENTER</button>
           </div>
         </div>
 

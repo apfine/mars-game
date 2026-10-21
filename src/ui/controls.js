@@ -64,10 +64,12 @@ export class InputManager {
   }
 
   detectMobile() {
+    if (typeof window === 'undefined') return false;
     return (
       'ontouchstart' in window ||
       navigator.maxTouchPoints > 0 ||
-      window.matchMedia('(pointer: coarse)').matches
+      window.matchMedia('(pointer: coarse)').matches ||
+      window.innerWidth <= 900
     );
   }
 
@@ -192,7 +194,12 @@ export class InputManager {
 
     // 3. Touch Overrides (merged from touch controls)
     if (this.touchState) {
-      if (this.touchState.throttle !== 0) this.state.throttle = this.touchState.throttle;
+      if (this.touchState.throttle !== 0) {
+        this.state.throttle = this.touchState.throttle;
+        this.state.pitch = this.touchState.throttle;
+        this.state.forward = this.touchState.throttle > 0;
+        this.state.backward = this.touchState.throttle < 0;
+      }
       if (this.touchState.steer !== 0) this.state.steer = this.touchState.steer;
       if (this.touchState.pitch !== 0) this.state.pitch = this.touchState.pitch;
       if (this.touchState.roll !== 0) this.state.roll = this.touchState.roll;
@@ -203,6 +210,14 @@ export class InputManager {
       if (this.touchState.handbrake) this.state.handbrake = true;
       if (this.touchState.nitro) this.state.nitro = true;
       if (this.touchState.assist) this.state.assist = true;
+      if (this.touchState.walkToggle) {
+        this.state.walkToggle = true;
+        this.touchState.walkToggle = false;
+      }
+      if (this.touchState.interactAction) {
+        this.state.interactAction = true;
+        this.touchState.interactAction = false;
+      }
     }
   }
 

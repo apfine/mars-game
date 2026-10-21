@@ -516,31 +516,34 @@ html, body {
   width: 100%;
   height: 100%;
   pointer-events: none;
+  z-index: 150;
 }
 
 .touch-cluster {
   position: absolute;
-  bottom: 24px;
+  bottom: 120px;
   display: flex;
-  gap: 16px;
+  gap: 14px;
   pointer-events: auto;
+  z-index: 160;
 }
 
 .left-cluster {
-  left: 20px;
+  left: 16px;
 }
 
 .right-cluster {
-  right: 20px;
+  right: 16px;
 }
 
 .touch-btn {
-  width: 68px;
-  height: 68px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
-  background: rgba(24, 20, 22, 0.65);
-  backdrop-filter: blur(8px);
-  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(16, 22, 32, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 2px solid rgba(255, 255, 255, 0.4);
   color: #ffffff;
   font-size: 22px;
   font-weight: 900;
@@ -548,78 +551,95 @@ html, body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
   transition: transform 0.08s ease, background 0.08s ease;
   touch-action: none;
+  user-select: none;
 }
 
 .touch-btn:active, .touch-btn.active {
-  background: rgba(220, 100, 50, 0.85);
-  border-color: #ffaa77;
+  background: rgba(80, 180, 255, 0.85);
+  border-color: #aae0ff;
   transform: scale(0.92);
+  box-shadow: 0 0 20px rgba(80, 180, 255, 0.75);
 }
 
 .pedal-btn {
-  width: 74px;
-  height: 74px;
-  font-size: 14px;
-  border-radius: 20px;
+  width: 68px;
+  height: 68px;
+  font-size: 20px;
+  border-radius: 18px;
 }
 
 .gas-btn {
-  background: rgba(30, 90, 60, 0.7);
-  border-color: rgba(70, 210, 140, 0.6);
+  background: rgba(24, 85, 52, 0.85);
+  border-color: rgba(90, 230, 150, 0.75);
 }
 
 .gas-btn:active, .gas-btn.active {
-  background: rgba(40, 180, 100, 0.9);
+  background: rgba(45, 195, 115, 0.95);
+  box-shadow: 0 0 20px rgba(50, 220, 130, 0.8);
 }
 
 .brake-btn {
-  background: rgba(90, 30, 30, 0.7);
-  border-color: rgba(240, 80, 80, 0.6);
+  background: rgba(85, 26, 26, 0.85);
+  border-color: rgba(245, 95, 95, 0.75);
 }
 
 .brake-btn:active, .brake-btn.active {
-  background: rgba(210, 40, 40, 0.9);
+  background: rgba(220, 45, 45, 0.95);
+  box-shadow: 0 0 20px rgba(230, 50, 50, 0.8);
 }
 
 /* Touch Action Bar */
 .touch-action-bar {
   position: absolute;
-  bottom: 110px;
+  bottom: 120px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 10px;
+  gap: 8px;
   pointer-events: auto;
+  z-index: 160;
 }
 
 .touch-pill-btn {
-  background: rgba(20, 20, 26, 0.75);
-  backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(14, 20, 30, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
   color: #ffffff;
   padding: 8px 14px;
-  border-radius: 24px;
+  border-radius: 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.65);
   touch-action: none;
+  user-select: none;
+  transition: transform 0.08s ease, background 0.08s ease;
 }
 
 .nitro-pill {
-  background: rgba(0, 120, 160, 0.8);
-  border-color: #00f0ff;
+  background: rgba(0, 110, 170, 0.85);
+  border-color: #40d0ff;
   color: #ffffff;
-  box-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 14px rgba(0, 200, 255, 0.45);
+}
+
+.launch-pill {
+  background: rgba(230, 60, 40, 0.9);
+  border-color: #ffaa99;
+  color: #ffffff;
+  animation: pulse-launch-btn 1.1s infinite alternate;
 }
 
 .touch-pill-btn:active, .touch-pill-btn.active {
   transform: scale(0.92);
-  background: #ff7733;
+  background: #ff8833;
+  border-color: #ffbb77;
 }
 
 /* Settings Modal */
@@ -1814,7 +1834,7 @@ html, body {
   box-shadow: 0 0 20px rgba(80, 190, 255, 0.7) !important;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 900px) {
   .spx-top-bar {
     flex-wrap: wrap;
     top: 8px;
@@ -1831,46 +1851,81 @@ html, body {
   }
   .flight-cam-bar::-webkit-scrollbar { display: none; }
   .spx-gimbal-bar {
-    top: 84px;
-    padding: 4px 8px;
+    display: none !important;
   }
-  .gimbal-lbl { font-size: 8.5px; }
-  .flight-action-prompt { top: 120px; font-size: 10.5px; }
+  .flight-action-prompt { top: 110px; font-size: 10.5px; }
+
+  /* Mobile compact SpaceX bottom telemetry bar */
   .spx-broadcast-bar {
-    height: auto;
-    padding: 8px 12px;
-    gap: 8px;
-    grid-template-columns: 1fr 1fr;
-  }
-  .spx-center-bridge {
-    grid-column: 1 / -1;
-    order: -1;
-    min-width: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    padding-bottom: 6px;
+    height: 64px !important;
+    padding: 4px 12px !important;
+    gap: 8px !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    background: rgba(6, 9, 14, 0.92) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    z-index: 100 !important;
   }
   .spx-engine-graphic {
-    width: 50px;
-    height: 50px;
+    display: none !important;
   }
-  .spx-telemetry-col {
-    min-width: 110px;
-  }
-  .spx-metric-num {
-    font-size: 15px;
-  }
-  .spx-mission-clock {
-    font-size: 18px;
+  .spx-center-bridge {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    align-items: center !important;
+    gap: 2px !important;
   }
   .spx-timeline {
-    gap: 8px;
+    display: none !important;
   }
-  .spx-tl-txt {
-    font-size: 7px;
+  .spx-mission-clock {
+    font-size: 13px !important;
+    letter-spacing: 0.5px !important;
+  }
+  .spx-telemetry-col {
+    min-width: 0 !important;
+    gap: 2px !important;
+  }
+  .spx-stage-header {
+    margin-bottom: 0 !important;
+  }
+  .spx-stage-title {
+    font-size: 9px !important;
+  }
+  .spx-stage-sub {
+    display: none !important;
+  }
+  .spx-metrics-row {
+    gap: 8px !important;
+  }
+  .spx-metric-lbl {
+    font-size: 7px !important;
+  }
+  .spx-metric-num {
+    font-size: 13px !important;
+  }
+  .spx-metric-unit {
+    font-size: 8px !important;
+  }
+  .spx-prop-stack {
+    display: none !important;
   }
   .flight-mobile-steering {
-    bottom: 175px;
+    bottom: 80px;
     left: 12px;
+    z-index: 160;
+  }
+  .flight-attitude-gauge {
+    display: none !important;
+  }
+  .touch-cluster {
+    bottom: 74px !important;
+  }
+  .touch-action-bar {
+    bottom: 78px !important;
   }
 }
 
