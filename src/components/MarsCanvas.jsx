@@ -337,6 +337,7 @@ export default function MarsCanvas() {
 
         {/* Mobile Touch Controls for Rover & Walking */}
         <div id="mobile-controls" className="touch-controls-layer">
+          <div className="compact-drive-pad">
           <div className="touch-cluster left-cluster">
             <button id="btn-left" className="touch-btn steer-btn" aria-label="Steer Left">◀</button>
             <button id="btn-right" className="touch-btn steer-btn" aria-label="Steer Right">▶</button>
@@ -347,6 +348,9 @@ export default function MarsCanvas() {
             <button id="btn-brake" className="touch-btn pedal-btn brake-btn" aria-label="Reverse / Back">▼</button>
           </div>
 
+            <button id="roadster-touch-rise" className="touch-btn" aria-label="Roadster ascend">UP</button>
+            <button id="roadster-touch-descend" className="touch-btn" aria-label="Roadster descend">DN</button>
+          </div>
           <div className="touch-action-bar">
             <button id="btn-nitro" className="touch-pill-btn nitro-pill" aria-label="Boost">BOOST</button>
             <button id="btn-handbrake" className="touch-pill-btn" aria-label="Brake">BRAKE</button>
@@ -390,16 +394,13 @@ export default function MarsCanvas() {
             <div className="spx-dropdown" id="flight-mission-dropdown">
               <button className="hud-pill-btn spx-dropdown-trigger" id="flight-mission-btn" aria-label="Mission Profile & Destination">
                 <span className="dropdown-icon">🎯</span>
-                <span id="flight-dest-current">DEST: EARTH</span>
+                <span id="flight-dest-current">TRANSFER</span>
                 <span className="dropdown-arrow">▾</span>
               </button>
               <div className="spx-dropdown-menu" id="flight-mission-menu">
-                <div className="dropdown-section-header">DESTINATION</div>
+                <div className="dropdown-section-header">TRANSFER & LAND</div>
                 <button className="dropdown-item" data-dest="earth">🌍 EARTH STARBASE</button>
                 <button className="dropdown-item" data-dest="mars">🔴 MARS STARBASE</button>
-                <div className="dropdown-section-header">FLIGHT PROFILE</div>
-                <button className="dropdown-item active traj-opt-btn" data-traj="ORBITAL">🛰️ ORBITAL (88 KM)</button>
-                <button className="dropdown-item traj-opt-btn" data-traj="SUBORBITAL">🎯 SUBORBITAL (50 KM)</button>
               </div>
             </div>
             <div id="flight-dest-switch" style={{ display: 'none' }}></div>
@@ -420,6 +421,10 @@ export default function MarsCanvas() {
                 <span className="dropdown-arrow">▾</span>
               </button>
               <div className="spx-dropdown-menu" id="flight-actions-menu">
+                <div className="dropdown-section-header">FLIGHT PROFILE</div>
+                <button className="dropdown-item active traj-opt-btn" data-traj="ORBITAL">🛰️ ORBITAL (88 KM)</button>
+                <button className="dropdown-item traj-opt-btn" data-traj="SUBORBITAL">🎯 SUBORBITAL (50 KM)</button>
+
                 <button className="dropdown-item" id="flight-reset-btn">🔄 RESET TO PAD</button>
                 <button className="dropdown-item" id="flight-hide-ui-btn">👁️ TOGGLE HUD [H]</button>
                 <button className="dropdown-item" id="flight-roadster-btn">🏎️ TESLA ROADSTER</button>
@@ -706,12 +711,14 @@ export default function MarsCanvas() {
         {/* Attitude Steering D-Pad for Manual Flight Mode */}
         <div id="flight-mobile-steering" className="flight-mobile-steering" style={{ display: 'none' }}>
           <div className="flight-touch-dpad">
+            <button id="flight-touch-thrust-up" className="touch-btn flight-dir-btn" aria-label="Increase thrust">T+</button>
             <button id="flight-btn-pitch-down" className="touch-btn flight-dir-btn" aria-label="Pitch Nose Up">▲</button>
             <div className="flight-dpad-middle">
               <button id="flight-btn-yaw-left" className="touch-btn flight-dir-btn" aria-label="Yaw Left">◀</button>
               <button id="flight-btn-yaw-right" className="touch-btn flight-dir-btn" aria-label="Yaw Right">▶</button>
             </div>
             <button id="flight-btn-pitch-up" className="touch-btn flight-dir-btn" aria-label="Pitch Nose Down">▼</button>
+            <button id="flight-touch-thrust-down" className="touch-btn flight-dir-btn" aria-label="Decrease thrust">T−</button>
           </div>
         </div>
 

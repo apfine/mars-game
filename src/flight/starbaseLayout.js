@@ -57,12 +57,17 @@ export const STARBASE_LAYOUT = {
     width: 150.0,
     depth: 95.0,
     height: 155.0, // Taller than mated Ship (50m) + Booster (71m) = 121m
+    bayWidth: 68,
+    bayOffsets: [-45, 45],
+    doorWidth: 26,
+    doorHeight: 88,
+    slabTop: 1.2,
     productionX: 105.0,
     repairX: 195.0,
-    conveyorDoorX: 110.0,
-    conveyorDoorZ: 230.0,
-    recoveryDoorX: 170.0,
-    recoveryDoorZ: 280.0
+    conveyorDoorX: 105.0,
+    conveyorDoorZ: 240.0,
+    recoveryDoorX: 195.0,
+    recoveryDoorZ: 240.0
   },
 
   conveyor: {
@@ -96,14 +101,15 @@ export const STARBASE_LAYOUT = {
     // Booster road: from Booster Tower, south along West industrial road into Mega Bay West Door
     boosterToReview: [
       { x: -144.5, z: 86.0 },
-      { x: -136.0, z: 160.0 },
-      { x: -80.0, z: 190.0 }
+      { x: -175.0, z: 120.0 },
+      { x: -175.0, z: 160.0 }
     ],
     boosterToFactory: [
-      { x: -80.0, z: 190.0 },
-      { x: -20.0, z: 230.0 },
-      { x: 60.0, z: 230.0 },
-      { x: 110.0, z: 230.0 }
+      { x: -175.0, z: 160.0 },
+      { x: 80.0, z: 155.0 },
+      { x: 105.0, z: 160.0 },
+      { x: 105.0, z: 180.0 },
+      { x: 105.0, z: 240.0 }
     ],
     boosterRollout: [
       { x: 110.0, z: 230.0 },
@@ -113,13 +119,15 @@ export const STARBASE_LAYOUT = {
     // Starship road: from Ship Tower, south along East perimeter road into Mega Bay South Door
     shipToReview: [
       { x: 129.5, z: -92.0 },
-      { x: 145.0, z: 50.0 },
-      { x: 155.0, z: 160.0 }
+      { x: 126.0, z: 20.0 },
+      { x: 126.0, z: 135.0 }
     ],
     shipToFactory: [
-      { x: 155.0, z: 160.0 },
-      { x: 165.0, z: 220.0 },
-      { x: 170.0, z: 280.0 }
+      { x: 126.0, z: 135.0 },
+      { x: 170.0, z: 155.0 },
+      { x: 195.0, z: 160.0 },
+      { x: 195.0, z: 180.0 },
+      { x: 195.0, z: 240.0 }
     ]
   }
 };
@@ -132,3 +140,9 @@ export const CATCH_PIN_HEIGHTS = {
 
 // Local pin offsets used by both art and capture checks.
 export const CATCH_PIN_RADIUS = 4.5;
+
+// Yellow lifting lugs, separate from catch pins; hook is 3 m above their plane.
+export const LIFT_POINTS = {
+  ship: { height: 35, radius: 4.8, hookOffset: 3 },
+  booster: { height: 67.5, radius: 4.8, hookOffset: 3 }
+};

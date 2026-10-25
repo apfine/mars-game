@@ -65,12 +65,7 @@ export class InputManager {
 
   detectMobile() {
     if (typeof window === 'undefined') return false;
-    return (
-      'ontouchstart' in window ||
-      navigator.maxTouchPoints > 0 ||
-      window.matchMedia('(pointer: coarse)').matches ||
-      window.innerWidth <= 900
-    );
+    return window.matchMedia('(pointer: coarse)').matches;
   }
 
   initKeyboard() {

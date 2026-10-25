@@ -190,6 +190,10 @@ export class MarsHUD {
       () => { this.touchState.steer = -1; },
       () => { if (this.touchState.steer === -1) this.touchState.steer = 0; }
     );
+    setupTouchBtn('roadster-touch-rise',
+      () => { this.touchState.throttleUp = true; }, () => { this.touchState.throttleUp = false; });
+    setupTouchBtn('roadster-touch-descend',
+      () => { this.touchState.throttleDown = true; }, () => { this.touchState.throttleDown = false; });
     setupTouchBtn('btn-right',
       () => { this.touchState.steer = 1; },
       () => { if (this.touchState.steer === 1) this.touchState.steer = 0; }

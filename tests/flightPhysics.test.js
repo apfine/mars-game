@@ -48,6 +48,17 @@ for (const planet of ['earth', 'mars']) {
   });
 }
 
+test('Moon vacuum landing uses propulsion and reaches the catch without plasma', () => {
+  const m=mission();m.enterPlanetEntry('moon');
+  assert.equal(m.sampleAtmosphere(0).density,0);
+  assert.equal(m.sampleAtmosphere(0).wind.length(),0);
+  assert.equal(m.phase,FLIGHT_PHASES.LANDING_FLIP);
+  for(let i=0;i<60*1200 && m.phase!==FLIGHT_PHASES.LANDED;i++)m.update(1/60);
+  assert.equal(m.phase,FLIGHT_PHASES.LANDED);
+  assert.equal(m.shipCaughtByTower,true);
+  assert.equal(m.heat,0);
+});
+
 for (const planet of ['earth', 'mars']) {
   test(`${planet}: automated launch separates and reaches orbit`, () => {
     const m = mission();
@@ -64,5 +75,7 @@ for (const planet of ['earth', 'mars']) {
     assert.ok(phases.has(FLIGHT_PHASES.STARSHIP_ASCENT));
     assert.ok(phases.has(FLIGHT_PHASES.ORBIT), `ended ${m.phase}, altitude ${m.altitude}`);
     assert.equal(m.vehicle.isMated, false);
+    for(let i=0;i<60*1200 && m.boosterState!=='CAUGHT';i++)m.update(1/60);
+    assert.equal(m.boosterState,'CAUGHT',`${planet} booster ended ${m.boosterState}`);
   });
 }

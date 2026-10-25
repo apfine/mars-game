@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { PLANET_PROFILES, getPlanetProfile } from './planetProfiles.js';
+import { getEarthMaps, getMoonMap } from '../effects/earthMaps.js';
+import { earthSurfaceHeight, earthCoastDistance, EARTH_RADIUS } from '../terrain/earthSurface.js';
 import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
 import { createProceduralEarthTexture, createProceduralMarsTexture } from '../effects/postLaunchSpace.js';
 
@@ -13,7 +15,7 @@ import { createProceduralEarthTexture, createProceduralMarsTexture } from '../ef
 // physics with the Earth profile (gravity 9.81 m/s², 1.225 kg/m³ atmosphere).
 // ---------------------------------------------------------------------------
 
-import { AU, SCENE_AU, SOLAR_BODIES, createTransfer, sampleTransfer, orbitalRate } from './orbitalMechanics.js';
+import { AU, SCENE_AU, SOLAR_BODIES, createTransfer, sampleTransfer, orbitalRate, sceneRadius } from './orbitalMechanics.js';
 
 const EARTH_RADIUS_SCENE = 26000;
 const MOON_RADIUS_SCENE = 7000;
@@ -22,20 +24,7 @@ function makeEarthTexture() {
   return createProceduralEarthTexture();
 }
 
-function makeEarthRoughness(map) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512; canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(map.image, 0, 0, 512, 256);
-  const image = ctx.getImageData(0, 0, 512, 256);
-  for (let i = 0; i < image.data.length; i += 4) {
-    const ocean = image.data[i + 2] > image.data[i] * 1.35 && image.data[i + 2] > image.data[i + 1] * 1.15;
-    const value = ocean ? 85 : 230;
-    image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
-  }
-  ctx.putImageData(image, 0, 0);
-  return new THREE.CanvasTexture(canvas);
-}
+function makeEarthRoughness() { return getEarthMaps().roughnessMap; }
 
 function makeCloudTexture() {
   const cv = document.createElement('canvas');
@@ -460,7 +449,7 @@ export class InterplanetaryJourney {
       depthWrite: false
     }));
     this.sunGlow.position.copy(this.sunAnchor);
-    this.sunGlow.scale.set(38000, 38000, 1);
+    this.sunGlow.scale.setScalar(sceneRadius(695700000) * 3);
     this.celestialGroup.add(this.sunGlow);
 
     const earthMap = makeEarthTexture();
@@ -568,7 +557,7 @@ export class InterplanetaryJourney {
     this.moon = new THREE.Mesh(
       new THREE.SphereGeometry(MOON_RADIUS_SCENE, 40, 26),
       new THREE.MeshStandardMaterial({
-        map: makeMoonTexture(),
+        map: getMoonMap(),
         color: 0xdfe2e4,
         roughness: 1.0,
         metalness: 0.0,
@@ -585,16 +574,20 @@ export class InterplanetaryJourney {
     this.celestialGroup.add(this.moon);
 
     this.solarOrigin = new THREE.Vector3();
+    this.localTransferOrigin = new THREE.Vector3();
     this.solarEpoch = 0;
     this.solarBodies = new Map([['earth', this.earth], ['mars', this.marsGlobe]]);
-    this.sun = new THREE.Mesh(new THREE.SphereGeometry(5200, 48, 32),
+    this.bodyEphemeris = new Map();
+    this._skyDirection = new THREE.Vector3();
+    this.moonEphemeris = new THREE.Vector3();
+    this.sun = new THREE.Mesh(new THREE.SphereGeometry(sceneRadius(695700000), 48, 32),
       new THREE.MeshBasicMaterial({ color: 0xffe5b0, fog: false, toneMapped: false }));
     this.celestialGroup.add(this.sun);
     this.solarLight = new THREE.PointLight(0xfff1da, 3, 0, 0);
     this.celestialGroup.add(this.solarLight);
     for (const body of SOLAR_BODIES) {
       if (this.solarBodies.has(body.id)) continue;
-      const radius = 2600 * Math.sqrt(body.radius / 6371000);
+      const radius = sceneRadius(body.radius);
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 20),
         new THREE.MeshStandardMaterial({ color: body.color, roughness: 0.9, fog: false }));
       this.solarBodies.set(body.id, mesh);
@@ -613,21 +606,21 @@ export class InterplanetaryJourney {
     // Realistic carved circular ocean body with spherical planetary curvature
     const oceanMat = new THREE.MeshStandardMaterial({
       map: makeOceanTexture(),
-      color: 0x4896d8,
+      color: 0x719eb2,
       roughness: 0.15,
-      metalness: 0.28,
+      metalness: 0.02,
       envMapIntensity: 1.25,
       transparent: true,
       opacity: 0.95
     });
-    const oceanGeo = new THREE.PlaneGeometry(48000, 48000, 72, 72);
+    const oceanGeo = new THREE.PlaneGeometry(80000, 80000, 96, 96);
     oceanGeo.rotateX(-Math.PI / 2);
     const oPos = oceanGeo.attributes.position;
     for (let i = 0; i < oPos.count; i++) {
       const vx = oPos.getX(i);
       const vz = oPos.getZ(i);
       const r = Math.hypot(vx, vz);
-      oPos.setY(i, -(r * r) / (2.0 * 2400000.0) - 2.8);
+      oPos.setY(i, -(r * r) / (2.0 * EARTH_RADIUS) - 2.8);
     }
     oceanGeo.computeVertexNormals();
 
@@ -640,7 +633,8 @@ export class InterplanetaryJourney {
     // Carved coastal Earth peninsula with realistic 3D relief, bluffs, rolling hills, and planetary curvature
     const groundMat = new THREE.MeshStandardMaterial({
       map: makeGrassTexture(),
-      color: 0x5a8848,
+      color: 0xffffff,
+      vertexColors: true,
       roughness: 0.88,
       metalness: 0.02,
       transparent: true,
@@ -650,29 +644,25 @@ export class InterplanetaryJourney {
       polygonOffsetUnits: 4
     });
 
-    const groundGeo = new THREE.PlaneGeometry(18400, 18400, 96, 96);
+    const groundGeo = new THREE.PlaneGeometry(40000, 40000, 192, 192);
     groundGeo.rotateX(-Math.PI / 2);
     const gPos = groundGeo.attributes.position;
     for (let i = 0; i < gPos.count; i++) {
       const vx = gPos.getX(i);
       const vz = gPos.getZ(i);
       const r = Math.hypot(vx, vz);
-      // Planetary curvature drop
-      let y = -(r * r) / (2.0 * 2400000.0) - 0.22;
-
-      // Center pad complex (r < 490m) stays flat. Surrounding terrain has carved relief
-      if (r > 480) {
-        const blend = Math.min(1.0, (r - 480) / 550.0);
-        // Inland bluffs and rolling green hills
-        const relief = Math.sin(vx * 0.0011) * Math.cos(vz * 0.0011) * 22.0
-                     + Math.sin(vx * 0.0026 + 1.2) * 11.0
-                     + Math.cos(vz * 0.0032) * 8.0;
-        // Slope gently towards the beach at the perimeter
-        const shoreDrop = r > 7600 ? (r - 7600) * -0.007 : 0.0;
-        y += (Math.max(-3.5, relief) + shoreDrop) * blend;
-      }
+      const y = earthSurfaceHeight(vx, vz);
       gPos.setY(i, y);
     }
+    const colors = new Float32Array(gPos.count * 3);
+    const sand = new THREE.Color(0xb7ac82), grass = new THREE.Color(0x637459), color = new THREE.Color();
+    for (let i = 0; i < gPos.count; i++) {
+      const x = gPos.getX(i), z = gPos.getZ(i);
+      const inland = THREE.MathUtils.smoothstep(earthCoastDistance(x, z), 20, 700);
+      color.copy(sand).lerp(grass, inland);
+      colors.set([color.r, color.g, color.b], i * 3);
+    }
+    groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     groundGeo.computeVertexNormals();
 
     const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -702,19 +692,20 @@ export class InterplanetaryJourney {
       const vx = bPos.getX(i);
       const vz = bPos.getZ(i);
       const r = Math.hypot(vx, vz);
-      bPos.setY(i, -(r * r) / (2.0 * 2400000.0) - 0.45);
+      bPos.setY(i, -(r * r) / (2.0 * EARTH_RADIUS) - 0.45);
     }
     beachGeo.computeVertexNormals();
 
     const beach = new THREE.Mesh(beachGeo, beachMat);
     beach.position.set(this.padCoords.x, this.padGroundY, this.padCoords.y);
+    beach.visible = false;
     this.earthSurface.add(beach);
     this.earthBeachMat = beachMat;
 
     // Graded concrete apron around the launch complex - set beneath pad structures to prevent Z-fighting
     const apronMat = new THREE.MeshStandardMaterial({
       map: makeEarthConcreteTexture(),
-      color: 0xced1cb,
+      color: 0x8e9594,
       roughness: 0.88,
       metalness: 0.05,
       transparent: true,
@@ -817,19 +808,7 @@ export class InterplanetaryJourney {
     const dummy = new THREE.Object3D();
 
     // Helper to evaluate carved surface height for tree placement
-    const sampleCarvedY = (vx, vz) => {
-      const r = Math.hypot(vx, vz);
-      let y = -(r * r) / (2.0 * 2400000.0) - 0.22;
-      if (r > 480) {
-        const blend = Math.min(1.0, (r - 480) / 550.0);
-        const relief = Math.sin(vx * 0.0011) * Math.cos(vz * 0.0011) * 22.0
-                     + Math.sin(vx * 0.0026 + 1.2) * 11.0
-                     + Math.cos(vz * 0.0032) * 8.0;
-        const shoreDrop = r > 7600 ? (r - 7600) * -0.007 : 0.0;
-        y += (Math.max(-3.5, relief) + shoreDrop) * blend;
-      }
-      return this.padGroundY + y;
-    };
+    const sampleCarvedY = (vx, vz) => this.padGroundY + earthSurfaceHeight(vx, vz);
 
     // 1. Plant Palms along coastal beaches & peninsulas
     for (let i = 0; i < countPalm; i++) {
@@ -1442,6 +1421,14 @@ export class InterplanetaryJourney {
 
     this.orbit = createTransfer(this.planetId, target);
     this._configureSolarFrame(this.physics.position);
+    if (this.orbit.lunar) {
+      const departure = sampleTransfer(this.orbit,0);
+      this.localTransferOrigin.set(this.physics.position.x-departure.x/AU*SCENE_AU,
+        this.physics.position.y-6000,this.physics.position.z);
+      this.solarOrigin.copy(this.localTransferOrigin); this.solarOrigin.x -= SCENE_AU;
+      this._solarPhases.set('earth',0);
+      this._lunarStartAngle = this.planetId === 'moon' ? Math.PI : Math.PI-this.orbit.seconds*2*Math.PI/(27.32*86400);
+    }
     this._samplePath(0, this.pathStart);
     this._samplePath(1, this.pathEnd);
     this.flybyPoint = null;
@@ -1468,18 +1455,20 @@ export class InterplanetaryJourney {
     this.moon.visible = true;
 
     this._updateSolarBodies(0);
-    this.sun.visible = this.sunGlow.visible = this.solarLight.visible = true;
+    this.sun.visible = this.solarLight.visible = true;
+    this.sunGlow.visible = false;
   }
 
   _configureSolarFrame(position) {
-    const from = SOLAR_BODIES.find(b => b.id === this.planetId);
+    const from = SOLAR_BODIES.find(b => b.id === (this.planetId === 'moon' ? 'earth' : this.planetId));
     const angle = this.planetId === 'mars' ? Math.PI : 0;
     this.solarOrigin.set(position.x - Math.cos(angle) * from.au * SCENE_AU,
       position.y - 6000, position.z);
     this.solarEpoch = 0;
+    if (this.planetId === 'moon' && !this.orbit) this.solarOrigin.x += 384400000/AU*SCENE_AU;
     this._solarPhases.set(from.id, angle);
     if (this.orbit && this.target) {
-      const dest = SOLAR_BODIES.find(b => b.id === this.target);
+      const dest = SOLAR_BODIES.find(b => b.id === (this.target === 'moon' ? 'earth' : this.target));
       this._solarPhases.set(dest.id, angle + Math.PI - orbitalRate(dest.au) * this.orbit.seconds);
     }
     this._updateSolarBodies(0);
@@ -1491,28 +1480,32 @@ export class InterplanetaryJourney {
     this.sunGlow.position.copy(this.solarOrigin);
     this.solarLight.position.copy(this.solarOrigin);
     for (const b of SOLAR_BODIES) {
-      const angle = this._solarPhases.get(b.id) + orbitalRate(b.au) * seconds;
+      const angle = this.orbit?.lunar && b.id === 'earth' ? 0 : this._solarPhases.get(b.id) + orbitalRate(b.au) * seconds;
       this.solarBodies.get(b.id).position.set(
         this.solarOrigin.x + Math.cos(angle) * b.au * SCENE_AU,
         this.solarOrigin.y,
         this.solarOrigin.z + Math.sin(angle) * b.au * SCENE_AU);
+      if (!this.bodyEphemeris.has(b.id)) this.bodyEphemeris.set(b.id,new THREE.Vector3());
+      this.bodyEphemeris.get(b.id).copy(this.solarBodies.get(b.id).position);
     }
     this.earthAnchor.copy(this.earth.position);
     this.marsAnchor.copy(this.marsGlobe.position);
-    this.earth.scale.setScalar(0.1);
-    this.marsGlobe.scale.setScalar(0.1);
+    this.earth.scale.setScalar(sceneRadius(6371000) / EARTH_RADIUS_SCENE);
+    this.marsGlobe.scale.setScalar(sceneRadius(3389500) / (EARTH_RADIUS_SCENE * 0.53));
     for (const mesh of [this.clouds, this.earthGlow]) {
       mesh.position.copy(this.earth.position);
       mesh.scale.copy(this.earth.scale);
     }
+    this.sunGlow.visible = false;
     this.earthStar.visible = false;
     this.marsStar.visible = false;
-    this.moon.scale.setScalar(0.1);
-    const lunarAngle = seconds / (27.32 * 86400) * Math.PI * 2;
+    this.moon.scale.setScalar(sceneRadius(1737400) / MOON_RADIUS_SCENE);
+    const lunarAngle = (this.orbit?.lunar ? this._lunarStartAngle || 0 : 0) + seconds / (27.32 * 86400) * Math.PI * 2;
     this.moon.position.copy(this.earth.position);
     // Moon distance uses the same enlarged globe scale for a readable Earth system.
-    this.moon.position.x += Math.cos(lunarAngle) * 15686;
-    this.moon.position.z += Math.sin(lunarAngle) * 15686;
+    this.moon.position.x += Math.cos(lunarAngle) * (384400000 / AU * SCENE_AU);
+    this.moon.position.z += Math.sin(lunarAngle) * (384400000 / AU * SCENE_AU);
+    this.moonEphemeris.copy(this.moon.position);
     if (this.earthSatellites) {
       this.earthSatellites.group.position.copy(this.earth.position);
       this.earthSatellites.group.scale.setScalar(0.1);
@@ -1525,6 +1518,33 @@ export class InterplanetaryJourney {
       this.padGroundY + 50000,
       this.padCoords.y - 120000
     );
+  }
+
+  updateLocalSky(camera) {
+    if (this.active) return;
+    // Local flight is in metres, navigation is in AU-scaled units. Project
+    // background bodies onto a camera-centred shell using their true angular
+    // size, instead of mixing these two distance systems during descent.
+    const observer = this.planetId === 'moon' ? this.moonEphemeris : this.bodyEphemeris.get(this.planetId);
+    if (!observer) return;
+    const shell = Math.min(150000,camera.far*.8);
+    for (const b of SOLAR_BODIES) {
+      const mesh = this.solarBodies.get(b.id);
+      if (b.id === this.planetId) { mesh.visible=false; continue; }
+      this._skyDirection.copy(this.bodyEphemeris.get(b.id)).sub(observer);
+      const distance = Math.max(1,this._skyDirection.length());
+      mesh.position.copy(camera.position).addScaledVector(this._skyDirection,shell/distance);
+      mesh.scale.setScalar(sceneRadius(b.radius)*shell/distance/mesh.geometry.parameters.radius);
+    }
+    if (this.planetId !== 'earth') {
+      for (const mesh of [this.clouds,this.earthGlow]) { mesh.position.copy(this.earth.position);mesh.scale.copy(this.earth.scale); }
+    }
+    if (this.planetId !== 'moon') {
+      this._skyDirection.copy(this.moonEphemeris).sub(observer);
+      const distance = Math.max(.001,this._skyDirection.length());
+      this.moon.position.copy(camera.position).addScaledVector(this._skyDirection,shell/distance);
+      this.moon.scale.setScalar(sceneRadius(1737400)*shell/distance/MOON_RADIUS_SCENE);
+    }
   }
 
   _rebuildRouteGeometry() {
@@ -1551,8 +1571,9 @@ export class InterplanetaryJourney {
 
   _samplePath(t, out) {
     const point = sampleTransfer(this.orbit, t);
-    return out.set(this.solarOrigin.x + point.x / AU * SCENE_AU,
-      this.solarOrigin.y + 6000, this.solarOrigin.z + point.z / AU * SCENE_AU);
+    const origin = this.orbit.lunar ? this.localTransferOrigin : this.solarOrigin;
+    return out.set(origin.x + point.x / AU * SCENE_AU,
+      origin.y + 6000, origin.z + point.z / AU * SCENE_AU);
   }
 
   _sampleTangent(t, out) {
@@ -1580,13 +1601,11 @@ export class InterplanetaryJourney {
     // When ascending above 1200m, fade out the regional landing zone so it seamlessly gives way
     // to the 3D spherical Earth globe with zero flat-plane cutoffs in the sky!
     if (this.planetId === 'earth' && this.earthSurface) {
-      if (currentAltitude > 3200) {
+      if (currentAltitude > 26000) {
         this.earthSurface.visible = false;
       } else {
         this.earthSurface.visible = true;
-        const fade = currentAltitude <= 1200
-          ? 1.0
-          : Math.max(0.0, 1.0 - (currentAltitude - 1200) / 2000);
+        const fade = 1-THREE.MathUtils.smoothstep(currentAltitude,8000,26000);
 
         if (this.earthOceanMat) this.earthOceanMat.opacity = 0.95 * fade;
         if (this.earthGroundMat) this.earthGroundMat.opacity = fade;
@@ -1666,7 +1685,7 @@ export class InterplanetaryJourney {
     this.vehicle.setReentryHeat(0);
 
     // Instantaneous separation from the moving destination, using the shared AU scale.
-    const targetPosition = this.solarBodies.get(this.target).position;
+    const targetPosition = this.target === 'moon' ? this.moon.position : this.solarBodies.get(this.target).position;
     const remainingKm = Math.round(Math.hypot(
       this.physics.position.x - targetPosition.x,
       this.physics.position.z - targetPosition.z) / SCENE_AU * AU / 1000);
@@ -1728,7 +1747,8 @@ export class InterplanetaryJourney {
       this.earth.visible = false;
       this.clouds.visible = false;
       this.earthGlow.visible = false;
-      this.earthStar.visible = false;
+      this.sunGlow.visible = false;
+    this.earthStar.visible = false;
       this.earthSatellites.group.visible = false;
       this.moon.visible = true;
       this.moon.scale.setScalar(0.2);
@@ -1775,6 +1795,7 @@ export class InterplanetaryJourney {
     for (const [id, mesh] of this.solarBodies) mesh.visible = id !== planetId;
     this.earth.visible = planetId !== 'earth';
     this.clouds.visible = this.earthGlow.visible = this.earth.visible;
+    this.moon.visible = planetId !== 'moon';
   }
 
   reset() {
@@ -1790,6 +1811,6 @@ export class InterplanetaryJourney {
     this.hideTransferTrail();
     this.physics.transferStatus = '';
     this.physics.transferProgress = 0;
-    this.setPlanet('mars');
+    this.setPlanet(this.physics.planetId);
   }
 }

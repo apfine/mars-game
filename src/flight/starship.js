@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
+import { STARBASE_LAYOUT as L, LIFT_POINTS } from './starbaseLayout.js';
 
 // -------------------------------------------------------------
 // SpaceX Starship + Super Heavy Stack & Expanded Mars Starbase
@@ -1002,7 +1002,7 @@ export class StarshipMissionVehicle {
     const cableGeo = new THREE.CylinderGeometry(0.12, 0.12, 1, 6);
     cableGeo.translate(0, -0.5, 0);
     const cable = new THREE.Mesh(cableGeo, this.matSteel);
-    cable.position.y = -0.4;
+    cable.position.y = 0;
     cable.scale.y = 40;
     trolley.add(cable);
 
@@ -1010,7 +1010,7 @@ export class StarshipMissionVehicle {
     clamp.position.y = -40;
     trolley.add(clamp);
 
-    const clampHead = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.4, 6.2), this.matDarkMetal);
+    const clampHead = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 6.2), this.matDarkMetal);
     clamp.add(clampHead);
     const fingerGeo = new THREE.BoxGeometry(1.0, 7.0, 1.2);
     for (const sx of [-1, 1]) {
@@ -1052,7 +1052,6 @@ export class StarshipMissionVehicle {
   // -------------------------------------------------------------
   buildProductionComplex(pad) {
     this.buildFactory(pad);
-    this.buildConveyor(pad);
     this.buildErector(pad);
     this.buildInspectionYard(pad);
     this.buildRecoveryCrawlers(pad);
@@ -1087,6 +1086,7 @@ export class StarshipMissionVehicle {
     const bayD = f.depth;
     const doorW = 26.0;
     const doorH = 88.0;
+    this.factoryGates = {};
 
     for (const [bayIdx, bayName, localX, signTitle, signSub, signColor] of [
       [1, 'PRODUCTION', -45.0, 'STARBASE MEGA BAY 1', 'HIGH-BAY PRODUCTION // SHIP & BOOSTER STACKING', '#38e8ff'],
@@ -1094,6 +1094,19 @@ export class StarshipMissionVehicle {
     ]) {
       const bayGroup = new THREE.Group();
       bayGroup.position.set(localX, 0, 0);
+      const gate = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 1.4), hallMat);
+      gate.position.set(0, doorH * 1.5, -bayD / 2 + 0.8);
+      gate.userData.noMerge = true;
+      bayGroup.add(gate);
+      this.factoryGates[bayIdx === 1 ? 'booster' : 'ship'] = gate;
+      const rampGeo = new THREE.PlaneGeometry(28, 10, 1, 1);
+      rampGeo.rotateX(-Math.PI / 2);
+      const rp = rampGeo.attributes.position;
+      for (let i = 0; i < rp.count; i++) rp.setY(i, (rp.getZ(i) + 5) / 10 * f.slabTop + 0.01);
+      rampGeo.computeVertexNormals();
+      const ramp = new THREE.Mesh(rampGeo, this.matConcrete);
+      ramp.position.z = -bayD / 2 - 13;
+      bayGroup.add(ramp);
 
       // 1. Exterior side walls (West & East of this bay)
       for (const side of [-1, 1]) {
@@ -1421,6 +1434,7 @@ export class StarshipMissionVehicle {
     this.crawlers = {};
     for (const kind of ['booster', 'ship']) {
       const crawler = new THREE.Group();
+      const wheels = [];
       crawler.userData.noMerge = true;
       crawler.position.set(L.factory.recoveryDoorX, 0, L.factory.recoveryDoorZ + (kind === 'booster' ? 8 : -8));
 
@@ -1446,8 +1460,11 @@ export class StarshipMissionVehicle {
       for (const wx of [-6.2, 0, 6.2]) {
         for (const wz of [-5.2, 5.2]) {
           const wheel = new THREE.Mesh(wheelGeo, this.matDarkMetal);
-          wheel.position.set(wx, 1.7, wz);
-          crawler.add(wheel);
+          const pod = new THREE.Group();
+          pod.position.set(wx, 1.7, wz);
+          pod.add(wheel);
+          crawler.add(pod);
+          wheels.push(pod);
         }
       }
 
@@ -1459,7 +1476,7 @@ export class StarshipMissionVehicle {
       }
 
       pad.add(crawler);
-      this.crawlers[kind] = { group: crawler, baseY: 3.0, loadY: 3.0 };
+      this.crawlers[kind] = { group: crawler, baseY: 0, loadY: 4.7, wheels };
     }
   }
 
@@ -1879,9 +1896,11 @@ export class StarshipMissionVehicle {
   // -------------------------------------------------------------
   buildSuperHeavyBooster() {
     const B = this.boosterGroup;
+    this.buildLiftingPoints(B, 'booster');
     const radius = 4.5; // 9m diameter
     const boosterHeight = 70.0;
     this.boosterHeight = boosterHeight;
+    this.buildBoosterRCS(B);
 
     // Main Stainless Steel Cylinder Body
     const cylGeo = new THREE.CylinderGeometry(radius, radius, boosterHeight, 32, 4);
@@ -2044,6 +2063,7 @@ export class StarshipMissionVehicle {
   // -------------------------------------------------------------
   buildStarship() {
     const S = this.starshipGroup;
+    this.buildLiftingPoints(S, 'ship');
     const r = 4.5;
     const barrelH = 34.0;
     const noseH = 16.0;
@@ -2288,6 +2308,43 @@ export class StarshipMissionVehicle {
   // -------------------------------------------------------------
   // 4. SPECIAL FX: SPACE JELLYFISH PLUME & HYPERSONIC PLASMA SHEATH
   // -------------------------------------------------------------
+  buildLiftingPoints(group, kind) {
+    const point = LIFT_POINTS[kind];
+    const mat = new THREE.MeshStandardMaterial({ color: 0xe9bc48, metalness: 0.7, roughness: 0.4 });
+    for (const side of [-1, 1]) {
+      const lug = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.22, 8, 16), mat);
+      lug.position.set(side * point.radius, point.height, 0);
+      lug.rotation.y = Math.PI / 2;
+      group.add(lug);
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2, 1.8), mat);
+      plate.position.set(side * 4.55, point.height - 0.65, 0);
+      group.add(plate);
+    }
+  }
+
+  buildBoosterRCS(group) {
+    const geo = new THREE.ConeGeometry(0.36,3.4,8);
+    geo.rotateZ(Math.PI); geo.translate(0,1.7,0);
+    const material = new THREE.MeshBasicMaterial({color:0xe6f0f4,transparent:true,opacity:0.45,depthWrite:false});
+    const jets = new THREE.InstancedMesh(geo,material,4);
+    const nozzle = new THREE.InstancedMesh(new THREE.CylinderGeometry(.16,.23,.45,8),this.matSteel,4);
+    const dummy = new THREE.Object3D(), direction = new THREE.Vector3();
+    for (const [i, x, y, z] of [[0,1,57,0],[1,-1,9,0],[2,0,57,-1],[3,0,9,1]]) {
+      direction.set(x,0,z); dummy.position.set(x*4.85,y,z*4.85);
+      dummy.quaternion.setFromUnitVectors(THREE.Object3D.DEFAULT_UP,direction);
+      dummy.updateMatrix(); jets.setMatrixAt(i,dummy.matrix); nozzle.setMatrixAt(i,dummy.matrix);
+    }
+    jets.visible=false; jets.frustumCulled=false;
+    group.add(jets,nozzle); this.boosterRCSJets=jets;
+  }
+
+  setBoosterRCS(turn) {
+    if (!this.boosterRCSJets) return;
+    const pulse = Math.sin(this._fxTime*28)>-0.25;
+    this.boosterRCSJets.visible=turn>0.025 && pulse;
+    this.boosterRCSJets.material.opacity=Math.min(0.55,turn*0.35);
+  }
+
   buildFX() {
     // "SPACE JELLYFISH" vacuum-expansion plume.
     // The old geometry was a 45 m bubble stretched to 110 m. The chase camera
@@ -2660,13 +2717,41 @@ export class StarshipMissionVehicle {
     s.clampLampMat.color.setHex(clampClosed ? 0x34d399 : 0xffb547);
     for (const child of s.clamp.children) {
       if (child.geometry && child.geometry.type === 'BoxGeometry' && child.geometry.parameters.height === 7.0) {
-        child.position.x = clampClosed ? (child.position.x > 0 ? 3.1 : -3.1) : (child.position.x > 0 ? 4.4 : -4.4);
+        child.position.x = clampClosed ? (child.position.x > 0 ? 4.8 : -4.8) : (child.position.x > 0 ? 6.0 : -6.0);
       }
     }
   }
 
   setStackerPose(yaw, trolleyDistance, cableLength, clampClosed = false) {
     this.setCranePose('launch', yaw, trolleyDistance, cableLength, clampClosed);
+  }
+
+  setCraneTarget(kind, worldPoint, attached) {
+    const crane = this.cranes[kind];
+    if (!crane) return;
+    const tower = kind === 'booster' ? L.boosterTower : L.shipTower;
+    const dx = worldPoint.x - this.launchPadGroup.position.x - tower.x;
+    const dz = worldPoint.z - this.launchPadGroup.position.z - tower.z;
+    const localY = worldPoint.y - this.launchPadGroup.position.y;
+    this.setCranePose(kind, Math.atan2(dx, dz), Math.hypot(dx, dz), crane.pivotY + 3.2 - localY, attached);
+    // The swivel keeps the spreader aligned with the two vehicle lugs while
+    // the boom slews around the tower.
+    crane.clamp.rotation.y = -Math.atan2(dx,dz);
+  }
+
+  setFactoryGate(kind, open) {
+    const door = this.factoryGates?.[kind];
+    if (door) door.position.y = L.factory.doorHeight / 2 + open * L.factory.doorHeight;
+  }
+
+  steerCrawler(kind, yaw, curvature, distance) {
+    const crawler = this.crawlers[kind];
+    if (!crawler) return;
+    crawler.group.rotation.y = yaw;
+    for (const pod of crawler.wheels) {
+      pod.rotation.y = Math.atan(curvature * pod.position.z);
+      pod.children[0].rotation.x += distance / 1.7;
+    }
   }
 
   setErectorAngle(angle) {

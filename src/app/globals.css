@@ -3046,3 +3046,41 @@ html, body {
 @media (max-width: 360px) {
   #flight-hud .hud-pill-btn { padding: 6px !important; font-size: 9px !important; letter-spacing: .1px !important; }
 }
+
+/* Compact, device-specific control pads. Viewport width never enables touch. */
+#flight-transfer-btn, #flight-dest-switch, #flight-traj-switch { display: none !important; }
+#flight-hud .flight-ops-bar { background: none; border: 0; box-shadow: none; }
+#flight-hud .flight-ops-bar:has(.flight-ops-status:empty) { display: none; }
+.dropdown-item:disabled { opacity: .4; cursor: default; }
+@media (pointer: fine), (hover: hover) {
+  #mobile-controls, #flight-mobile-steering { display: none !important; }
+}
+@media (pointer: coarse) {
+  .compact-drive-pad, #flight-hud .flight-touch-dpad {
+    display: grid; grid-template-columns: repeat(3, 40px); grid-auto-rows: 40px; gap: 4px;
+  }
+  .compact-drive-pad { position: absolute; bottom: max(100px, env(safe-area-inset-bottom)); left: 12px; pointer-events: auto; grid-template-areas: '. forward .' 'left back right'; }
+  .compact-drive-pad .touch-cluster, #flight-hud .flight-dpad-middle { display: contents; }
+  .compact-drive-pad .touch-btn, #flight-hud .flight-dir-btn {
+    width: 40px !important; height: 40px !important; min-width: 40px; padding: 0;
+    font-size: 13px !important; border-radius: 0 !important;
+    clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);
+    background: #15202ddd !important; backdrop-filter: none !important; box-shadow: none !important;
+    touch-action: none;
+  }
+  #btn-left, #flight-btn-yaw-left { grid-area: left; }
+  #btn-right, #flight-btn-yaw-right { grid-area: right; }
+  #btn-gas { grid-area: forward; } #btn-brake { grid-area: back; }
+  #roadster-touch-rise, #roadster-touch-descend { display: none; }
+  body[data-control-mode='roadster'] .compact-drive-pad { grid-template-areas: 'rise forward descend' 'left back right'; }
+  body[data-control-mode='roadster'] #roadster-touch-rise { display: flex; grid-area: rise; }
+  body[data-control-mode='roadster'] #roadster-touch-descend { display: flex; grid-area: descend; }
+  #mobile-controls .touch-action-bar { display: none !important; }
+  #flight-hud .flight-touch-dpad { grid-template-areas: 'thrustup pitchup thrustdown' 'left pitchdown right'; }
+  #flight-touch-thrust-up { grid-area: thrustup; } #flight-touch-thrust-down { grid-area: thrustdown; }
+  #flight-btn-pitch-down { grid-area: pitchup; } #flight-btn-pitch-up { grid-area: pitchdown; }
+  #flight-hud #flight-manual-controls { display: none !important; }
+  #flight-hud .hud-pill-btn { min-height: 36px; padding: 5px 7px !important; font-size: 9px !important; }
+  #flight-hud .spx-top-bar { gap: 4px; }
+  #flight-hud .spx-dropdown-menu { max-height: 60dvh; overflow: auto; touch-action: pan-y; }
+}

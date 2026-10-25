@@ -94,6 +94,10 @@ export class MissionFlightHUD {
     };
 
     this.isMobile = false;
+    const actions = document.getElementById('flight-actions-menu');
+    for (const key of ['btnStageNow', 'btnLegs', 'btnCargo','deorbitBtn']) {
+      if (actions && this.dom[key]) { this.dom[key].className = 'dropdown-item'; actions.append(this.dom[key]); }
+    }
     this.initEvents();
   }
 
@@ -134,7 +138,8 @@ export class MissionFlightHUD {
         destBtns.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         const curLbl = document.getElementById('flight-dest-current');
-        if (curLbl) curLbl.textContent = `DEST: ${dest.toUpperCase()}`;
+        if (curLbl) curLbl.textContent = 'TRANSFER';
+        this.options.onTransfer?.();
         if (this.dom.transferBtn) this.dom.transferBtn.textContent = `TRANSFER · ${dest.toUpperCase()}`;
         const menu = document.getElementById('flight-mission-menu');
         if (menu) menu.classList.remove('open');
@@ -258,6 +263,7 @@ export class MissionFlightHUD {
       };
       btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        btn.setPointerCapture?.(e.pointerId);
         step();
         if (holdInterval) clearInterval(holdInterval);
         holdInterval = setInterval(step, 32);
@@ -370,7 +376,13 @@ export class MissionFlightHUD {
       };
       btn.addEventListener('pointerup', end);
       btn.addEventListener('pointercancel', end);
+      btn.addEventListener('lostpointercapture', end);
     };
+
+    bindTouchDir(document.getElementById('flight-touch-thrust-up'),
+      () => this.options.onTouchThrottle?.(1, true), () => this.options.onTouchThrottle?.(1, false));
+    bindTouchDir(document.getElementById('flight-touch-thrust-down'),
+      () => this.options.onTouchThrottle?.(-1, true), () => this.options.onTouchThrottle?.(-1, false));
 
     bindTouchDir(
       this.dom.btnPitchDown,
@@ -526,11 +538,13 @@ export class MissionFlightHUD {
     const preLaunch = physics.phase === FLIGHT_PHASES.ON_PAD || physics.phase === FLIGHT_PHASES.COUNTDOWN;
     const destLabel = document.getElementById('flight-dest-current');
     if (destLabel) {
-      destLabel.textContent = `DEST: ${destination.toUpperCase()}`;
+      destLabel.textContent = 'TRANSFER';
     }
     const allDestBtns = document.querySelectorAll('[data-dest]');
     allDestBtns.forEach((btn) => {
-      btn.classList.toggle('active', btn.getAttribute('data-dest')?.toLowerCase() === destination);
+      const canDepart = inOrbit || preLaunch || ['BOOSTER_ASCENT','HOT_STAGING','STARSHIP_ASCENT'].includes(physics.phase);
+      btn.disabled = btn.getAttribute('data-dest')?.toLowerCase() === currentPlanet || !canDepart || physics.yardControl;
+      btn.classList.toggle('active', btn.getAttribute('data-dest')?.toLowerCase() === currentPlanet);
     });
     if (this.dom.destSwitch) {
       this.dom.destSwitch.style.display = inOrbit ? 'flex' : 'none';
@@ -709,7 +723,7 @@ export class MissionFlightHUD {
     }
 
     if (this.dom.mobileSteering) {
-      const showTouchPad = !physics.autoMission;
+      const showTouchPad = window.matchMedia('(pointer: coarse)').matches;
       this.dom.mobileSteering.style.display = showTouchPad ? 'flex' : 'none';
     }
 

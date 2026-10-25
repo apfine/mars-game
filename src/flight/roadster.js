@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { FLIGHT_PHASES } from './missionPhysics.js';
 
 // ---------------------------------------------------------------------------
@@ -16,6 +17,8 @@ export class FlyingRoadster {
     this.enabled = false;
     this.time = 0;
     this.planetId = 'mars';
+    this.speed = 0; this.verticalSpeed = 0;
+    this.yaw = 0; this.pitch = 0; this.roll = 0;
 
     this.group = new THREE.Group();
     this.group.name = 'FLYING_ROADSTER';
@@ -28,7 +31,8 @@ export class FlyingRoadster {
   }
 
   buildModel() {
-    const paint = new THREE.MeshStandardMaterial({
+    const paint = new THREE.MeshPhysicalMaterial({
+      clearcoat: 1, clearcoatRoughness: 0.18,
       color: 0x99000a,
       metalness: 0.92,
       roughness: 0.16,
@@ -58,7 +62,7 @@ export class FlyingRoadster {
     });
 
     // Sculpted aerodynamic Midnight Cherry supercar body
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.46, 4.38), paint);
+    const body = new THREE.Mesh(new RoundedBoxGeometry(2.08, 0.46, 4.38, 3, 0.17), paint);
     body.position.y = 0.46;
     this.group.add(body);
 
@@ -67,7 +71,7 @@ export class FlyingRoadster {
     splitter.position.set(0, 0.22, 2.3);
     this.group.add(splitter);
 
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.32, 1.15), paint);
+    const nose = new THREE.Mesh(new RoundedBoxGeometry(1.92, 0.32, 1.15, 3, 0.12), paint);
     nose.position.set(0, 0.54, 2.32);
     nose.rotation.x = -0.09;
     this.group.add(nose);
@@ -83,7 +87,7 @@ export class FlyingRoadster {
     diffuser.rotation.x = 0.12;
     this.group.add(diffuser);
 
-    const rear = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.40, 1.05), paint);
+    const rear = new THREE.Mesh(new RoundedBoxGeometry(2.02, 0.40, 1.05, 3, 0.12), paint);
     rear.position.set(0, 0.56, -2.02);
     this.group.add(rear);
 
@@ -109,7 +113,7 @@ export class FlyingRoadster {
       this.group.add(mirrorHousing);
     }
 
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.56, 1.88), glass);
+    const cabin = new THREE.Mesh(new RoundedBoxGeometry(1.64, 0.56, 1.88, 3, 0.16), glass);
     cabin.position.set(0, 0.92, -0.15);
     this.group.add(cabin);
 

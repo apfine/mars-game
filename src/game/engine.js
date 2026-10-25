@@ -18,6 +18,7 @@ import { StarbaseOperations } from '../flight/starbaseOperations.js';
 import { StarbaseObstacleSystem } from '../flight/solidCollisions.js';
 import { FlyingRoadster } from '../flight/roadster.js';
 import { PLANET_PROFILES } from '../flight/planetProfiles.js';
+import { earthSurfaceHeight } from '../terrain/earthSurface.js';
 
 export class MarsGameEngine {
   constructor(container, options = {}) {
@@ -133,6 +134,8 @@ export class MarsGameEngine {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.container.appendChild(this.renderer.domElement);
+    // Non-enumerable handle for integration checks and developer tools.
+    Object.defineProperty(this.renderer.domElement, 'game', { value: this });
   }
 
   initScene() {
@@ -190,6 +193,7 @@ export class MarsGameEngine {
     this.starship = new StarshipMissionVehicle();
     this.scene.add(this.starship.group);
     this.missionPhysics = new StarshipMissionPhysics(this.starship, new THREE.Vector2(1400, 1150));
+    this.missionPhysics.obstacles = this.obstacles;
 
     // Earth, the Moon, both satellite networks and the compressed interplanetary
     // cruise. Entry hands control back to the real flight integrator.
@@ -200,6 +204,13 @@ export class MarsGameEngine {
     this.atmosphere.setPlanet('mars');
 
     this.operations = new StarbaseOperations(this.missionPhysics, this.starship, {
+      obstacles: this.obstacles,
+      isRouteBlocked: (pos,radius) => {
+        const actors=[this.physics.position];
+        if (this.mode === 'walking') actors.push(this.walker.position);
+        if (this.mode === 'roadster') actors.push(this.roadster.group.position);
+        return actors.some(a=>Math.abs(a.y-pos.y)<8 && Math.hypot(a.x-pos.x,a.z-pos.z)<radius+1.6);
+      },
       onRelaunch: () => {
         if (this.missionPhysics.phase === FLIGHT_PHASES.ON_PAD && this.missionPhysics.autoMission) {
           this.operations.reset();
@@ -292,16 +303,17 @@ export class MarsGameEngine {
         this.cameraController.resetGimbal();
       },
       onResetMission: () => {
-        this.missionPhysics.setPlanet('mars');
+        const planet = this.missionPhysics.planetId;
+        this.missionPhysics.setPlanet(planet);
         this.missionPhysics.resetToPad();
-        this.missionPhysics.destination = 'earth';
+        this.missionPhysics.destination = planet === 'earth' ? 'mars' : 'earth';
         this.journey.reset();
         this.tankerOps = { active: false, phase: 'idle', timer: 0, progress: 0, target: null, fromFuel: 0, targetFuel: 0 };
         this.missionPhysics.tankerActive = false;
         this.missionPhysics.tankerStatus = '';
         this.missionPhysics.opsMessage = '';
         this.operations?.reset();
-        this.applyPlanetEnvironment('mars');
+        this.applyPlanetEnvironment(planet);
         this.setTimeScale(1);
         this.cameraController.resetGimbal();
       },
@@ -325,12 +337,15 @@ export class MarsGameEngine {
         this.missionPhysics.toggleCargoDoors();
       },
       onTouchPitch: (val) => {
+        if (val) this.missionPhysics.autoMission = false;
         this.input.setTouchFlightInput({ pitch: val });
       },
       onTouchYaw: (val) => {
+        if (val) this.missionPhysics.autoMission = false;
         this.input.setTouchFlightInput({ steer: val });
       },
       onTouchThrottle: (dir, held) => {
+        if (held) this.missionPhysics.autoMission = false;
         this.input.setTouchFlightInput({
           throttleUp: held && dir > 0,
           throttleDown: held && dir < 0
@@ -414,6 +429,8 @@ export class MarsGameEngine {
   // the stack launches to orbit first with proper staging (booster stays on home world).
   beginTransfer() {
     const physics = this.missionPhysics;
+    if (physics.yardControl || this.journey.active) return;
+    physics.autoMission = true;
     const target = physics.destination || (physics.planetId === 'mars' ? 'earth' : 'mars');
 
     // If on pad or landed on either world, launch into orbit first and queue transfer
@@ -446,6 +463,7 @@ export class MarsGameEngine {
   }
 
   startInterplanetaryTransfer(target) {
+    this.journey.arrived = false;
     if (!this.missionPhysics.triggerInterplanetary(target)) return false;
     this.setTimeScale(this.missionPhysics.autoMission ? 4 : Math.max(1, Math.min(this.timeScale, 4)));
     this.ensureTransferStarted();
@@ -559,7 +577,7 @@ export class MarsGameEngine {
       return;
     }
     if (this.missionPhysics.phase !== FLIGHT_PHASES.INTERPLANETARY) return;
-    if (this.journey.active || this.journey.arrived) return;
+    if (this.journey.active) return;
     const target = this.missionPhysics.transferTarget || this.missionPhysics.destination;
     if (target && target !== this.missionPhysics.planetId) {
       this.journey.start(target);
@@ -591,6 +609,8 @@ export class MarsGameEngine {
   applyPlanetEnvironment(planetId) {
     const isEarth = planetId === 'earth';
     this.atmosphere.setPlanet(planetId);
+    this.terrain.setPlanet(planetId);
+    this.physics.gravity = PLANET_PROFILES[planetId].gravity;
     this.journey.setPlanet(planetId);
     this.roadster?.setPlanet(planetId);
     if (this.terrain?.group) this.terrain.group.visible = !isEarth;
@@ -652,6 +672,7 @@ export class MarsGameEngine {
 
   // Triggered when clicking the physical red launch button on the Starbase Launch Control Pedestal (or pressing [F] next to it)
   triggerPhysicalPadLaunch() {
+    if (this.missionPhysics.yardControl) return;
     if (!this.audio.initialized) this.audio.init();
     this.audio.ensureRunning();
     this.audio.playLaunchButtonSound();
@@ -686,12 +707,15 @@ export class MarsGameEngine {
   setMode(targetMode) {
     if (this.mode === targetMode) return;
     this.mode = targetMode;
+    document.body.dataset.controlMode = targetMode;
+    this.input.clearTouchFlightInput?.();
     this.timeScales = targetMode === 'starship' ? this.flightTimeScales : this.groundTimeScales;
     if (targetMode !== 'starship' && this.timeScale > 8) this.setTimeScale(8);
     if (this.astronaut) this.astronaut.group.visible = targetMode === 'walking';
 
     const roverHud = document.getElementById('hud-layer');
     const mobileControls = document.getElementById('mobile-controls');
+    if (mobileControls) mobileControls.style.display = targetMode !== 'starship' && this.input.detectMobile() ? 'block' : 'none';
 
     if (this.mode === 'starship') {
       this.camera.near = 0.4;
@@ -872,29 +896,36 @@ export class MarsGameEngine {
 
   getSurfaceHeight(x, z) {
     if (this.missionPhysics.planetId === 'earth') {
-      const dx = x - this.missionPhysics.padCoords.x;
-      const dz = z - this.missionPhysics.padCoords.y;
-      const r = Math.hypot(dx, dz);
-      if (r <= 480) {
-        return this.missionPhysics.padGroundY + 0.14;
-      }
-      const yCurve = -(r * r) / (2.0 * 2400000.0) - 0.22;
-      const blend = Math.min(1.0, (r - 480) / 550.0);
-      const relief = Math.sin(dx * 0.0011) * Math.cos(dz * 0.0011) * 22.0
-                   + Math.sin(dx * 0.0026 + 1.2) * 11.0
-                   + Math.cos(dz * 0.0032) * 8.0;
-      const shoreDrop = r > 7600 ? (r - 7600) * -0.007 : 0.0;
-      return this.missionPhysics.padGroundY + yCurve + (Math.max(-3.5, relief) + shoreDrop) * blend + 0.35;
+      const ground = this.missionPhysics.padGroundY + earthSurfaceHeight(
+        x-this.missionPhysics.padCoords.x, z-this.missionPhysics.padCoords.y);
+      return this.obstacles.supportHeight(x,z,ground);
     }
-    return getMarsHeight(x, z);
+    return this.obstacles.supportHeight(x,z,getMarsHeight(x,z));
   }
 
   resolveWorldCollisions(position, radius = 1.0, feetY = 0) {
     let result = null;
     // 1. Starbase structural obstacles (launch tower, OLM, catch towers, factory, tanks, pedestal, erector)
     if (this.obstacles) {
-      const hit = this.obstacles.resolve(position, radius, feetY);
+      const hit = this.obstacles.resolve(position, radius, feetY-this.missionPhysics.padGroundY, 1.8);
       if (hit) result = hit;
+    }
+    if (this.missionPhysics?.yardControl) {
+      for (const kind of ['ship','booster']) {
+        const crawler=this.starship.crawlers[kind];
+        if (!crawler?.group.visible) continue;
+        const load=kind === 'ship' ? this.missionPhysics.position : this.missionPhysics.boosterPosition;
+        const top=load.y+(kind === 'ship' ? 50 : 70);
+        if (feetY>top || feetY+1.8<load.y-4.7) continue;
+        const solidRadius=feetY<load.y ? 10 : 4.8;
+        const dx=position.x-load.x,dz=position.z-load.z,distance=Math.hypot(dx,dz);
+        if(distance<solidRadius+radius) {
+          const nx=distance>1e-5?dx/distance:1,nz=distance>1e-5?dz/distance:0;
+          const pen=solidRadius+radius-distance;
+          position.x+=nx*pen;position.z+=nz*pen;
+          result={hit:true,nx,nz,pen,material:'metal'};
+        }
+      }
     }
     // 2. Martian boulders, rock outcrops, and monuments
     if (this.missionPhysics?.planetId === 'mars' && this.scatter?.resolve) {
@@ -956,7 +987,7 @@ export class MarsGameEngine {
     }
 
     const groundY = this.getSurfaceHeight(this.walker.position.x, this.walker.position.z);
-    this.walker.position.y = Math.max(this.walker.position.y, groundY);
+    this.walker.position.y = groundY;
 
     this.walker.velocity.set(sinY * this.walker.speed, 0, cosY * this.walker.speed);
     this.walker.speedKmh = Math.abs(Math.round(this.walker.speed * 3.6));
@@ -1017,6 +1048,8 @@ export class MarsGameEngine {
     // Interplanetary cruise, celestial rotation and satellite relay networks
     // animate in every camera mode. Pass active camera altitude for seamless LOD fading.
     const camAltNow = Math.max(0, (this.camera ? this.camera.position.y : 0) - this.missionPhysics.padElevation);
+    this.operations.update(dt);
+    if (this.missionPhysics.yardControl && this.mode !== 'starship') this.missionPhysics.updateYardVisuals(dt);
     this.journey.update(dt, this.timeScale, camAltNow);
     this.roadster.update(dt, this.mode === 'starship' ? this.missionPhysics : null);
     if (this.missionPhysics.phase !== FLIGHT_PHASES.INTERPLANETARY && this.journey.active) {
@@ -1029,7 +1062,7 @@ export class MarsGameEngine {
     // =========================================================
     if (this.mode === 'starship') {
       this.updateTankerOperations(dt);
-      this.operations.update(dt);
+
       this.ensureTransferStarted();
 
       if (this.input.consumeSinglePress('handbrake')) {
@@ -1072,14 +1105,14 @@ export class MarsGameEngine {
       }
 
       this.atmosphere.setAltitude(camAltitude, this.missionPhysics.speed);
-      const onMars = this.missionPhysics.planetId === 'mars';
+      const onMars = this.missionPhysics.planetId !== 'earth';
       if (onMars) {
         this.terrain.setCameraAltitude(camAltitude);
       } else if (this.terrain?.group) {
         this.terrain.group.visible = false;
       }
       if (this.scatter?.group) {
-        this.scatter.group.visible = onMars && camAltitude < 900;
+        this.scatter.group.visible = onMars && this.missionPhysics.planetId !== 'moon' && camAltitude < 900;
       }
 
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
@@ -1105,6 +1138,7 @@ export class MarsGameEngine {
       }
 
       this.starship.updateLOD(this.camera.position);
+      this.journey.updateLocalSky(this.camera);
       this.renderer.render(this.scene, this.camera);
       this.notifyFirstFrame();
       return;
@@ -1153,7 +1187,7 @@ export class MarsGameEngine {
       this.cameraController.updateWalking(scaledDt, this.walker);
 
       const activePos = this.walker.position;
-      const onMars = this.missionPhysics.planetId === 'mars';
+      const onMars = this.missionPhysics.planetId !== 'earth';
       if (onMars) {
         this.scatter.setVisible(true);
         this.terrain.update(activePos);
@@ -1193,7 +1227,7 @@ export class MarsGameEngine {
       );
       this.cameraController.updateRoadster(scaledDt, this.roadster);
       const activePos = this.roadster.group.position;
-      const onMars = this.missionPhysics.planetId === 'mars';
+      const onMars = this.missionPhysics.planetId !== 'earth';
       if (onMars) {
         this.scatter.setVisible(true);
         this.terrain.update(activePos);
@@ -1237,7 +1271,7 @@ export class MarsGameEngine {
       }
       this.lastOnGround = this.physics.onGroundCount;
 
-      const onMars = this.missionPhysics.planetId === 'mars';
+      const onMars = this.missionPhysics.planetId !== 'earth';
       if (onMars) {
         this.scatter.setVisible(true);
         this.terrain.update(this.physics.position);
@@ -1267,6 +1301,7 @@ export class MarsGameEngine {
     this.starship.group.visible = (sbDx * sbDx + sbDz * sbDz) <= 1200 * 1200;
     this.starship.updateLOD(this.camera.position);
 
+    this.journey.updateLocalSky(this.camera);
     this.renderer.render(this.scene, this.camera);
     this.notifyFirstFrame();
   }

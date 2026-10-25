@@ -28,3 +28,11 @@ test('Kepler solver converges around apsides', () => {
     assert.ok(Math.abs(E - e * Math.sin(E) - m) < 1e-10);
   }
 });
+
+test('Earth/Moon transfer uses Earth gravity and reverses the same ellipse',()=>{
+  const out=createTransfer('earth','moon'), back=createTransfer('moon','earth');
+  assert.equal(out.seconds,back.seconds);
+  assert.ok(out.seconds/86400>4 && out.seconds/86400<6);
+  assert.ok(Math.abs(Math.hypot(sampleTransfer(out,1).x,sampleTransfer(out,1).z)-384400000)<0.01);
+  assert.ok(sampleTransfer(back,1).speed>sampleTransfer(back,0).speed);
+});

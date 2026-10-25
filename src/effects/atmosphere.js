@@ -50,6 +50,7 @@ export class MarsAtmosphere {
       depthTest: false,
       uniforms: {
         uTime: { value: 0 },
+        uVacuum: { value: 0 },
         uSunPos: { value: SUN_DIR.clone() },
         uSkyZenith: { value: new THREE.Color(0xc47e5a) },     // Deep Martian butterscotch zenith
         uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Luminous dusty salmon horizon matched to terrain fog
@@ -72,6 +73,7 @@ export class MarsAtmosphere {
       `,
       fragmentShader: `
         uniform float uTime;
+        uniform float uVacuum;
         uniform vec3 uSunPos;
         uniform vec3 uSkyZenith;
         uniform vec3 uSkyHorizon;
@@ -164,6 +166,7 @@ export class MarsAtmosphere {
 
           vec3 limbGlow = mix(uLimbTint, uSkyHorizon, atmoDensity) * limbBand * sunSide * 0.85;
           limbGlow += vec3(0.32, 0.66, 0.98) * upperBlueBand * sunSide * 0.55;
+          limbGlow *= 1.0-uVacuum;
 
           // Blend daytime sky dome with cosmic space as altitude rises
           float skyCoverage = smoothstep(-0.08, 0.04, elevAboveHorizon) * atmoDensity;
@@ -222,11 +225,11 @@ export class MarsAtmosphere {
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
-    this.ambientLight = new THREE.AmbientLight(0x7a5044, 0.7);
+    this.ambientLight = new THREE.AmbientLight(0xcbd2dc, 0.7);
     this.scene.add(this.ambientLight);
 
     // Warm sky fill / sand bounce light (soft, realistic shadow fill)
-    this.hemiLight = new THREE.HemisphereLight(0xe8b496, 0xa0583a, 0.95);
+    this.hemiLight = new THREE.HemisphereLight(0xe2e7ef, 0x7b7470, 0.95);
     this.scene.add(this.hemiLight);
 
     // Atmospheric perspective for all standard-lit objects (terrain has its own matching fog)
@@ -383,13 +386,19 @@ export class MarsAtmosphere {
     skyClone.material.uniforms.uTime.value = 0;
     skyClone.material.uniforms.uAltitude.value = 0;
     skyClone.material.uniforms.uSpaceFade.value = 0;
+    // Neutral IBL keeps steel silver while the visible sky retains its colour.
+    for (const name of ['uSkyZenith','uSkyHorizon','uForwardTint','uGroundTint','uLimbTint']) {
+      const color = skyClone.material.uniforms[name].value;
+      const gray = color.r*0.2126+color.g*0.7152+color.b*0.0722;
+      color.lerp(new THREE.Color(gray,gray,gray),0.94);
+    }
     skyClone.renderOrder = -10;
     envScene.add(skyClone);
 
     const isEarth = this.planetId === 'earth';
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(95, 16).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: isEarth ? 0x5a7d52 : 0xc4724a })
+      new THREE.MeshBasicMaterial({ color: 0x73777b })
     );
     ground.position.y = -1.0;
     envScene.add(ground);
@@ -711,6 +720,7 @@ export class MarsAtmosphere {
 
     if (this.skyMat) {
       const u = this.skyMat.uniforms;
+      u.uVacuum.value = planetId === 'moon' ? 1 : 0;
       u.uSkyZenith.value.setHex(sky.zenith);
       u.uSkyHorizon.value.setHex(sky.horizon);
       u.uSunColor.value.setHex(sky.sun);
@@ -744,7 +754,7 @@ export class MarsAtmosphere {
     }
 
     // Surface dust, tracks and Martian moons are Mars-only.
-    const isMars = planetId !== 'earth';
+    const isMars = planetId === 'mars';
     if (this.dustPoints) this.dustPoints.visible = isMars && !this.isFlight;
     if (this.tracks) this.tracks.visible = isMars && !this.isFlight;
     if (this.phobos) this.phobos.visible = isMars && !this.isFlight;
@@ -757,7 +767,7 @@ export class MarsAtmosphere {
 
   setFlightMode(isFlight) {
     this.isFlight = isFlight;
-    const isMars = this.planetId !== 'earth';
+    const isMars = this.planetId === 'mars';
     if (this.dustPoints) this.dustPoints.visible = !isFlight && isMars;
     if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = isMars;
     if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight && isMars && this.dustDensity > 0.45;
@@ -1223,7 +1233,7 @@ export class MarsAtmosphere {
 
   setAltitude(alt, speed = 0) {
     const a = Math.max(0, alt);
-    const spaceFade = THREE.MathUtils.clamp((a - 1500) / 14500, 0.0, 1.0);
+    const spaceFade = this.planetId === 'moon' ? 1 : 1-Math.exp(-a/(this.planetId === 'earth' ? 14000 : 11000));
     if (this.skyMat) {
       this.skyMat.uniforms.uSpaceFade.value = spaceFade;
       this.skyMat.uniforms.uAltitude.value = a;
@@ -1242,10 +1252,11 @@ export class MarsAtmosphere {
       this.regionalMat.uniforms.uAltitude.value = a;
       this.regionalMat.uniforms.uOpacity.value = regOpacity;
     }
-    if (this.scene.fog && !this.isFlight) {
+    if (this.scene.fog) {
       const isEarth = this.planetId === 'earth';
       this.scene.fog.near = THREE.MathUtils.lerp(isEarth ? 260 : 110, 80000, spaceFade);
       this.scene.fog.far = THREE.MathUtils.lerp(isEarth ? 7600 : 520, 250000, spaceFade);
+      if (this.planetId === 'moon') { this.scene.fog.near=1e8; this.scene.fog.far=2e8; }
     }
     if (this.dustPoints) {
       this.dustPoints.visible = !this.isFlight && a < 600 && this.planetId !== 'earth';

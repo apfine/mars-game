@@ -38,7 +38,7 @@ export class MarsRoverPhysics {
     this.brakeForce = 38.0; // m/s²
     this.turnSpeed = 2.2; // rad/s
     this.steerAngleVisual = 0.52; // max visual wheel steer angle
-    this.gravity = 16.0; // Snappy downward gravity for arcade vehicle control
+    this.gravity = 3.721;
 
     // Nitro System
     this.nitroCapacity = 100.0;
@@ -302,7 +302,7 @@ export class MarsRoverPhysics {
     );
 
     const ax = (this.velocity.x - this.prevVelocity.x) / dt;
-    const ay = ((this.velocity.y - this.prevVelocity.y) / dt) + (this.isAirborne ? 0.0 : 3.721);
+    const ay = ((this.velocity.y - this.prevVelocity.y) / dt) + (this.isAirborne ? 0.0 : this.gravity);
     const az = (this.velocity.z - this.prevVelocity.z) / dt;
     const properG = Math.hypot(ax, ay, az) / 9.80665;
     this.gForce = properG.toFixed(2);

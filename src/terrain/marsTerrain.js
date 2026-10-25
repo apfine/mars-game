@@ -287,6 +287,19 @@ export class MarsTerrainManager {
     this.material.uniforms.uQuality.value = qVal;
   }
 
+  setPlanet(id) {
+    this.planetId = id;
+    this._originalColors ||= new Map(Object.entries(this.material.uniforms).filter(([,u])=>u.value?.isColor).map(([k,u])=>[k,u.value.clone()]));
+    for (const [name,color] of this._originalColors) {
+      this.material.uniforms[name].value.copy(color);
+      if (id === 'moon') {
+        const gray = color.r*0.2126+color.g*0.7152+color.b*0.0722;
+        this.material.uniforms[name].value.setRGB(gray,gray,gray);
+      }
+    }
+    this.material.uniforms.uGridEnabled.value = 0;
+  }
+
   setFlightMode(isFlight) {
     this.material.uniforms.uFlightMode.value = isFlight ? 1.0 : 0.0;
   }
@@ -294,8 +307,8 @@ export class MarsTerrainManager {
   setCameraAltitude(alt) {
     const a = Math.max(0, alt);
     this.material.uniforms.uCamAltitude.value = a;
-    this.material.uniforms.uFogNear.value = 110.0;
-    this.material.uniforms.uFogFar.value = 520.0;
+    this.material.uniforms.uFogNear.value = this.planetId === 'moon' ? 1e8 : 110;
+    this.material.uniforms.uFogFar.value = this.planetId === 'moon' ? 2e8 : 520;
     // Hide the 840m near-ground 3D chunk grid above 920m so it never appears as a tiny square from high altitude
     if (this.group) {
       this.group.visible = a < 920.0;
@@ -373,6 +386,7 @@ export class MarsTerrainManager {
   }
 
   update(playerPos) {
+    if (!Number.isFinite(playerPos.x) || !Number.isFinite(playerPos.z)) return;
     const pcx = Math.floor((playerPos.x + CHUNK_SIZE * 0.5) / CHUNK_SIZE);
     const pcz = Math.floor((playerPos.z + CHUNK_SIZE * 0.5) / CHUNK_SIZE);
 

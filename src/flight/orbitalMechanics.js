@@ -2,6 +2,7 @@
 export const AU = 149597870700;
 export const SUN_MU = 1.32712440018e20;
 export const SCENE_AU = 180000;
+export function sceneRadius(metres) { return metres / AU * SCENE_AU; }
 export const SOLAR_BODIES = [
   { id: 'mercury', au: 0.3871, radius: 2439700, color: 0xa99c8c },
   { id: 'venus', au: 0.7233, radius: 6051800, color: 0xe6c58c },
@@ -20,6 +21,12 @@ export function solveKepler(meanAnomaly, eccentricity) {
   return e;
 }
 export function createTransfer(from, to) {
+  if ((from === 'earth' && to === 'moon') || (from === 'moon' && to === 'earth')) {
+    const r1 = 6571000, r2 = 384400000, a = (r1+r2)/2, mu = 3.986004418e14;
+    return { a, e:(r2-r1)/(r2+r1), mu, inward:from==='moon', lunar:true, seconds:Math.PI*Math.sqrt(a**3/mu) };
+  }
+  from = from === 'moon' ? 'earth' : from;
+  to = to === 'moon' ? 'earth' : to;
   const r1 = SOLAR_BODIES.find(b => b.id === from).au * AU;
   const r2 = SOLAR_BODIES.find(b => b.id === to).au * AU;
   const a = (r1 + r2) / 2;
@@ -32,6 +39,6 @@ export function sampleTransfer(orbit, t) {
   const x = orbit.a * (Math.cos(E) - orbit.e);
   const z = orbit.a * Math.sqrt(1 - orbit.e ** 2) * Math.sin(E);
   const r = Math.hypot(x, z);
-  return { x, z, speed: Math.sqrt(SUN_MU * (2 / r - 1 / orbit.a)) };
+  return { x, z, speed: Math.sqrt((orbit.mu || SUN_MU) * (2 / r - 1 / orbit.a)) };
 }
 export function orbitalRate(au) { return Math.sqrt(SUN_MU / (au * AU) ** 3); }

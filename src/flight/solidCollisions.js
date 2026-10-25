@@ -40,7 +40,7 @@ export class StarbaseObstacleSystem {
         z: oz,
         radius: 12.0,
         minY: -5,
-        maxY: L.olmTop + 4.0
+        maxY: L.olmTop
       },
 
       // 2. Mechazilla Launch Tower (Main 145m tower)
@@ -260,11 +260,49 @@ export class StarbaseObstacleSystem {
         maxY: L.conveyor.beltY + 2.0
       });
     }
+    // Match the TWO rendered halls, including their central alley, portal
+    // lintels, foundations and roofs. The former single big box did not match art.
+    this.obstacles = this.obstacles.filter(o => !o.name.startsWith('MEGA_BAY') && !o.name.startsWith('CONVEYOR_PIER'));
+    const f = L.factory, front = f.z - f.depth / 2;
+    const box = (name, x, z, w, d, minY, maxY) => this.obstacles.push({
+      type: 'box', name, material: 'metal', minX: ox+x-w/2, maxX: ox+x+w/2,
+      minZ: oz+z-d/2, maxZ: oz+z+d/2, minY, maxY
+    });
+    box('FACTORY_FOUNDATION', f.x, f.z, f.width+16, f.depth+16, 0, f.slabTop);
+    for (const [i, offset] of f.bayOffsets.entries()) {
+      const x = f.x + offset, w = f.bayWidth, door = f.doorWidth;
+      for (const side of [-1, 1]) {
+        box(`BAY_${i}_SIDE_${side}`, x+side*(w/2-0.8), f.z, 2.4, f.depth, 0, f.height);
+        const flank = (w-door)/2;
+        box(`BAY_${i}_FRONT_${side}`, x+side*(door/2+flank/2), front+0.8, flank, 2.2, 0, f.height);
+      }
+      box(`BAY_${i}_REAR`, x, f.z+f.depth/2-0.8, w, 1.6, 0, f.height);
+      box(`BAY_${i}_HEADER`, x, front+0.8, door, 2.2, f.doorHeight, f.height);
+      box(`BAY_${i}_ROOF`, x, f.z, w+2, f.depth+2, f.height, f.height+2.4);
+      box(`GATE_${i ? 'ship' : 'booster'}`, x, front+0.8, door, 1.4, f.doorHeight, f.doorHeight*2);
+    }
+  }
+
+  setGate(kind, open) {
+    const gate = this.obstacles.find(o => o.name === `GATE_${kind}`);
+    if (gate) { gate.minY = open * L.factory.doorHeight; gate.maxY = gate.minY + L.factory.doorHeight; }
+  }
+
+  supportHeight(x, z, groundY) {
+    const f = L.factory;
+    const localZ = z-this.padCoords.y, localX = x-this.padCoords.x;
+    const edge = f.z-f.depth/2-8;
+    if (localZ > edge-10 && localZ < edge &&
+      f.bayOffsets.some(offset => Math.abs(localX-f.x-offset)<14)) {
+      return groundY+(localZ-edge+10)/10*f.slabTop;
+    }
+    return Math.abs(x-this.padCoords.x-f.x) <= (f.width+16)/2 &&
+      Math.abs(z-this.padCoords.y-f.z) <= (f.depth+16)/2 ? groundY+f.slabTop : groundY;
   }
 
   // Resolves a circle/sphere against all obstacles in XZ.
   // Returns { nx, nz, pen, hit: true } if collision was detected, or null.
-  resolve(position, radius = 1.0, currentY = 0) {
+  resolve(position, radius = 1.0, currentY = 0, bodyHeight = 0) {
     let hitAny = false;
     let totalNx = 0;
     let totalNz = 0;
@@ -273,8 +311,10 @@ export class StarbaseObstacleSystem {
     let hitMaterial = 'metal';
 
     for (const obs of this.obstacles) {
+      // Floors are resolved vertically by supportHeight, including their ramps.
+      if (obs.name === 'FACTORY_FOUNDATION') continue;
       // Height check
-      if (currentY !== undefined && (currentY < obs.minY || currentY > obs.maxY)) {
+      if (currentY !== undefined && (currentY + bodyHeight < obs.minY || currentY >= obs.maxY)) {
         continue;
       }
 
@@ -286,7 +326,7 @@ export class StarbaseObstacleSystem {
         if (distSq < minSafeDist * minSafeDist) {
           const dist = Math.sqrt(distSq) || 0.001;
           const pen = minSafeDist - dist;
-          const nx = dx / dist;
+          const nx = distSq < 1e-10 ? 1 : dx / dist;
           const nz = dz / dist;
           position.x += nx * pen;
           position.z += nz * pen;

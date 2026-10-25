@@ -86,7 +86,16 @@ export const PLANET_PROFILES = {
   }
 };
 
-export const DESTINATIONS = ['mars', 'earth'];
+PLANET_PROFILES.moon = {
+  id: 'moon', name: 'MOON', designation: 'LUNA', gravity: 1.625,
+  gasConstant: 1, gamma: 1, radius: 1737400, surfaceDensity: 0,
+  surfacePressurePa: 0, seaLevelTemperatureK: 220, starbaseName: 'STARBASE SELENE',
+  entryAltitude: 20000, arrivalSpeed: 150,
+  sky: { zenith: 0x000000, horizon: 0x000000, sun: 0xffffff, halo: 0x000000, limb: 0x000000, ground: 0x808080, forward: 0x000000 },
+  layers: buildLayers(0, [{bottom:0,top:100000,scaleHeight:1,tempBottom:220,tempTop:220}])
+};
+
+export const DESTINATIONS = ['mars', 'earth', 'moon'];
 
 export function getPlanetProfile(id) {
   return PLANET_PROFILES[id] || PLANET_PROFILES.mars;

@@ -49,9 +49,9 @@ function createBodyTexture() {
 
   // Mars dust settled low and in a fine film everywhere
   const dust = g.createLinearGradient(0, 0, 0, S);
-  dust.addColorStop(0.0, 'rgba(176,108,72,0.62)');
-  dust.addColorStop(0.35, 'rgba(176,108,72,0.22)');
-  dust.addColorStop(1.0, 'rgba(176,108,72,0.10)');
+  dust.addColorStop(0.0, 'rgba(155,143,129,0.18)');
+  dust.addColorStop(0.35, 'rgba(155,143,129,0.08)');
+  dust.addColorStop(1.0, 'rgba(155,143,129,0.02)');
   g.fillStyle = dust;
   g.fillRect(0, 0, S, S);
   for (let i = 0; i < 250; i++) {
@@ -166,6 +166,14 @@ export class MarsRoverModel {
     this.box(1.62, 0.05, 2.5, 0.02, darkMetal, 0, H(1.395), -0.1);        // top deck plate
 
     // Warm electronics box with raised vents
+    // Expedition rack, guarded lights and modular cargo pods share the chassis
+    // material batches rather than adding per-frame props or particle systems.
+    for (const sx of [-1,1]) {
+      this.box(0.3,0.34,0.95,0.05,paint,sx*.76,H(1.55),-.9,C,true);
+      this.strut(V(sx*.86,H(1.48),-.45),V(sx*.86,H(1.48),1),.035,aluminum);
+    }
+    this.box(1.45,.055,.1,.025,darkMetal,0,H(1.75),1.3);
+    this.box(1.2,.035,.025,.01,lampLens,0,H(1.75),1.36);
     this.box(1.0, 0.26, 0.9, 0.06, paint, 0, H(1.55), 0.62, C, true);
     for (let i = 0; i < 6; i++) {
       this.box(0.8, 0.012, 0.025, 0.004, darkMetal, 0, H(1.685), 0.34 + i * 0.1);

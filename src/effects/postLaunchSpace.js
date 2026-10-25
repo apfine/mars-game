@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { getEarthMaps, getMoonMap } from './earthMaps.js';
+import { getPlanetProfile } from '../flight/planetProfiles.js';
 
 // ---------------------------------------------------------------------------
 // Realistic Procedural Mars Planetary Texture Generator
@@ -19,182 +21,7 @@ let _cachedEarthTexture = null;
 // external image dependencies, yet keep the silhouette of the real continents
 // so the globe reads as Earth from orbit instead of a generic blue marble.
 export function createProceduralEarthTexture() {
-  if (typeof document === 'undefined') return null;
-  if (_cachedEarthTexture) return _cachedEarthTexture;
-
-  const W = 2048;
-  const H = 1024;
-  const cv = document.createElement('canvas');
-  cv.width = W;
-  cv.height = H;
-  const g = cv.getContext('2d');
-  if (!g) return null;
-
-  // ---- Ocean -----------------------------------------------------------
-  const ocean = g.createLinearGradient(0, 0, 0, H);
-  ocean.addColorStop(0.0, '#071b38');
-  ocean.addColorStop(0.18, '#0a2d5f');
-  ocean.addColorStop(0.46, '#0b4b8f');
-  ocean.addColorStop(0.58, '#0d5a9f');
-  ocean.addColorStop(0.82, '#082d61');
-  ocean.addColorStop(1.0, '#06162f');
-  g.fillStyle = ocean;
-  g.fillRect(0, 0, W, H);
-
-  // Subtle sea-floor / current variation.
-  for (let i = 0; i < 420; i++) {
-    const x = Math.random() * W;
-    const y = Math.random() * H;
-    const r = 20 + Math.random() * 130;
-    const grad = g.createRadialGradient(x, y, 0, x, y, r);
-    const warm = Math.random() > 0.55;
-    grad.addColorStop(0, warm ? 'rgba(20,98,150,0.055)' : 'rgba(8,35,80,0.07)');
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = grad;
-    g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  const px = (lon) => ((lon + 180) / 360) * W;
-  const py = (lat) => ((90 - lat) / 180) * H;
-
-  const fillPolygon = (points, fill) => {
-    g.beginPath();
-    for (let i = 0; i < points.length; i++) {
-      const [lon, lat] = points[i];
-      const x = px(lon);
-      const y = py(lat);
-      if (i === 0) g.moveTo(x, y);
-      else g.lineTo(x, y);
-    }
-    g.closePath();
-    g.fillStyle = fill;
-    g.fill();
-  };
-
-  // ---- Continents ------------------------------------------------------
-  // Coordinates are deliberately simplified but preserve real continental
-  // shapes: the Americas, Africa, Europe, Asia, Australia and Antarctica.
-  fillPolygon([
-    [-168, 66], [-150, 71], [-132, 70], [-115, 73], [-95, 73], [-78, 70],
-    [-62, 59], [-52, 47], [-63, 45], [-70, 40], [-81, 25], [-97, 18],
-    [-106, 23], [-115, 31], [-125, 41], [-135, 53], [-150, 61]
-  ], '#46763d');
-  fillPolygon([
-    [-81, 12], [-70, 12], [-54, 4], [-35, -6], [-39, -23], [-47, -31],
-    [-54, -40], [-66, -55], [-75, -50], [-72, -31], [-79, -10]
-  ], '#3f7238');
-  fillPolygon([
-    [-17, 37], [-5, 36], [10, 37], [31, 31], [43, 12], [51, 11],
-    [42, -12], [35, -25], [20, -35], [10, -30], [1, -5], [-10, 5],
-    [-17, 20]
-  ], '#7a793d');
-  fillPolygon([
-    [-10, 36], [0, 44], [14, 38], [30, 40], [40, 45], [30, 60],
-    [20, 70], [6, 60], [-5, 50]
-  ], '#4e7a3b');
-  fillPolygon([
-    [30, 45], [60, 55], [88, 70], [120, 75], [158, 70], [180, 60],
-    [172, 10], [145, 0], [122, -9], [100, 5], [80, 8], [60, 25],
-    [42, 30], [30, 40]
-  ], '#5f7d3b');
-  fillPolygon([
-    [112, -10], [130, -12], [153, -25], [150, -38], [125, -35],
-    [114, -25]
-  ], '#8b6f3e');
-  fillPolygon([
-    [-55, 60], [-40, 59], [-20, 60], [-18, 76], [-28, 83], [-46, 83],
-    [-60, 75]
-  ], '#d9e8e9');
-  fillPolygon([
-    [-180, -65], [180, -65], [180, -90], [-180, -90]
-  ], '#eef5f5');
-
-  // Great Britain / Ireland, Japan, Madagascar, New Zealand.
-  fillPolygon([[-11, 50], [-5, 58], [1, 51], [-4, 49]], '#527c3e');
-  fillPolygon([[-10, 52], [-6, 55], [-8, 51]], '#4e783a');
-  fillPolygon([[130, 31], [141, 40], [146, 43], [142, 34], [135, 31]], '#4c753d');
-  fillPolygon([[43, -12], [50, -17], [47, -25], [43, -20]], '#6e7e3e');
-  fillPolygon([[166, -35], [178, -38], [174, -46], [166, -45]], '#5b7f46');
-
-  // ---- Deserts, forests, mountain ranges -------------------------------
-  const biome = (cx, cy, rx, ry, color, alpha = 1) => {
-    const grad = g.createRadialGradient(px(cx), py(cy), 4, px(cx), py(cy), Math.max(rx, ry));
-    grad.addColorStop(0, color);
-    grad.addColorStop(0.6, color);
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    g.globalAlpha = alpha;
-    g.fillStyle = grad;
-    g.beginPath();
-    g.ellipse(px(cx), py(cy), rx, ry, -0.18, 0, Math.PI * 2);
-    g.fill();
-    g.globalAlpha = 1;
-  };
-  // Sahara, Arabian, Gobi, Australian outback, Atacama, Kalahari.
-  biome(12, 23, 150, 70, '#c8a96a', 0.9);
-  biome(42, 22, 70, 48, '#c7a164', 0.78);
-  biome(95, 43, 110, 50, '#b9a477', 0.7);
-  biome(134, -25, 100, 48, '#b4824e', 0.8);
-  biome(-70, -24, 24, 70, '#b39261', 0.7);
-  biome(22, -23, 55, 40, '#b0955d', 0.55);
-  // Amazon, Congo, Southeast Asia rainforests.
-  biome(-62, -4, 90, 44, '#1f6131', 0.9);
-  biome(20, 0, 65, 38, '#2a6a35', 0.85);
-  biome(110, 2, 75, 35, '#256a34', 0.75);
-  // Boreal forest belt.
-  biome(-100, 55, 200, 30, '#315c3a', 0.6);
-  biome(100, 60, 250, 34, '#315c3a', 0.6);
-  // Rockies / Andes / Himalaya rock + snow.
-  biome(-108, 42, 28, 60, '#8b8170', 0.55);
-  biome(-70, -25, 18, 100, '#8c7d69', 0.65);
-  biome(82, 32, 90, 18, '#8e806b', 0.55);
-  biome(82, 32, 60, 8, '#e7ecec', 0.5);
-
-  // ---- Coastline haze / islands ----------------------------------------
-  for (let i = 0; i < 520; i++) {
-    const lon = -180 + Math.random() * 360;
-    const lat = -58 + Math.random() * 132;
-    const r = 1 + Math.random() * 5;
-    g.fillStyle = `rgba(60,110,58,${0.08 + Math.random() * 0.12})`;
-    g.beginPath();
-    g.arc(px(lon), py(lat), r, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  // ---- Fine terrain grain ---------------------------------------------
-  const img = g.getImageData(0, 0, W, H);
-  const d = img.data;
-  for (let y = 0; y < H; y += 2) {
-    for (let x = 0; x < W; x += 2) {
-      const i = (y * W + x) * 4;
-      const n = (Math.random() - 0.5) * 8;
-      d[i] = Math.max(0, Math.min(255, d[i] + n));
-      d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + n));
-      d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + n));
-    }
-  }
-  g.putImageData(img, 0, 0);
-
-  // ---- Polar caps ------------------------------------------------------
-  const north = g.createLinearGradient(0, 0, 0, 78);
-  north.addColorStop(0, 'rgba(248,252,255,0.98)');
-  north.addColorStop(0.55, 'rgba(240,249,255,0.78)');
-  north.addColorStop(1, 'rgba(240,249,255,0)');
-  g.fillStyle = north;
-  g.fillRect(0, 0, W, 86);
-  const south = g.createLinearGradient(0, H - 86, 0, H);
-  south.addColorStop(0, 'rgba(240,249,255,0)');
-  south.addColorStop(0.45, 'rgba(242,250,255,0.8)');
-  south.addColorStop(1, 'rgba(250,254,255,0.98)');
-  g.fillStyle = south;
-  g.fillRect(0, H - 86, W, 86);
-
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  _cachedEarthTexture = tex;
-  return tex;
+  return typeof document === 'undefined' ? null : getEarthMaps().map;
 }
 
 export function createProceduralMarsTexture() {
@@ -439,7 +266,7 @@ export class PostLaunchSpace {
     this.scene.add(this.group);
 
     // Massive 165 km planetary radius in camera space so the horizon curvature looks vast and authentic, never compressed!
-    this.planetRadius = 165000.0;
+    this.planetRadius = 3389500;
     this.sunDirection = new THREE.Vector3(0.5, 0.65, 0.45).normalize();
     this.orbitRotation = 0.0;
     this.initialized = false;
@@ -451,7 +278,7 @@ export class PostLaunchSpace {
   // albedo, Rayleigh-blue limb and cloud treatment so arriving from Mars never
   // shows a red Mars-looking planet above the Earth Starbase.
   setPlanet(planetId) {
-    this.pendingPlanetId = planetId === 'earth' ? 'earth' : 'mars';
+    this.pendingPlanetId = getPlanetProfile(planetId).id;
     this.planetId = this.pendingPlanetId;
     if (!this.initialized) return;
     this._applyPlanetLook();
@@ -459,10 +286,19 @@ export class PostLaunchSpace {
 
   _applyPlanetLook() {
     const earth = this.planetId === 'earth';
+    const radius = getPlanetProfile(this.planetId).radius;
+    if (this.planetRadius !== radius) {
+      this.planetRadius = radius;
+      this.planetMesh.geometry.dispose();
+      this.planetMesh.geometry = new THREE.SphereGeometry(radius, 192, 128);
+      this.airglowMesh.geometry.dispose();
+      this.airglowMesh.geometry = new THREE.SphereGeometry(radius * 1.014, 64, 48);
+    }
     if (this.planetMat) {
       const u = this.planetMat.uniforms;
-      u.uMap.value = earth ? createProceduralEarthTexture() : createProceduralMarsTexture();
+      u.uMap.value = earth ? createProceduralEarthTexture() : this.planetId === 'moon' ? getMoonMap() : createProceduralMarsTexture();
       u.uEarth.value = earth ? 1 : 0;
+      u.uMoon.value = this.planetId === 'moon' ? 1 : 0;
       u.uAtmosphereColor.value.setHex(earth ? 0x5b9fe8 : 0xc8825c);
       u.uAirglowBlue.value.setHex(earth ? 0x9bd6ff : 0x5ca8e6);
     }
@@ -470,8 +306,8 @@ export class PostLaunchSpace {
       this.airglowMat.uniforms.uDustColor.value.setHex(earth ? 0x7fb8ef : 0xe28d62);
       this.airglowMat.uniforms.uAirglowCyan.value.setHex(earth ? 0x6fc5ff : 0x58b2ff);
     }
-    if (this.phobosMesh) this.phobosMesh.visible = !earth;
-    if (this.deimosMesh) this.deimosMesh.visible = !earth;
+    if (this.phobosMesh) this.phobosMesh.visible = this.planetId === 'mars';
+    if (this.deimosMesh) this.deimosMesh.visible = this.planetId === 'mars';
   }
 
   ensureInitialized() {
@@ -501,6 +337,7 @@ export class PostLaunchSpace {
         uAtmosphereColor: { value: new THREE.Color(0xc8825c) },
         uAirglowBlue: { value: new THREE.Color(0x5ca8e6) },
         uEarth: { value: 0.0 },
+        uMoon: { value: 0 },
         uTime: { value: 0.0 }
       },
       vertexShader: `
@@ -527,6 +364,7 @@ export class PostLaunchSpace {
         uniform vec3 uAtmosphereColor;
         uniform vec3 uAirglowBlue;
         uniform float uEarth;
+        uniform float uMoon;
         uniform float uTime;
 
         varying vec2 vUv;
@@ -596,9 +434,12 @@ export class PostLaunchSpace {
           vec3 tangent = normalize(cross(vec3(0.0, 0.0, 1.0), S + vec3(0.0001)));
           vec3 bitangent = normalize(cross(S, tangent));
 
-          float h0 = sampleRelief(S);
-          float hx = sampleRelief(normalize(S + tangent * eps));
-          float hy = sampleRelief(normalize(S + bitangent * eps));
+          float h0 = 0.5, hx = 0.5, hy = 0.5;
+          if (uEarth < 0.5 && uMoon < 0.5) {
+            h0 = sampleRelief(S);
+            hx = sampleRelief(normalize(S + tangent * eps));
+            hy = sampleRelief(normalize(S + bitangent * eps));
+          }
 
           vec3 bumpN = normalize(N + (tangent * (h0 - hx) + bitangent * (h0 - hy)) * 0.75);
 
@@ -615,6 +456,7 @@ export class PostLaunchSpace {
           float latMask = mix(1.0 - smoothstep(0.15, 0.75, abs(S.z)), 1.0, earth);
           float cloudNoise = fbm3D(S * mix(14.0, 10.0, earth) + vec3(uTime * mix(0.002, 0.006, earth), 0.0, uTime * 0.001));
           float cloudFactor = smoothstep(mix(0.64, 0.53, earth), mix(0.85, 0.76, earth), cloudNoise) * latMask * mix(0.24, 0.78, earth);
+          cloudFactor *= 1.0-uMoon;
           baseAlbedo = mix(baseAlbedo, mix(vec3(0.82, 0.68, 0.58), vec3(0.95, 0.98, 1.0), earth), cloudFactor);
 
           // Day/Night Solar Terminator with calibrated dusty regolith reflectance (never bleaches white!)
@@ -646,7 +488,10 @@ export class PostLaunchSpace {
           float edgeFeather = smoothstep(0.002, 0.075, dot(N, V));
           float finalAlpha = uFade * mix(1.0, edgeFeather, earth > 0.5 ? 0.88 : 0.75);
 
+          if (uMoon > 0.5) surfaceColor = baseAlbedo * (max(0.0, dot(N,L)) * 0.95 + 0.025);
           gl_FragColor = vec4(surfaceColor, finalAlpha);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }
       `,
       transparent: true,
@@ -853,7 +698,7 @@ export class PostLaunchSpace {
     }
 
     // Smooth cross-fade between the 36km regional Martian surface (0 - 14km) and the 165km 3D planetary globe (3km - 100km+)
-    const fade = THREE.MathUtils.smoothstep(alt, 3000.0, 12500.0);
+    const fade = this.planetId === 'moon' ? THREE.MathUtils.smoothstep(alt,200,2000) : THREE.MathUtils.smoothstep(alt,3000,12500);
     this.group.visible = fade > 0.005;
 
     if (!this.group.visible) return;
@@ -870,20 +715,26 @@ export class PostLaunchSpace {
     // Keep the 165km Mars globe horizontally centered directly beneath the active camera (shipPos.x, shipPos.z)
     // and keep visual altitude close to the planetary surface during atmospheric entry (12km - 50km)
     const clampedAlt = Math.max(0.0, alt);
-    const visualSpaceAlt = clampedAlt <= 3500.0
-      ? clampedAlt
-      : 3500.0 + (clampedAlt - 3500.0) * 0.30;
+    const visualSpaceAlt = clampedAlt;
     const globeCenterY = shipPos.y - this.planetRadius - visualSpaceAlt;
 
-    this.planetMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
-    this.airglowMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
+    this.planetMesh.position.set(this.padCoords.x, globeCenterY, this.padCoords.y);
+    this.airglowMesh.position.copy(this.planetMesh.position);
 
     // Roll the planet surface along its equator (Z-axis polar spin) as the spacecraft travels downrange (+X) and orbits
-    this.orbitRotation += dt * (0.0025 + Math.max(0, speed - 400) * 0.000004);
+    this.orbitRotation += dt * speed / this.planetRadius;
     const downrangeLon = (shipPos.x - this.padCoords.x) * 0.000008;
     const downrangeLat = (shipPos.z - this.padCoords.y) * 0.000008;
-    this.planetMesh.rotation.z = -0.35 + this.orbitRotation * 0.12 + downrangeLon;
-    this.planetMesh.rotation.x = THREE.MathUtils.clamp(downrangeLat, -0.35, 0.35);
+    if (this.planetId === 'earth') {
+      // A Gulf coast launch site, aligned to the satellite map's latitude/longitude.
+      const lat = 25.997 * Math.PI / 180, lon = -97.156 * Math.PI / 180;
+      const normal = this._siteNormal || (this._siteNormal = new THREE.Vector3());
+      normal.set(Math.cos(lat) * Math.cos(lon), Math.sin(lat), -Math.cos(lat) * Math.sin(lon));
+      this.planetMesh.quaternion.setFromUnitVectors(normal, this._siteUp || (this._siteUp = new THREE.Vector3(0, 1, 0)));
+    } else {
+      this.planetMesh.rotation.z = -0.35 + this.orbitRotation * 0.12 + downrangeLon;
+      this.planetMesh.rotation.x = THREE.MathUtils.clamp(downrangeLat, -0.35, 0.35);
+    }
 
     // Orbit Phobos across the Martian space sky
     if (this.phobosMesh) {
