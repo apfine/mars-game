@@ -117,7 +117,7 @@ function createSteelMaps() {
   g.fillRect(0, 0, S, S);
   hg.fillStyle = '#808080';
   hg.fillRect(0, 0, S, S);
-  og.fillStyle = 'rgb(255, 58, 246)';
+  og.fillStyle = 'rgb(255, 90, 246)';
   og.fillRect(0, 0, S, S);
 
   // Barrel ring-by-ring reflectance variation & staggered vertical panel seams
@@ -601,12 +601,12 @@ export class StarshipMissionVehicle {
     this.matSteel = new THREE.MeshStandardMaterial({
       map: steelMaps.map,
       normalMap: steelMaps.normalMap,
-      normalScale: new THREE.Vector2(0.85, 0.85),
+      normalScale: new THREE.Vector2(0.32, 0.32),
       roughnessMap: steelMaps.ormMap,
       metalnessMap: steelMaps.ormMap,
       roughness: 1.0,
       metalness: 1.0,
-      envMapIntensity: 1.35,
+      envMapIntensity: 1.65,
       dithering: true
     });
 
@@ -2409,33 +2409,14 @@ export class StarshipMissionVehicle {
 
         void main() {
           if (uHeat <= 0.005) discard;
-          // Multi-spectral atmospheric ionization sheath:
-          // Leading detached bow shock ionizes to brilliant neon cyan/turquoise and electric violet;
-          // Stagnation front compresses into blazing incandescent white-gold;
-          // Downstream wake expands into deep solar orange and glowing amber.
-          vec3 leadingCyan = vec3(0.18, 0.94, 0.98);
-          vec3 ionizedViolet = vec3(0.70, 0.20, 1.0);
-          vec3 stagnationWhite = vec3(1.0, 0.98, 0.88);
-          vec3 amberWake = vec3(1.0, 0.46, 0.08);
-
-          // Windward wrap factor: strongest directly on +Z belly center (vPos.z > 0), fading at side edges
-          float bellyCenter = clamp(vPos.z / 5.0, 0.0, 1.0);
-          float axialDist = abs(vPos.y - 24.0) / 26.0;
-          float envelope = clamp(bellyCenter * (1.15 - axialDist * 0.45), 0.0, 1.0);
-
-          // Sequential coverage: at low uHeat, only stagnation zone glows; at peak uHeat, full sheath ignites
-          float activeMask = smoothstep(1.0 - uHeat * 0.95, 1.05, envelope + uHeat * 0.35);
-          float stream = 0.86 + 0.14 * sin(vPos.y * 0.7 - uTime * 28.0 + vPos.x * 1.5);
-
-          // Shock front detached boundary vs compressed stagnation zone
-          float edgeShock = pow(1.0 - abs(vNormal.z), 1.3);
-          vec3 shockEdgeCol = mix(leadingCyan, ionizedViolet, edgeShock);
-          vec3 coreCol = mix(amberWake, stagnationWhite, pow(bellyCenter, 1.5));
-          vec3 plasmaCol = mix(shockEdgeCol, coreCol, bellyCenter * 0.72 + 0.28);
-          plasmaCol = mix(plasmaCol, stagnationWhite, smoothstep(0.60, 0.98, uHeat) * bellyCenter);
-
-          float rim = 0.38 + 0.62 * (1.0 - abs(vNormal.z));
-          float alpha = clamp(activeMask * rim * stream * pow(uHeat, 1.1) * 1.35, 0.0, 0.95);
+          // Local-space windward mask stays attached to the heatshield as the camera moves.
+          float belly = smoothstep(0.0, 4.8, vPos.z);
+          float ends = smoothstep(0.0, 5.0, vPos.y) * (1.0 - smoothstep(40.0, 49.0, vPos.y));
+          float stream = 0.82 + 0.12 * sin(vPos.y * 0.9 - uTime * 13.0 + sin(vPos.x * 3.0));
+          float sheath = pow(belly, 1.7) * ends;
+          vec3 plasmaCol = mix(vec3(0.9, 0.14, 0.025), vec3(1.0, 0.62, 0.22), uHeat);
+          plasmaCol = mix(plasmaCol, vec3(1.0, 0.89, 0.7), pow(uHeat * belly, 3.0));
+          float alpha = sheath * stream * uHeat * 0.42;
           gl_FragColor = vec4(plasmaCol, alpha);
         }
       `
@@ -2589,23 +2570,24 @@ export class StarshipMissionVehicle {
     }
   }
 
-  setReentryHeat(heatNormalized) {
+  setReentryHeat(heatNormalized, ionization = 0) {
     const h = THREE.MathUtils.clamp(heatNormalized, 0.0, 1.0);
-    const active = h > 0.005;
+    const plasma = h * ionization;
+    const active = plasma > 0.015;
     if (this.plasmaMesh) this.plasmaMesh.visible = active;
     if (this.nosePlasma) this.nosePlasma.visible = active;
     if (this.plasmaMat) {
-      this.plasmaMat.uniforms.uHeat.value = h;
+      this.plasmaMat.uniforms.uHeat.value = plasma;
     }
     if (this.matHeatshield) {
-      if (active) {
+      if (h > 0.01) {
         if (!this.matHeatshield.emissive) this.matHeatshield.emissive = new THREE.Color(0x000000);
         // Incandescent ramp: dull red -> orange -> white-hot stagnation
         const r = 0.30 + h * 0.70;
         const g = 0.025 + h * h * 0.62;
         const b = h * h * h * 0.38;
         this.matHeatshield.emissive.setRGB(r, g, b);
-        this.matHeatshield.emissiveIntensity = 0.55 + h * 2.6;
+        this.matHeatshield.emissiveIntensity = h * 0.85;
       } else {
         this.matHeatshield.emissive.setRGB(0, 0, 0);
         this.matHeatshield.emissiveIntensity = 1.0;

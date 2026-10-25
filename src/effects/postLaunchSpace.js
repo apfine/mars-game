@@ -197,7 +197,7 @@ export function createProceduralEarthTexture() {
   return tex;
 }
 
-function createProceduralMarsTexture() {
+export function createProceduralMarsTexture() {
   if (typeof document === 'undefined') return null;
   if (_cachedMarsTexture) return _cachedMarsTexture;
 

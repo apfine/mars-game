@@ -151,11 +151,11 @@ export class MarsAtmosphere {
 
           // Forward solar scattering through suspended aerosols. Mars uses a
           // ferric-oxide tint; Earth uses a much cooler, cleaner white-blue.
-          daySky += uForwardTint * pow(sc, 3.0);
+          daySky += uForwardTint * pow(sc, 3.0) * daylightScalar;
 
           // Martian Mie Blue Scattering Halo around the Sun
           float blueMie = pow(sc, 10.0) * 0.34 * atmoDensity;
-          daySky = mix(daySky, uSunHaloBlue, clamp(blueMie, 0.0, 0.65));
+          daySky = mix(daySky, uSunHaloBlue, clamp(blueMie, 0.0, 0.65) * daylightScalar);
 
           // High-altitude Stratospheric / Mesospheric Limb Glow (salmon inner band -> cyan-blue outer airglow)
           float limbBand = exp(-abs(elevAboveHorizon - 0.025) * (10.0 + (1.0 - atmoDensity) * 26.0));
@@ -168,14 +168,14 @@ export class MarsAtmosphere {
           // Blend daytime sky dome with cosmic space as altitude rises
           float skyCoverage = smoothstep(-0.08, 0.04, elevAboveHorizon) * atmoDensity;
           vec3 sky = mix(cosmosCol, daySky, clamp(skyCoverage, 0.0, 1.0));
-          sky += limbGlow * (1.0 - skyCoverage * 0.65);
+          sky += limbGlow * (1.0 - skyCoverage * 0.65) * daylightScalar;
 
           // Lower hemisphere ground fill when inside the atmosphere (prevents dark void below horizon during landing/ascent)
           if (elevAboveHorizon < 0.04) {
             float belowFactor = smoothstep(0.04, -0.18, elevAboveHorizon);
             vec3 groundFill = mix(uSkyHorizon, uGroundTint, smoothstep(0.0, -0.45, elevAboveHorizon));
             float groundVis = clamp(atmoDensity * 1.15, 0.0, 1.0);
-            sky = mix(sky, groundFill, belowFactor * groundVis);
+            sky = mix(sky, groundFill * daylightScalar, belowFactor * groundVis);
           }
 
           // Solar Disk & Corona (visible above planetary limb)
@@ -1263,7 +1263,7 @@ export class MarsAtmosphere {
     const isEarth = this.planetId === 'earth';
     const dayPeriod = isEarth ? 86400.0 : 88775.2; // true rotational sol duration in seconds
     const timeSpeed = (physics && typeof physics.timeScale === 'number') ? physics.timeScale : 1.0;
-    this.diurnalClock = (this.diurnalClock ?? (dayPeriod * 0.38)) + dt * timeSpeed;
+    this.diurnalClock = (this.diurnalClock ?? (dayPeriod * 0.38)) + (physics?.simulationDt ?? dt * timeSpeed);
     const solFraction = (this.diurnalClock % dayPeriod) / dayPeriod;
     const solAngle = solFraction * Math.PI * 2.0;
 
@@ -1274,8 +1274,12 @@ export class MarsAtmosphere {
     dynSunDir.set(
       sunAzim * 0.88,
       sunElev,
-      Math.sin(solAngle * 0.5) * 0.32
+      Math.sin(solAngle) * 0.32
     ).normalize();
+
+    if (physics?.isInterplanetary && physics.sunPosition) {
+      dynSunDir.copy(physics.sunPosition).sub(playerPos).normalize();
+    }
 
     this.skyMat.uniforms.uSunPos.value.copy(dynSunDir);
 
@@ -1299,6 +1303,19 @@ export class MarsAtmosphere {
       this.sunLight.color.setHex(isEarth ? 0x182c44 : 0x22151b);
     }
 
+    const daylight = THREE.MathUtils.smoothstep(sunElev, -0.12, 0.18);
+    this.ambientLight.intensity = THREE.MathUtils.lerp(0.025, 0.45, daylight);
+    this.hemiLight.intensity = THREE.MathUtils.lerp(0.04, 0.8, daylight);
+    const fogBase = this._dayFog || (this._dayFog = new THREE.Color());
+    fogBase.setHex(isEarth ? 0xbcd8f0 : 0xe0aa8c).multiplyScalar(0.025 + daylight * 0.975);
+    if (this.scene.fog) this.scene.fog.color.copy(fogBase);
+    // Deep-space navigation has its own Sun, no local sky light or ground skirt.
+    if (physics?.isInterplanetary) {
+      this.sunLight.intensity = 0;
+      this.ambientLight.intensity = 0.08;
+      this.hemiLight.intensity = 0;
+      if (this.scene.fog) { this.scene.fog.near = 1e7; this.scene.fog.far = 2e7; }
+    }
     // 1. Anchor skydome, regional surface, distant mountains and directional light to active camera/player
     this.skyMesh.position.copy(playerPos);
     if (this.regionalSurfaceMesh && this.regionalSurfaceMesh.visible) {
@@ -1310,7 +1327,7 @@ export class MarsAtmosphere {
     }
     this.sunLight.position.set(
       playerPos.x + dynSunDir.x * 600,
-      playerPos.y + Math.max(-80, dynSunDir.y * 600),
+      playerPos.y + dynSunDir.y * 600,
       playerPos.z + dynSunDir.z * 600
     );
     this.sunLight.target.position.copy(playerPos);
@@ -1324,6 +1341,9 @@ export class MarsAtmosphere {
     if (this.isFlight) {
       this.updateSpeedStreamers(physics?.altitude || 0, physics?.speed || 0, playerPos);
       if (this.postLaunchSpace) {
+        this.postLaunchSpace.sunDirection.copy(dynSunDir);
+        this.postLaunchSpace.planetMat?.uniforms.uSunDir.value.copy(dynSunDir);
+        this.postLaunchSpace.airglowMat?.uniforms.uSunDir.value.copy(dynSunDir);
         this.postLaunchSpace.update(dt, physics?.altitude || 0, physics?.speed || 0, playerPos, Boolean(physics?.isInterplanetary));
       }
       return;

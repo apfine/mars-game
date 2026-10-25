@@ -98,6 +98,12 @@ export class MissionFlightHUD {
   }
 
   initEvents() {
+    const details = document.getElementById('flight-details-btn');
+    details?.addEventListener('click', () => {
+      const expanded = this.dom.container.classList.toggle('show-details');
+      details.setAttribute('aria-expanded', String(expanded));
+    });
+    document.getElementById('flight-roadster-shortcut')?.addEventListener('click', () => this.options.onToggleRoadster?.());
     if (this.dom.stageBtn) {
       this.dom.stageBtn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -123,7 +129,7 @@ export class MissionFlightHUD {
     destBtns.forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const dest = btn.getAttribute('data-dest');
+        const dest = btn.getAttribute('data-dest')?.toLowerCase();
         if (dest && this.options.onSelectDestination) this.options.onSelectDestination(dest);
         destBtns.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
@@ -209,6 +215,7 @@ export class MissionFlightHUD {
         const wasOpen = menu.classList.contains('open');
         document.querySelectorAll('.spx-dropdown-menu').forEach((m) => m.classList.remove('open'));
         if (!wasOpen) menu.classList.add('open');
+        trigger.setAttribute('aria-expanded', String(!wasOpen));
       });
     };
     bindDropdown('flight-cam-btn', 'flight-cam-menu');
@@ -523,7 +530,7 @@ export class MissionFlightHUD {
     }
     const allDestBtns = document.querySelectorAll('[data-dest]');
     allDestBtns.forEach((btn) => {
-      btn.classList.toggle('active', btn.getAttribute('data-dest') === destination.toUpperCase());
+      btn.classList.toggle('active', btn.getAttribute('data-dest')?.toLowerCase() === destination);
     });
     if (this.dom.destSwitch) {
       this.dom.destSwitch.style.display = inOrbit ? 'flex' : 'none';
@@ -702,7 +709,7 @@ export class MissionFlightHUD {
     }
 
     if (this.dom.mobileSteering) {
-      const showTouchPad = this.isMobile || !physics.autoMission;
+      const showTouchPad = !physics.autoMission;
       this.dom.mobileSteering.style.display = showTouchPad ? 'flex' : 'none';
     }
 

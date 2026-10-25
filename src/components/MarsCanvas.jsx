@@ -385,6 +385,7 @@ export default function MarsCanvas() {
           </div>
 
           <div className="spx-top-right">
+            <button id="flight-details-btn" className="hud-pill-btn" aria-expanded="false" aria-label="Toggle flight instruments">DETAILS</button>
             {/* Mission & Destination Dropdown */}
             <div className="spx-dropdown" id="flight-mission-dropdown">
               <button className="hud-pill-btn spx-dropdown-trigger" id="flight-mission-btn" aria-label="Mission Profile & Destination">
@@ -394,8 +395,8 @@ export default function MarsCanvas() {
               </button>
               <div className="spx-dropdown-menu" id="flight-mission-menu">
                 <div className="dropdown-section-header">DESTINATION</div>
-                <button className="dropdown-item" data-dest="EARTH">🌍 EARTH STARBASE</button>
-                <button className="dropdown-item" data-dest="MARS">🔴 MARS STARBASE</button>
+                <button className="dropdown-item" data-dest="earth">🌍 EARTH STARBASE</button>
+                <button className="dropdown-item" data-dest="mars">🔴 MARS STARBASE</button>
                 <div className="dropdown-section-header">FLIGHT PROFILE</div>
                 <button className="dropdown-item active traj-opt-btn" data-traj="ORBITAL">🛰️ ORBITAL (88 KM)</button>
                 <button className="dropdown-item traj-opt-btn" data-traj="SUBORBITAL">🎯 SUBORBITAL (50 KM)</button>
@@ -436,7 +437,7 @@ export default function MarsCanvas() {
           <button id="flight-deorbit-btn" className="flight-ops-btn" title="Deorbit and recover at the local Starbase">
             DEORBIT
           </button>
-          <button id="flight-roadster-btn" className="flight-ops-btn roadster-btn" title="Toggle the flying Tesla Roadster">
+          <button id="flight-roadster-shortcut" className="flight-ops-btn roadster-btn" title="Toggle the flying Tesla Roadster">
             ROADSTER
           </button>
           <span id="flight-ops-status" className="flight-ops-status"></span>

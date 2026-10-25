@@ -695,7 +695,7 @@ export class MarsGameEngine {
 
     if (this.mode === 'starship') {
       this.camera.near = 0.4;
-      this.camera.far = 500000;
+      this.camera.far = 8000000;
       this.camera.updateProjectionMatrix();
       this.cameraController.initialized = false;
 
@@ -1042,17 +1042,14 @@ export class MarsGameEngine {
         this.flightHud.notifyCameraMode(nextMode);
       }
 
-      // High warp is only physically integrated in orbit; atmospheric phases
-      // stay capped at 8 substeps to preserve guidance and contact stability.
+      // Fixed upper bound per substep; distribute elapsed time instead of dropping it.
       const warp = this.timeScale || 1;
       const inOrbit = this.missionPhysics.phase === FLIGHT_PHASES.ORBIT;
-      if (warp > 8 && inOrbit) {
-        this.missionPhysics.update(Math.min(dt * warp, 1.5), this.input.state);
-      } else {
-        const steps = Math.max(1, Math.min(warp, 8));
-        for (let s = 0; s < steps; s++) {
-          this.missionPhysics.update(dt, this.input.state);
-        }
+      const simulationDt = Math.min(inOrbit ? 12 : 16 / 60,
+        Math.min(dt, 0.1) * Math.min(warp, inOrbit ? 1000 : 8));
+      const steps = Math.max(1, Math.ceil(simulationDt / (inOrbit ? 1.5 : 1 / 60)));
+      for (let step = 0; step < steps; step++) {
+        this.missionPhysics.update(simulationDt / steps, this.input.state);
       }
       if (this.missionPhysics.phase === FLIGHT_PHASES.INTERPLANETARY) {
         this.ensureTransferStarted();
@@ -1095,7 +1092,9 @@ export class MarsGameEngine {
         onGroundCount: camAltitude < 200 ? 4 : 0,
         speedKmh: this.missionPhysics.speed * 3.6,
         isInterplanetary: this.missionPhysics.phase === FLIGHT_PHASES.INTERPLANETARY || Boolean(this.journey?.active),
-        timeScale: this.timeScale
+        sunPosition: this.journey.solarOrigin,
+        timeScale: this.timeScale,
+        simulationDt
       });
 
       if (onMars && camAltitude < 5000) {

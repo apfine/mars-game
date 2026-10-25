@@ -177,7 +177,7 @@ export class StarshipMissionPhysics {
     this.atmoDensity = this.planetProfile.surfaceDensity;
     this.atmoPressurePa = this.planetProfile.surfacePressurePa;
     this.atmoTempK = this.planetProfile.seaLevelTemperatureK;
-    this.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * this.atmoTempK);
+    this.soundSpeed = Math.sqrt(this.planetProfile.gamma * this.planetProfile.gasConstant * this.atmoTempK);
     this.windSpeed = 0;
     this.destination = 'earth';
     this.transferTarget = null;
@@ -271,8 +271,8 @@ export class StarshipMissionPhysics {
 
     out.density = density;
     out.temperature = temperature;
-    out.pressure = density * MARS_R_GAS * temperature;
-    out.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * temperature);
+    out.pressure = density * this.planetProfile.gasConstant * temperature;
+    out.soundSpeed = Math.sqrt(this.planetProfile.gamma * this.planetProfile.gasConstant * temperature);
     out.layer = layerIndex;
     return out;
   }
@@ -419,7 +419,7 @@ export class StarshipMissionPhysics {
     this.atmoDensity = profile.surfaceDensity;
     this.atmoPressurePa = profile.surfacePressurePa;
     this.atmoTempK = profile.seaLevelTemperatureK;
-    this.soundSpeed = Math.sqrt(MARS_GAMMA * MARS_R_GAS * this.atmoTempK);
+    this.soundSpeed = Math.sqrt(this.planetProfile.gamma * this.planetProfile.gasConstant * this.atmoTempK);
     this.boosterArmY = L.boosterTower.armY;
     this.shipArmY = L.shipTower.armY;
     return profile;
@@ -488,9 +488,11 @@ export class StarshipMissionPhysics {
     // The belly-flop and landing-burn guidance handle the final descent; this
     // avoids flying a 1,000 km hypersonic ground track that the local scene
     // cannot represent.
-    const entryAlt = options.altitude || 28000;
-    this.position.set(target.x, this.padElevation + entryAlt, target.y);
-    this.velocity.set(0, -120.0, 0);
+    const entryAlt = options.altitude ?? profile.entryAltitude;
+    const entrySpeed = options.speed ?? profile.arrivalSpeed;
+    const flightAngle = 6 * Math.PI / 180;
+    this.position.set(target.x, this.padElevation + entryAlt, target.y - entryAlt * 8);
+    this.velocity.set(0, -entrySpeed * Math.sin(flightAngle), entrySpeed * Math.cos(flightAngle));
     this.yaw = 0;
     this.pitch = 0.55;
     this.roll = 0.0;
@@ -498,7 +500,7 @@ export class StarshipMissionPhysics {
     this.yawVel = 0;
     this.rollVel = 0;
     this.throttle = 0;
-    this.heat = 0.78;
+    this.heat = 0;
     this.entryStartAlt = entryAlt;
     this.missionTime = 0;
     this.orbitTimer = 0;
@@ -702,7 +704,7 @@ export class StarshipMissionPhysics {
     this.speed = this.velocity.length();
     this.verticalSpeed = this.velocity.y;
     this.horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-    this.mach = (this.speed / speedOfSound).toFixed(2);
+    this.mach = (relativeSpeed / speedOfSound).toFixed(2);
     this.dynamicPressure = 0.5 * marsDensity * relativeSpeed * relativeSpeed;
 
     // Show Orbital / Suborbital trajectory decision prompt during upper stage ascent before space insertion
@@ -879,8 +881,12 @@ export class StarshipMissionPhysics {
         // of the ship tower's arms, not merely at the geometric pad centre.
         const latAx = THREE.MathUtils.clamp((2.0 * (dxPad - this.velocity.x * dtGo)) / latDen, -12.0, 12.0);
         const latAz = THREE.MathUtils.clamp((2.0 * (dzPad - this.velocity.z * dtGo)) / latDen, -12.0, 12.0);
-        thrustAccel.x = latAx;
-        thrustAccel.z = latAz;
+        const lateral = Math.hypot(latAx, latAz);
+        const lateralLimit = thrustAccelMag * 0.65;
+        const steeringScale = lateral > lateralLimit ? lateralLimit / lateral : 1;
+        thrustAccel.x = latAx * steeringScale;
+        thrustAccel.z = latAz * steeringScale;
+        thrustAccel.y = Math.sqrt(Math.max(0, thrustAccelMag ** 2 - thrustAccel.x ** 2 - thrustAccel.z ** 2));
       }
 
       // B. AERODYNAMICS: quadratic drag on the instantaneous reference area,
@@ -932,6 +938,13 @@ export class StarshipMissionPhysics {
           const gain = 2.0 / (tGo * tGo);
           aeroAccel.x += THREE.MathUtils.clamp(missX * gain, -aeroSteerMax, aeroSteerMax);
           aeroAccel.z += THREE.MathUtils.clamp(missZ * gain, -aeroSteerMax, aeroSteerMax);
+          // Bank guidance redirects available lift; it cannot add thrust or
+          // make aerodynamic forces accelerate the craft along its airspeed.
+          const along = aeroAccel.dot(velHat);
+          aeroAccel.addScaledVector(velHat, -along);
+          const liftLimit = this.dynamicPressure * 0.55 * SHIP_PLANFORM_AREA / activeMass;
+          aeroAccel.clampLength(0, liftLimit);
+          aeroAccel.addScaledVector(velHat, -dragAccel);
         }
       }
       this.angleOfAttack = angleOfAttack;
@@ -942,7 +955,7 @@ export class StarshipMissionPhysics {
       const effectiveGravityVec = this._gravityVec.set(0, centrifugalUp - localGravity, 0);
 
       // In stable orbit (FLIGHT_PHASES.ORBIT): centrifugal force balances local gravity exactly (zero altitude decay)
-      if (this.phase === FLIGHT_PHASES.ORBIT) {
+      if (this.autoMission && this.phase === FLIGHT_PHASES.ORBIT) {
         effectiveGravityVec.set(0, 0, 0);
         this.velocity.y *= Math.pow(0.01, dt);
         const orbitalCircSpeed = Math.sqrt(localGravity * rFromCenter);
@@ -1002,10 +1015,10 @@ export class StarshipMissionPhysics {
       //    q_conv = k * sqrt(rho / R_nose) * v^3  [W/m²]
       //    The TPS surface temperature is the radiative-equilibrium solution
       //    T = (q / (eps * sigma))^(1/4), so the glow is driven by real flux.
-      const inEntryCorridor = !this.vehicle.isMated && this.altitude < 62000 &&
-        this.altitude > 9000 && this.speed > 320.0 && this.velocity.y < 25.0;
+      const inEntryCorridor = !this.vehicle.isMated && this.altitude < this.planetProfile.entryAltitude &&
+        this.altitude > 0 && this.speed > this.soundSpeed * 3 && this.velocity.y < 25.0;
       if (inEntryCorridor && marsDensity > 1e-9) {
-        const v3 = this.speed * this.speed * this.speed;
+        const v3 = relativeSpeed * relativeSpeed * relativeSpeed;
         this.heatFlux = 1.83e-4 * Math.sqrt(marsDensity / SHIP_NOSE_RADIUS) * v3;
         const targetHeat = THREE.MathUtils.clamp(Math.pow(this.heatFlux / 145000.0, 0.62), 0.0, 1.0);
         // Thermal inertia: the TPS heats and cools over seconds, not instantly.
@@ -1022,7 +1035,9 @@ export class StarshipMissionPhysics {
       } else {
         this.tpsTempC = THREE.MathUtils.lerp(220.0, this.tpsTempC, Math.exp(-dt * 0.35));
       }
-      this.vehicle.setReentryHeat(this.heat);
+      const ionization = THREE.MathUtils.smoothstep(this.speed, 1800, 4500) *
+        THREE.MathUtils.smoothstep(marsDensity, 1e-8, 1e-5);
+      this.vehicle.setReentryHeat(this.heat, ionization);
     }
 
     // -------------------------------------------------------------
@@ -1305,13 +1320,13 @@ export class StarshipMissionPhysics {
         // stays flyable as the tanks drain and acceleration climbs.
         const engineCount = 6;
         const shipAvailAccel = this.getShipAvailAccel(engineCount);
-        const usableDecel = Math.max(2.2, shipAvailAccel * 0.70 - localGravity);
-        const desiredVy = -Math.sqrt(2.0 * usableDecel * heightAboveCatch) - 1.2;
+        // Reserve thrust for lateral braking and controller response near the catch.
+        const usableDecel = Math.max(1, shipAvailAccel * 0.32 - localGravity);
+        const desiredVy = -Math.min(250, Math.sqrt(2.0 * usableDecel * heightAboveCatch)) - 1.2;
         const vyError = desiredVy - this.velocity.y;
         // Feedforward the profile decel, then close the velocity loop.
-        const profileDecel = (desiredVy * desiredVy) / (2.0 * Math.max(1.0, heightAboveCatch));
-        const neededAccelY = localGravity + profileDecel + THREE.MathUtils.clamp(vyError * 2.4, -shipAvailAccel * 0.5, 30.0);
-        this.throttle = THREE.MathUtils.clamp(neededAccelY / Math.max(0.35, Math.cos(this.pitch) * shipAvailAccel), 0.20, 1.0);
+        const neededAccelY = localGravity + vyError * 1.2;
+        this.throttle = THREE.MathUtils.clamp(neededAccelY / Math.max(0.35, Math.cos(this.pitch) * shipAvailAccel), 0, 1.0);
 
         if (heightAboveCatch <= 90.0) {
           const preClose = THREE.MathUtils.clamp((90.0 - heightAboveCatch) / 180.0, 0.0, 0.45);
@@ -1341,7 +1356,7 @@ export class StarshipMissionPhysics {
         const vyErr = targetVy - this.velocity.y;
         const neededAy = localGravity + THREE.MathUtils.clamp(vyErr * 3.8, -2.5, 22.0);
         const shipAvailAccel = this.getShipAvailAccel(6);
-        this.throttle = THREE.MathUtils.clamp(neededAy / shipAvailAccel, 0.15, 0.90);
+        this.throttle = THREE.MathUtils.clamp(neededAy / shipAvailAccel, 0, 0.90);
 
         this.alignShipToCatch(dt, hAbovePins);
 
