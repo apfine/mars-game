@@ -65,11 +65,27 @@ const transferResults = await evaluate(`(() => {
     g.selectDestination(target);g.beginTransfer();g.ensureTransferStarted();
     const started=g.journey.active;
     for(let i=0;i<100 && g.journey.active;i++)g.journey.update(1,3,200000);
-    results.push({target,started,arrived:p.planetId,phase:p.phase});
+    const arrivedPhase=p.phase,boosterVisible=g.starship.boosterGroup.visible;
+    if(target==='earth'){
+      g.cameraController.setFlightMode('FREE_ORBIT');
+      g.cameraController.adjustGimbal(0.8,0.9);
+      g.beginDeorbit();
+    }
+    results.push({target,started,arrived:p.planetId,phase:arrivedPhase,boosterVisible,
+      afterDeorbit:target==='earth'?p.phase:null,
+      entryCamera:target==='earth'?g.cameraController.getFlightMode():null,
+      entryPitch:target==='earth'?g.cameraController.gimbalPitch:null});
   }
   return results;
 })()`);
 for(const r of transferResults) { assert.equal(r.started,true);assert.equal(r.arrived,r.target); }
+for(const r of transferResults) assert.equal(r.boosterVisible,false);
+for(const r of transferResults.filter(r=>r.target==='earth')) {
+  assert.equal(r.phase,'ORBIT');
+  assert.equal(r.afterDeorbit,'HYPERSONIC_ENTRY');
+  assert.equal(r.entryCamera,'CHASE');
+  assert.equal(r.entryPitch,0);
+}
 console.log('Round trip and lunar transfers',transferResults);
 await evaluate(`(() => {
   const g=document.querySelector('canvas').game, p=g.missionPhysics;
@@ -97,6 +113,36 @@ await writeFile('.browser-earth-space.png',Buffer.from((await call('Page.capture
 const angles=await evaluate(`(()=>{const g=document.querySelector('canvas').game,j=g.journey;const diameter=m=>2*Math.atan(m.geometry.parameters.radius*m.scale.x/m.position.distanceTo(g.camera.position))*180/Math.PI;return {mars:diameter(j.marsGlobe),moon:diameter(j.moon)}})()`);
 assert.ok(angles.mars<.01);assert.ok(angles.moon>.4 && angles.moon<.6);
 console.log('Apparent sizes from Earth',angles);
+const boosterPlasmaVisible=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  p.setPlanet('earth');g.applyPlanetEnvironment('earth');
+  g.starship.boosterGroup.visible=true;
+  g.starship.boosterGroup.position.set(p.boosterCatchCoords.x,p.padGroundY+180,p.boosterCatchCoords.y);
+  g.starship.boosterGroup.quaternion.identity();
+  g.starship.setBoosterReentryHeat(1,1);
+  g.camera.position.set(p.boosterCatchCoords.x+115,p.padGroundY+225,p.boosterCatchCoords.y+120);
+  g.camera.lookAt(p.boosterCatchCoords.x,p.padGroundY+215,p.boosterCatchCoords.y);
+  g.atmosphere.setAltitude(225);
+  g.atmosphere.update(1/60,g.camera.position,{altitude:225,speed:0});
+  g.renderer.render(g.scene,g.camera);
+  return g.starship.boosterPlasma.visible;
+})()`);
+assert.equal(boosterPlasmaVisible,true);
+await writeFile('.browser-booster-plasma.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
 console.log('errors', [...new Set(errors)]);
+const landingView=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  p.enterPlanetEntry('earth');g.cameraController.setFlightMode('CHASE');g.cameraController.resetGimbal();
+  let steps=0;while(steps<90000 && (p.altitude>150 || p.phase==='HYPERSONIC_ENTRY')){p.update(1/60);steps++}
+  g.cameraController.updateFlight(1/60,p);g.atmosphere.setAltitude(150);
+  g.atmosphere.update(1/60,g.camera.position,{altitude:150,speed:p.speed});
+  g.starship.updateLOD(g.camera.position);g.renderer.render(g.scene,g.camera);
+  return {phase:p.phase,altitude:p.altitude,position:p.position.toArray(),camera:g.camera.position.toArray(),shipVisible:g.starship.starshipGroup.visible,steps};
+})()`);
+await writeFile('.browser-earth-landing.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+console.log('landingView',landingView);
+assert.equal(landingView.phase,'LANDING_FLIP');
+assert.equal(landingView.shipVisible,true);
+assert.ok(Math.hypot(...landingView.camera.map((n,i)=>n-landingView.position[i]))<150);
 ws.close();
 if (errors.some(e => e.startsWith('Uncaught') || e.includes('THREE.') || e.includes('VALIDATE_STATUS'))) process.exitCode = 1;

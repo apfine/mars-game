@@ -27,8 +27,12 @@ export const BOOSTER_STATES = {
   BOOSTBACK: 'BOOSTBACK',
   DESCENT: 'DESCENT',
   APPROACH: 'APPROACH',
-  CAUGHT: 'CAUGHT'
+  CAUGHT: 'CAUGHT',
+  LEFT_BEHIND: 'LEFT_BEHIND'
 };
+
+const ENTRY_DOWNRANGE = { earth: 6.42, mars: 6.511 };
+const ENTRY_ANGLE = 6 * Math.PI / 180;
 
 const EARTH_G0 = 9.80665; // Standard Earth gravity for accelerometer G-Force readout (m/s²)
 const MARS_RADIUS = 3389500.0; // Mean Mars radius (m)
@@ -136,6 +140,7 @@ export class StarshipMissionPhysics {
     this.boosterVelocity = new THREE.Vector3();
     this.boosterQuaternion = new THREE.Quaternion();
     this.boosterState = BOOSTER_STATES.ATTACHED;
+    this.arrivalOrbit = false;
     this.boosterTimer = 0.0;
     this.boosterTracking = false;
 
@@ -154,6 +159,7 @@ export class StarshipMissionPhysics {
     this.mach = '0.0';
     this.dynamicPressure = 0.0; // Pa
     this.heat = 0.0;            // Re-entry heating factor (0.0 to 1.0)
+    this.boosterHeat = 0.0;
     this.gForce = '0.38';       // Proper IMU G-force in Earth G's (0.38G resting on Mars)
     this.downrange = '0.0';
     this.countdownTimer = 3.0;
@@ -287,6 +293,7 @@ export class StarshipMissionPhysics {
     this.pendingTransfer = null;
     this.phase = FLIGHT_PHASES.ON_PAD;
     this.boosterState = BOOSTER_STATES.ATTACHED;
+    this.arrivalOrbit = false;
     this.scriptedControl = false;
     this.yardControl = false;
     this.transferTarget = null;
@@ -326,6 +333,7 @@ export class StarshipMissionPhysics {
     this.dynamicPressure = 0;
     this.throttle = 0;
     this.heat = 0;
+    this.boosterHeat = 0;
     this.gForce = (this.marsGravity / EARTH_G0).toFixed(2); // 0.38G on Mars pad
     this.downrange = '0.0';
     this.missionTime = 0;
@@ -356,6 +364,7 @@ export class StarshipMissionPhysics {
     this.vehicle.setBoosterThrottle(0);
     this.vehicle.setStarshipThrottle(0);
     this.vehicle.setReentryHeat(0);
+    this.vehicle.setBoosterReentryHeat?.(0);
     this.vehicle.setFlapDeflection(0, 0);
     this.vehicle.setGridFinSteering(0, 0);
     if (this.vehicle.setLaunchButtonPressed) {
@@ -443,18 +452,17 @@ export class StarshipMissionPhysics {
     const destination = target || (this.planetId === 'mars' ? 'earth' : 'mars');
     if (!PLANET_PROFILES[destination] || destination === this.planetId) return false;
 
-    // Enforce rule: In Auto mode or unless explicitly done in Manual mode with a mated stack,
-    // the booster NEVER transfers between bodies. It remains safely caught/landed on its home planet.
-    const isExplicitManualMated = !this.autoMission && this.vehicle.isMated;
-    if (!isExplicitManualMated) {
-      if (this.vehicle.isMated) {
-        this.vehicle.setMated(false);
-      }
-      this.vehicle.boosterGroup.visible = false;
-      this.boosterState = BOOSTER_STATES.CAUGHT;
-      this.boosterVelocity.set(0, 0, 0);
-      this.vehicle.setBoosterThrottle(0);
-    }
+    // The launch booster stays on the departure world, including manual
+    // transfers. A caught booster must never reappear on the destination pad.
+    if (this.vehicle.isMated) this.vehicle.setMated(false);
+    this.boosterState = BOOSTER_STATES.LEFT_BEHIND;
+    this.boosterVelocity.set(0, 0, 0);
+    this.boosterAltitude = 0;
+    this.boosterSpeed = 0;
+    this.boosterHeat = 0;
+    this.vehicle.boosterGroup.visible = false;
+    this.vehicle.setBoosterThrottle(0);
+    this.vehicle.setBoosterReentryHeat?.(0);
 
     this.transferTarget = destination;
     this.phase = FLIGHT_PHASES.INTERPLANETARY;
@@ -462,10 +470,8 @@ export class StarshipMissionPhysics {
     this.yardControl = false;
     this.throttle = 0;
     this.velocity.set(0, 0, 0);
-    if (!isExplicitManualMated) {
-      this.boosterVelocity.set(0, 0, 0);
-      this.vehicle.boosterGroup.visible = false;
-    }
+    this.boosterVelocity.set(0, 0, 0);
+    this.vehicle.boosterGroup.visible = false;
     this.vehicle.setStarshipThrottle(0, true);
     return true;
   }
@@ -482,6 +488,8 @@ export class StarshipMissionPhysics {
     this.vehicle.setMated(false);
     this.vehicle.starshipGroup.visible = true;
     this.vehicle.boosterGroup.visible = false;
+    this.boosterState = BOOSTER_STATES.LEFT_BEHIND;
+    this.arrivalOrbit = false;
     // Arrival propellant state: the ship has spent most of its propellant on
     // the transfer and only retains the landing reserve.
     this.starshipFuel = planetId === 'moon' ? 35 : planetId === 'mars' ? 30 : 18;
@@ -497,11 +505,11 @@ export class StarshipMissionPhysics {
     // cannot represent.
     const entryAlt = options.altitude ?? profile.entryAltitude;
     const entrySpeed = options.speed ?? profile.arrivalSpeed;
-    const flightAngle = 6 * Math.PI / 180;
+    const flightAngle = ENTRY_ANGLE;
     // Match the entry corridor to the distance this atmosphere actually lets
     // the vehicle travel before the landing burn. The old 8:1 offset left the
     // ship tens to hundreds of kilometres from the tower at low altitude.
-    const entryDownrange = planetId === 'mars' ? 6.511 : 6.3;
+    const entryDownrange = ENTRY_DOWNRANGE[planetId] ?? 6.3;
     this.position.set(target.x, this.padElevation + entryAlt, target.y - entryAlt * entryDownrange);
     this.velocity.set(0, -entrySpeed * Math.sin(flightAngle), entrySpeed * Math.cos(flightAngle));
     if (planetId === 'moon') {
@@ -522,6 +530,52 @@ export class StarshipMissionPhysics {
     this.vehicle.setReentryHeat(this.heat);
     this.vehicle.setCargoDoors(0);
     this.vehicle.setLandingLegs(0);
+    return profile;
+  }
+
+  // Transfer arrival parks only the ship in a stable local orbit. Deorbit is
+  // a separate pilot action; the booster remains on its departure world.
+  enterPlanetOrbit(planetId) {
+    const profile = this.setPlanet(planetId);
+    this.scriptedControl = false;
+    this.yardControl = false;
+    this.pendingTransfer = null;
+    this.arrivalOrbit = true;
+    this.phase = FLIGHT_PHASES.ORBIT;
+    this.vehicle.setMated(false);
+    this.vehicle.starshipGroup.visible = true;
+    this.vehicle.boosterGroup.visible = false;
+    this.boosterState = BOOSTER_STATES.LEFT_BEHIND;
+    this.boosterVelocity.set(0, 0, 0);
+    this.boosterAltitude = 0;
+    this.boosterSpeed = 0;
+    this.boosterHeat = 0;
+    this.vehicle.setBoosterReentryHeat?.(0);
+    this.starshipFuel = 18;
+    this.starshipFlameout = false;
+    this.shipCaughtByTower = false;
+    this.cargoDoorsDeployed = false;
+    this.landingLegsDeployed = false;
+    const entryAlt = profile.entryAltitude;
+    this.position.set(this.shipCatchCoords.x, this.padElevation + entryAlt,
+      this.shipCatchCoords.y - entryAlt * (ENTRY_DOWNRANGE[planetId] ?? 6.42));
+    this.velocity.set(0, 0, Math.sqrt(profile.gravity * (profile.radius + entryAlt)));
+    this.altitude = entryAlt;
+    this.speed = this.velocity.length();
+    this.horizontalSpeed = this.speed;
+    this.verticalSpeed = 0;
+    this.pitch = Math.PI / 2;
+    this.yaw = 0;
+    this.roll = 0;
+    this.pitchVel = this.yawVel = this.rollVel = 0;
+    this.throttle = 0;
+    this.heat = 0;
+    this.heatFlux = 0;
+    this.orbitTimer = 0;
+    this.missionTime = 0;
+    this.starshipScore = 0;
+    this.vehicle.setStarshipThrottle(0, true);
+    this.vehicle.setReentryHeat(0);
     return profile;
   }
 
@@ -638,7 +692,15 @@ export class StarshipMissionPhysics {
 
   triggerDeorbit() {
     if (!this.vehicle.isMated && this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.LANDED) {
+      if (this.arrivalOrbit) {
+        // The local scene compresses the orbital coast to the next entry pass.
+        // Enter the calibrated forward corridor only after the pilot commits.
+        this.enterPlanetEntry(this.planetId);
+        this.opsMessage = 'DEORBIT COMMITTED // GUIDED ENTRY';
+        return;
+      }
       this.phase = FLIGHT_PHASES.DEORBIT;
+      this.orbitTimer = 0;
       if (this.autoMission) {
         this.throttle = 0.9;
       }
@@ -1448,7 +1510,7 @@ export class StarshipMissionPhysics {
   // -------------------------------------------------------------
   updateBoosterReturn(dt) {
     this.vehicle.setBoosterRCS?.(0);
-    if (this.boosterState === BOOSTER_STATES.ATTACHED) return;
+    if (this.boosterState === BOOSTER_STATES.ATTACHED || this.boosterState === BOOSTER_STATES.LEFT_BEHIND) return;
 
     this.boosterTimer += dt;
     // Catch pins sit 65.5 m above the booster base, so the base must stop at
@@ -1712,6 +1774,22 @@ export class StarshipMissionPhysics {
     }
     this.boosterAltitude = Math.max(0, this.boosterPosition.y - targetCatchElevation);
     this.boosterSpeed = this.boosterVelocity.length();
+    if (this.boosterState === BOOSTER_STATES.CAUGHT) {
+      this.boosterHeat = 0;
+      this.vehicle.setBoosterReentryHeat?.(0);
+    } else {
+      const atmosphere = this.sampleAtmosphere(Math.max(0, this.boosterPosition.y - this.padElevation), this._boosterAtmo);
+      const airSpeed = this._relBoosterVel.copy(this.boosterVelocity).sub(atmosphere.wind).length();
+      const heatFlux = 1.83e-4 * Math.sqrt(atmosphere.density / 4.5) * airSpeed ** 3;
+      const targetHeat = this.boosterVelocity.y < -100
+        ? THREE.MathUtils.clamp(Math.pow(heatFlux / 12000, 0.6), 0, 1)
+        : 0;
+      const heatRate = targetHeat > this.boosterHeat ? 1.25 : 0.65;
+      this.boosterHeat += (targetHeat - this.boosterHeat) * (1 - Math.exp(-dt / heatRate));
+      const ionization = THREE.MathUtils.smoothstep(airSpeed, 450, 1350) *
+        THREE.MathUtils.smoothstep(atmosphere.density, 1e-5, 1e-3);
+      this.vehicle.setBoosterReentryHeat?.(this.boosterHeat, ionization);
+    }
     this.vehicle.boosterGroup.position.copy(this.boosterPosition);
     this.vehicle.boosterGroup.quaternion.copy(this.boosterQuaternion);
   }

@@ -53,6 +53,9 @@ for (const planet of ['earth', 'mars']) {
       phases.add(m.phase);
       maxHeat = Math.max(maxHeat, m.heat);
       assert.ok(Number.isFinite(m.position.length() + m.velocity.length()));
+      if (planet === 'earth' && (m.phase === FLIGHT_PHASES.LANDING_FLIP || m.phase === FLIGHT_PHASES.TOUCHDOWN)) {
+        assert.ok(m.velocity.z > -0.1, 'Earth landing reverses against the entry direction');
+      }
       const height = m.position.y - m.shipCatchBaseY;
       if (height >= 0 && height < 12 && m.phase !== FLIGHT_PHASES.LANDED) {
         terminalSamples++;
@@ -87,6 +90,36 @@ test('Moon vacuum landing uses propulsion and reaches the catch without plasma',
   assert.equal(m.heat,0);
 });
 
+test('Earth arrival waits in orbit for deorbit and brings no booster to the destination', () => {
+  const m = mission();
+  m.autoMission = true;
+  m.enterPlanetOrbit('earth');
+  assert.equal(m.phase, FLIGHT_PHASES.ORBIT);
+  assert.equal(m.vehicle.isMated, false);
+  assert.equal(m.boosterState, 'LEFT_BEHIND');
+  assert.equal(m.vehicle.boosterGroup.visible, false);
+  for (let i = 0; i < 60 * 30; i++) m.update(1 / 60);
+  assert.equal(m.phase, FLIGHT_PHASES.ORBIT);
+  assert.equal(m.vehicle.boosterGroup.visible, false);
+  m.triggerDeorbit();
+  assert.equal(m.phase, FLIGHT_PHASES.HYPERSONIC_ENTRY);
+  for (let i = 0; i < 60 * 1800 && m.phase !== FLIGHT_PHASES.LANDED; i++) m.update(1 / 60);
+  assert.equal(m.phase, FLIGHT_PHASES.LANDED);
+  assert.equal(m.shipCaughtByTower, true);
+  assert.equal(m.boosterState, 'LEFT_BEHIND');
+  assert.equal(m.vehicle.boosterGroup.visible, false);
+});
+
+test('manual transfer also leaves the booster on the departure world', () => {
+  const m = mission();
+  m.autoMission = false;
+  m.phase = FLIGHT_PHASES.ORBIT;
+  assert.equal(m.triggerInterplanetary('earth'), true);
+  assert.equal(m.boosterState, 'LEFT_BEHIND');
+  assert.equal(m.vehicle.boosterGroup.visible, false);
+  assert.equal(m.vehicle.isMated, false);
+});
+
 for (const planet of ['earth', 'mars']) {
   test(`${planet}: automated launch separates and reaches orbit`, () => {
     const m = mission();
@@ -104,9 +137,11 @@ for (const planet of ['earth', 'mars']) {
     assert.ok(phases.has(FLIGHT_PHASES.ORBIT), `ended ${m.phase}, altitude ${m.altitude}`);
     assert.equal(m.vehicle.isMated, false);
     let boosterTerminalSamples=0;
+    let maxBoosterHeat=0;
     let previousBooster=m.boosterPosition.clone();
     for(let i=0;i<60*1200 && m.boosterState!=='CAUGHT';i++) {
       m.update(1/60);
+      maxBoosterHeat=Math.max(maxBoosterHeat,m.boosterHeat);
       const height=m.boosterPosition.y-m.boosterCatchBaseY;
       if(height>=0 && height<12 && m.boosterState!=='CAUGHT') {
         boosterTerminalSamples++;
@@ -121,5 +156,7 @@ for (const planet of ['earth', 'mars']) {
     }
     assert.equal(m.boosterState,'CAUGHT',`${planet} booster ended ${m.boosterState}`);
     assert.ok(boosterTerminalSamples>5);
+    assert.ok(maxBoosterHeat>(planet==='earth' ? 0.3 : 0.05), `${planet} booster has no entry heating`);
+    assert.equal(m.boosterHeat,0);
   });
 }

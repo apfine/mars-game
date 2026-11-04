@@ -645,7 +645,8 @@ export class MissionFlightHUD {
         BOOSTBACK: 'BOOSTBACK BURN',
         DESCENT: 'GRID FIN GLIDE',
         APPROACH: 'LANDING BURN',
-        CAUGHT: 'TOWER CAUGHT'
+        CAUGHT: 'TOWER CAUGHT',
+        LEFT_BEHIND: 'ON DEPARTURE WORLD'
       };
       this.dom.boosterTag.textContent = bTagMap[physics.boosterState] || physics.boosterState;
     }
@@ -729,7 +730,7 @@ export class MissionFlightHUD {
 
     // 7. Highlight BOOSTER camera tab while Super Heavy is returning to tower
     if (this.dom.trackBoosterBtn) {
-      const isSeparated = physics.boosterState && physics.boosterState !== 'ATTACHED' && physics.boosterState !== 'CAUGHT';
+      const isSeparated = physics.boosterState && !['ATTACHED', 'CAUGHT', 'LEFT_BEHIND'].includes(physics.boosterState);
       this.dom.trackBoosterBtn.classList.toggle('pulse-highlight', Boolean(isSeparated && this.currentCamMode !== 'BOOSTER_CAM'));
     }
 

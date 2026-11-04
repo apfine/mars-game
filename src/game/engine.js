@@ -292,9 +292,11 @@ export class MarsGameEngine {
         this.toggleRoadster();
       },
       onSelectCamera: (camMode) => {
-        this.cameraController.setFlightMode(camMode);
-        this.missionPhysics.boosterTracking = (camMode === 'BOOSTER_CAM');
-        this.flightHud.notifyCameraMode(camMode);
+        const selected = camMode === 'BOOSTER_CAM' && this.missionPhysics.boosterState === 'LEFT_BEHIND'
+          ? 'CHASE' : camMode;
+        this.cameraController.setFlightMode(selected);
+        this.missionPhysics.boosterTracking = (selected === 'BOOSTER_CAM');
+        this.flightHud.notifyCameraMode(selected);
       },
       onGimbalMove: (dYaw, dPitch) => {
         this.cameraController.adjustGimbal(dYaw, dPitch);
@@ -465,6 +467,11 @@ export class MarsGameEngine {
   startInterplanetaryTransfer(target) {
     this.journey.arrived = false;
     if (!this.missionPhysics.triggerInterplanetary(target)) return false;
+    if (this.cameraController.getFlightMode() === 'BOOSTER_CAM') {
+      this.cameraController.setFlightMode('CHASE');
+      this.missionPhysics.boosterTracking = false;
+      this.flightHud?.notifyCameraMode('CHASE');
+    }
     this.setTimeScale(this.missionPhysics.autoMission ? 4 : Math.max(1, Math.min(this.timeScale, 4)));
     this.ensureTransferStarted();
     return true;
@@ -566,6 +573,14 @@ export class MarsGameEngine {
   beginDeorbit() {
     if (this.missionPhysics.phase === FLIGHT_PHASES.ORBIT) {
       this.missionPhysics.triggerDeorbit();
+      if (this.missionPhysics.phase !== FLIGHT_PHASES.ORBIT) {
+        // Orbital camera angles can point straight down at the Starbase during
+        // the close approach. Start entry with a ship-following horizon view.
+        this.cameraController.setFlightMode('CHASE');
+        this.cameraController.resetGimbal();
+        this.missionPhysics.boosterTracking = false;
+        this.flightHud?.notifyCameraMode('CHASE');
+      }
     }
   }
 
@@ -586,21 +601,27 @@ export class MarsGameEngine {
     }
   }
 
-  // Hands the entry interface back to the flight integrator once the cruise is
-  // complete, then swaps terrain/sky to the destination environment.
+  // Earth arrival pauses in orbit for a pilot deorbit decision. Other worlds
+  // retain their direct guided entry sequence.
   handlePlanetArrival(planetId) {
     // The real arrival callback fires after the journey marks itself complete;
     // this guard also makes manual/debug arrival deterministic.
     this.journey.active = false;
     this.journey.arrived = true;
     this.journey.hideTransferTrail();
-    this.missionPhysics.enterPlanetEntry(planetId);
+    if (planetId === 'earth') this.missionPhysics.enterPlanetOrbit(planetId);
+    else this.missionPhysics.enterPlanetEntry(planetId);
     this.missionPhysics.transferStatus = '';
     this.missionPhysics.transferProgress = 0;
-    this.missionPhysics.opsMessage = '';
+    this.missionPhysics.opsMessage = planetId === 'earth' ? 'EARTH ORBIT // SELECT DEORBIT WHEN READY' : '';
     this.applyPlanetEnvironment(planetId);
     this.missionPhysics.setDestination(planetId === 'mars' ? 'earth' : 'mars');
     this.setTimeScale(1);
+    if (this.cameraController.getFlightMode?.() === 'BOOSTER_CAM') {
+      this.cameraController.setFlightMode('CHASE');
+      this.missionPhysics.boosterTracking = false;
+      this.flightHud?.notifyCameraMode('CHASE');
+    }
     this.cameraController.initialized = false;
     this.flightHud?.notifyTransfer(null);
     this.flightHud?.notifyPlanet(planetId);
@@ -1070,7 +1091,10 @@ export class MarsGameEngine {
       }
 
       if (this.input.consumeSinglePress('cameraToggle')) {
-        const nextMode = this.cameraController.nextFlightMode();
+        let nextMode = this.cameraController.nextFlightMode();
+        if (nextMode === 'BOOSTER_CAM' && this.missionPhysics.boosterState === 'LEFT_BEHIND') {
+          nextMode = this.cameraController.nextFlightMode();
+        }
         this.missionPhysics.boosterTracking = (nextMode === 'BOOSTER_CAM');
         this.flightHud.notifyCameraMode(nextMode);
       }

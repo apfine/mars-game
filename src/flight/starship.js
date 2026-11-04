@@ -1960,7 +1960,8 @@ export class StarshipMissionVehicle {
 
     // Engine bay heat shield / skirt
     const skirtGeo = new THREE.CylinderGeometry(radius + 0.18, radius + 0.05, 1.4, 32, 1, true);
-    const skirt = new THREE.Mesh(skirtGeo, this.matDarkMetal);
+    this.boosterSkirtMat = this.matDarkMetal.clone();
+    const skirt = new THREE.Mesh(skirtGeo, this.boosterSkirtMat);
     skirt.position.y = 1.1;
     B.add(skirt);
 
@@ -2007,7 +2008,8 @@ export class StarshipMissionVehicle {
       bellProfile.push(new THREE.Vector2(0.36 + 1.06 * Math.pow(t, 1.7), -2.5 * t));
     }
     const raptorGeo = new THREE.LatheGeometry(bellProfile, 12);
-    const raptorsInst = new THREE.InstancedMesh(raptorGeo, this.matRaptorBell, 33);
+    this.boosterEngineMat = this.matRaptorBell.clone();
+    const raptorsInst = new THREE.InstancedMesh(raptorGeo, this.boosterEngineMat, 33);
     const dummy = new THREE.Object3D();
     let idx = 0;
     for (let i = 0; i < 20; i++) {
@@ -2056,6 +2058,58 @@ export class StarshipMissionVehicle {
 
     // Merge all static booster geometry into one mesh per material.
     mergeStaticGroup(B, [this.boosterFlame, this.boosterShockCore, ...this.gridFins]);
+
+    // Entry heating starts at the engine bay and streams toward the grid fins
+    // as the booster falls engines-first through the atmosphere.
+    this.boosterPlasmaMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+      uniforms: { uTime: { value: 0 }, uHeat: { value: 0 } },
+      vertexShader: `
+        varying vec3 vPos;
+        void main() {
+          vPos = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uHeat;
+        varying vec3 vPos;
+        void main() {
+          if (uHeat <= 0.005) discard;
+          float y = vPos.y;
+          float base = smoothstep(-3.0, 2.0, y);
+          float tail = 1.0 - smoothstep(48.0, 112.0, y);
+          float streak = 0.74 + 0.26 * sin(y * 1.1 - uTime * 18.0 + sin(vPos.x * 3.0 + vPos.z * 2.0));
+          float flicker = 0.88 + 0.12 * sin(uTime * 30.0 + y * 0.65);
+          float hot = exp(-max(y, 0.0) / 28.0);
+          vec3 fire = mix(vec3(0.95, 0.075, 0.012), vec3(1.0, 0.38, 0.045), hot);
+          fire = mix(fire, vec3(1.0, 0.87, 0.48), pow(hot, 4.0) * uHeat * 0.52);
+          float alpha = base * tail * streak * flicker * uHeat * (0.24 + hot * 0.52);
+          gl_FragColor = vec4(fire, alpha);
+        }
+      `
+    });
+    const sheath = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.15, 5.55, 70, 24, 12, true).translate(0, 35, 0),
+      this.boosterPlasmaMat
+    );
+    const wake = new THREE.Mesh(
+      new THREE.ConeGeometry(5.4, 48, 24, 10, true).translate(0, 89, 0),
+      this.boosterPlasmaMat
+    );
+    const engineShock = new THREE.Mesh(
+      new THREE.SphereGeometry(5.0, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      this.boosterPlasmaMat
+    );
+    this.boosterPlasma = new THREE.Group();
+    this.boosterPlasma.add(sheath, wake, engineShock);
+    this.boosterPlasma.visible = false;
+    this.boosterPlasma.renderOrder = 6;
+    B.add(this.boosterPlasma);
   }
 
   // -------------------------------------------------------------
@@ -2652,6 +2706,21 @@ export class StarshipMissionVehicle {
     }
   }
 
+  setBoosterReentryHeat(heatNormalized, ionization = 0) {
+    const heat = THREE.MathUtils.clamp(heatNormalized, 0, 1);
+    const plasma = heat * THREE.MathUtils.clamp(ionization, 0, 1);
+    if (this.boosterPlasma) this.boosterPlasma.visible = plasma > 0.015;
+    if (this.boosterPlasmaMat) this.boosterPlasmaMat.uniforms.uHeat.value = plasma;
+    if (this.boosterSkirtMat) {
+      this.boosterSkirtMat.emissive.setRGB(0.9, 0.18 + heat * 0.42, 0.015);
+      this.boosterSkirtMat.emissiveIntensity = heat * 2.2;
+    }
+    if (this.boosterEngineMat) {
+      this.boosterEngineMat.emissive.setRGB(1.0, 0.21 + heat * 0.31, 0.025);
+      this.boosterEngineMat.emissiveIntensity = heat * 3.0;
+    }
+  }
+
   // Distance-based visibility so the huge starbase and thin frost shells cost
   // nothing while the ship is in space or high above the pad.
   updateLOD(cameraPos) {
@@ -2794,6 +2863,9 @@ export class StarshipMissionVehicle {
     }
     if (this.plasmaMesh?.visible && this.plasmaMat) {
       this.plasmaMat.uniforms.uTime.value = this._fxTime;
+    }
+    if (this.boosterPlasma?.visible && this.boosterPlasmaMat) {
+      this.boosterPlasmaMat.uniforms.uTime.value = this._fxTime;
     }
     if (this.boosterFlame?.visible && this.boosterFlame.material.uniforms) {
       this.boosterFlame.material.uniforms.uTime.value = this._fxTime;
