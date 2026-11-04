@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PLANET_PROFILES, getPlanetProfile } from './planetProfiles.js';
 import { getEarthMaps, getMoonMap } from '../effects/earthMaps.js';
 import { earthSurfaceHeight, earthCoastDistance, EARTH_RADIUS } from '../terrain/earthSurface.js';
@@ -102,15 +103,17 @@ function makeGrassTexture() {
   cv.width = 512;
   cv.height = 512;
   const g = cv.getContext('2d');
-  g.fillStyle = '#4a7038';
+  // Neutral detail map: biome colours come from terrain vertices. Multiplying
+  // a green texture by green vertex colours made the entire coast nearly black.
+  g.fillStyle = '#e9e9dc';
   g.fillRect(0, 0, 512, 512);
   for (let i = 0; i < 3000; i++) {
-    const shade = 40 + Math.random() * 60;
-    g.fillStyle = `rgba(${26 + shade * 0.35},${shade},${24 + shade * 0.25},${0.12 + Math.random() * 0.3})`;
+    const shade = 120 + Math.random() * 90;
+    g.fillStyle = `rgba(${shade},${shade + 4},${shade - 8},${0.08 + Math.random() * 0.17})`;
     g.fillRect(Math.random() * 512, Math.random() * 512, 1 + Math.random() * 4, 1 + Math.random() * 4);
   }
   for (let i = 0; i < 18; i++) {
-    g.fillStyle = `rgba(120,100,64,${0.1 + Math.random() * 0.14})`;
+    g.fillStyle = `rgba(128,120,95,${0.05 + Math.random() * 0.07})`;
     g.beginPath();
     g.arc(Math.random() * 512, Math.random() * 512, 14 + Math.random() * 48, 0, Math.PI * 2);
     g.fill();
@@ -120,6 +123,21 @@ function makeGrassTexture() {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(14, 14);
   return tex;
+}
+
+function makeLeafCluster(radius) {
+  const parts = [];
+  for (let i = 0; i < 7; i++) {
+    const angle = i * 2.39996;
+    const reach = i === 0 ? 0 : radius * (0.38 + (i % 3) * 0.055);
+    const lobe = new THREE.IcosahedronGeometry(radius * (i === 0 ? 0.73 : 0.50), 1);
+    lobe.scale(1.13, 0.82 + (i % 3) * 0.08, 0.96);
+    lobe.translate(Math.cos(angle) * reach, Math.sin(i * 2.7) * radius * 0.18, Math.sin(angle) * reach);
+    parts.push(lobe);
+  }
+  const merged = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  return merged;
 }
 
 function makeOceanTexture() {
@@ -644,26 +662,46 @@ export class InterplanetaryJourney {
       polygonOffsetUnits: 4
     });
 
-    const groundGeo = new THREE.PlaneGeometry(40000, 40000, 192, 192);
-    groundGeo.rotateX(-Math.PI / 2);
-    const gPos = groundGeo.attributes.position;
-    for (let i = 0; i < gPos.count; i++) {
-      const vx = gPos.getX(i);
-      const vz = gPos.getZ(i);
-      const r = Math.hypot(vx, vz);
-      const y = earthSurfaceHeight(vx, vz);
-      gPos.setY(i, y);
-    }
-    const colors = new Float32Array(gPos.count * 3);
-    const sand = new THREE.Color(0xb7ac82), grass = new THREE.Color(0x637459), color = new THREE.Color();
-    for (let i = 0; i < gPos.count; i++) {
-      const x = gPos.getX(i), z = gPos.getZ(i);
-      const inland = THREE.MathUtils.smoothstep(earthCoastDistance(x, z), 20, 700);
-      color.copy(sand).lerp(grass, inland);
-      colors.set([color.r, color.g, color.b], i * 3);
-    }
-    groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    groundGeo.computeVertexNormals();
+    const makeGroundGeometry = (size, segments, centerHole = 0) => {
+      const geo = new THREE.PlaneGeometry(size, size, segments, segments);
+      geo.rotateX(-Math.PI / 2);
+      const positions = geo.attributes.position;
+      const colors = new Float32Array(positions.count * 3);
+      const sand = new THREE.Color(0xcbb991);
+      const meadow = new THREE.Color(0x729553);
+      const woodland = new THREE.Color(0x456d3e);
+      const color = new THREE.Color();
+      for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i), z = positions.getZ(i);
+        const coast = earthCoastDistance(x, z);
+        positions.setY(i, earthSurfaceHeight(x, z));
+        const inland = THREE.MathUtils.smoothstep(coast, -130, 420);
+        const woodlandMix = THREE.MathUtils.smoothstep(coast, 900, 3000) *
+          (0.28 + 0.22 * Math.sin(x * 0.0021) * Math.cos(z * 0.0017));
+        color.copy(sand).lerp(meadow, inland).lerp(woodland, woodlandMix);
+        const variation = 0.93 + 0.09 * Math.sin(x * 0.008) * Math.cos(z * 0.006);
+        color.multiplyScalar(variation);
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+      }
+      if (centerHole) {
+        const source = geo.getIndex();
+        const kept = [];
+        for (let i = 0; i < source.count; i += 3) {
+          const a = source.getX(i), b = source.getX(i + 1), c = source.getX(i + 2);
+          const x = (positions.getX(a) + positions.getX(b) + positions.getX(c)) / 3;
+          const z = (positions.getZ(a) + positions.getZ(b) + positions.getZ(c)) / 3;
+          if (Math.abs(x) < centerHole && Math.abs(z) < centerHole) continue;
+          kept.push(a, b, c);
+        }
+        geo.setIndex(kept);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geo.computeVertexNormals();
+      return geo;
+    };
+    const groundGeo = makeGroundGeometry(40000, 256, 3125);
 
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.position.set(this.padCoords.x, this.padGroundY, this.padCoords.y);
@@ -671,6 +709,14 @@ export class InterplanetaryJourney {
     this.earthSurface.add(ground);
     this.earthGround = ground;
     this.earthGroundMat = groundMat;
+
+    // Resolve the walkable landscape around Starbase at 20 m instead of the
+    // 156 m regional grid. Both meshes sample the same collision height.
+    const nearGround = new THREE.Mesh(makeGroundGeometry(6250, 250), groundMat);
+    nearGround.position.set(this.padCoords.x, this.padGroundY, this.padCoords.y);
+    nearGround.receiveShadow = true;
+    this.earthSurface.add(nearGround);
+    this.earthNearGround = nearGround;
 
     // Sandy coastal ring makes the land/ocean boundary read as a beach
     const beachMat = new THREE.MeshStandardMaterial({
@@ -732,7 +778,7 @@ export class InterplanetaryJourney {
     const oakGreenMat = new THREE.MeshStandardMaterial({ color: 0x2d682c, roughness: 0.88, transparent: true, opacity: 1.0 });
     const cypressMat = new THREE.MeshStandardMaterial({ color: 0x173a1d, roughness: 0.92, transparent: true, opacity: 1.0 });
     const willowMat = new THREE.MeshStandardMaterial({ color: 0x648c34, roughness: 0.88, transparent: true, opacity: 1.0 });
-    const mapleRedMat = new THREE.MeshStandardMaterial({ color: 0xb83818, roughness: 0.86, transparent: true, opacity: 1.0 });
+    const mapleRedMat = new THREE.MeshStandardMaterial({ color: 0x5e803d, roughness: 0.86, transparent: true, opacity: 1.0 });
     const birchLeafMat = new THREE.MeshStandardMaterial({ color: 0x5da83a, roughness: 0.88, transparent: true, opacity: 1.0 });
     const firDarkMat = new THREE.MeshStandardMaterial({ color: 0x102f15, roughness: 0.94, transparent: true, opacity: 1.0 });
     const mangroveMat = new THREE.MeshStandardMaterial({ color: 0x275628, roughness: 0.90, transparent: true, opacity: 1.0 });
@@ -771,8 +817,8 @@ export class InterplanetaryJourney {
 
     // Archetype 3: Sprawling English Oak (stout trunk + 2 broadleaf domes)
     const oakTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.3, 1.9, 14, 6), barkDarkMat, countOak);
-    const oakDome1Inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(9.0, 2), oakGreenMat, countOak);
-    const oakDome2Inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(7.2, 2), birchLeafMat, countOak);
+    const oakDome1Inst = new THREE.InstancedMesh(makeLeafCluster(9.0), oakGreenMat, countOak);
+    const oakDome2Inst = new THREE.InstancedMesh(makeLeafCluster(7.2), birchLeafMat, countOak);
 
     // Archetype 4: Mediterranean Cypress (slender columnar spire)
     const cypressTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.6, 0.9, 6, 6), barkDarkMat, countCypress);
@@ -780,15 +826,15 @@ export class InterplanetaryJourney {
 
     // Archetype 5: Weeping Willow (umbrella + cascading fronds)
     const willowTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.2, 1.7, 12, 6), barkDarkMat, countWillow);
-    const willowDomeInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(9.5, 7.0, 6, 8), willowMat, countWillow);
+    const willowDomeInst = new THREE.InstancedMesh(makeLeafCluster(9.5), willowMat, countWillow);
 
     // Archetype 6: Autumn Red Maple (vibrant orange-crimson canopy)
     const mapleTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.9, 1.4, 15, 6), barkDarkMat, countMaple);
-    const mapleCanopyInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(8.2, 2), mapleRedMat, countMaple);
+    const mapleCanopyInst = new THREE.InstancedMesh(makeLeafCluster(8.2), mapleRedMat, countMaple);
 
     // Archetype 7: Silver Birch / Aspen (slender pale trunk + airy fluttering foliage)
     const birchTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.8, 20, 6), barkSilverMat, countBirch);
-    const birchCanopyInst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(6.8, 2), birchLeafMat, countBirch);
+    const birchCanopyInst = new THREE.InstancedMesh(makeLeafCluster(6.8), birchLeafMat, countBirch);
 
     // Archetype 8: Douglas Fir / Giant Spruce (tall conifer with 4 dense tiered skirts)
     const firTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.9, 1.5, 24, 6), barkDarkMat, countFir);
@@ -802,7 +848,7 @@ export class InterplanetaryJourney {
 
     // Archetype 10: Flowering Magnolia / Dogwood (glossy dark canopy with bright blossoms)
     const magnoliaTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.8, 1.2, 11, 6), barkPaleMat, countMagnolia);
-    const magnoliaCanopyInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(7.0, 2), magnoliaMat, countMagnolia);
+    const magnoliaCanopyInst = new THREE.InstancedMesh(makeLeafCluster(7.0), magnoliaMat, countMagnolia);
     const magnoliaBloomInst = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(3.4, 1), flowerBlossomMat, countMagnolia);
 
     const dummy = new THREE.Object3D();
@@ -1122,6 +1168,39 @@ export class InterplanetaryJourney {
       mangroveTrunkInst, mangroveDomeInst,
       magnoliaTrunkInst, magnoliaCanopyInst, magnoliaBloomInst
     );
+
+    // Low vegetation fills the open ground beyond the clear launch apron.
+    // A single instanced mesh keeps this dense coastal cover inexpensive.
+    const shrubCount = 1800;
+    const shrubs = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(1, 0),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 1 }),
+      shrubCount
+    );
+    const shrubColors = [0x54753c, 0x6e8c48, 0x45673b, 0x8b9c55].map(v => new THREE.Color(v));
+    const fract = v => v - Math.floor(v);
+    let planted = 0;
+    for (let i = 0; i < shrubCount * 5 && planted < shrubCount; i++) {
+      const angle = fract(Math.sin(i * 127.1 + 19.3) * 43758.5453) * Math.PI * 2;
+      const radius = Math.sqrt(0.045 + fract(Math.sin(i * 78.233 + 91.7) * 9628.234) * 0.955) * 2700;
+      const vx = Math.cos(angle) * radius;
+      const vz = Math.sin(angle) * radius;
+      if (radius < 530 || earthCoastDistance(vx, vz) < 60) continue;
+      const size = 1.5 + fract(Math.sin(i * 17.41) * 7241.8) * 2.4;
+      const height = size * (0.45 + fract(Math.sin(i * 4.13) * 914.2) * 0.25);
+      dummy.position.set(this.padCoords.x + vx, sampleCarvedY(vx, vz) + height * 0.75, this.padCoords.y + vz);
+      dummy.rotation.set(0, angle, 0);
+      dummy.scale.set(size, height, size);
+      dummy.updateMatrix();
+      shrubs.setMatrixAt(planted, dummy.matrix);
+      shrubs.setColorAt(planted, shrubColors[i % shrubColors.length]);
+      planted++;
+    }
+    shrubs.count = planted;
+    shrubs.instanceMatrix.needsUpdate = true;
+    if (shrubs.instanceColor) shrubs.instanceColor.needsUpdate = true;
+    this.earthSurface.add(shrubs);
+    this.earthTreeMaterials.push(shrubs.material);
 
     // Low clouds drifting through the coastal sky.
     this.earthCloudSprites = new THREE.Group();

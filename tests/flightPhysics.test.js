@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { StarshipMissionPhysics, FLIGHT_PHASES } from '../src/flight/missionPhysics.js';
+import { earthSurfaceHeight } from '../src/terrain/earthSurface.js';
 
 function mission() {
   const vehicle = new Proxy({
@@ -23,6 +24,19 @@ test('Earth and Mars atmosphere use their own gas properties and continuous dens
       assert.ok(Math.abs(below / above - 1) < .00001);
     }
   }
+});
+test('Earth flight contact follows the visible inland relief', () => {
+  const m = mission();
+  m.setPlanet('earth');
+  m.vehicle.setMated(false);
+  m.autoMission = false;
+  const x = m.padCoords.x - 1400, z = m.padCoords.y + 400;
+  const floor = m.padGroundY + earthSurfaceHeight(x - m.padCoords.x, z - m.padCoords.y);
+  assert.ok(floor > m.padGroundY + 1);
+  m.position.set(x, floor + 30, z);
+  m.velocity.set(0, -35, 0);
+  for (let i = 0; i < 180; i++) m.update(1 / 60);
+  assert.ok(Math.abs(m.position.y - floor) < 0.1);
 });
 for (const planet of ['earth', 'mars']) {
   test(`${planet}: entry starts hypersonic, finite dynamics and reaches recovery`, () => {
