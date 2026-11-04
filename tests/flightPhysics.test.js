@@ -32,11 +32,24 @@ for (const planet of ['earth', 'mars']) {
     assert.ok(m.velocity.length() > 3000);
     const phases = new Set();
     let maxHeat = 0;
+    let terminalSamples = 0;
+    let previousPosition = m.position.clone();
     for (let i = 0; i < 60 * 1800; i++) {
       m.update(1 / 60);
       phases.add(m.phase);
       maxHeat = Math.max(maxHeat, m.heat);
       assert.ok(Number.isFinite(m.position.length() + m.velocity.length()));
+      const height = m.position.y - m.shipCatchBaseY;
+      if (height >= 0 && height < 12 && m.phase !== FLIGHT_PHASES.LANDED) {
+        terminalSamples++;
+        assert.ok(Math.hypot(m.position.x - m.shipCatchCoords.x, m.position.z - m.shipCatchCoords.y) < 2,
+          `${planet} ship is beside the arms during final descent`);
+        assert.ok(m.position.distanceTo(previousPosition) < 1,
+          `${planet} ship jumps during final descent`);
+      }
+      if (m.shipCaughtByTower) assert.ok(m.position.distanceTo(previousPosition) < 1,
+        `${planet} ship jumps into the catch`);
+      previousPosition.copy(m.position);
       if (m.phase === FLIGHT_PHASES.LANDED) break;
     }
     assert.ok(phases.has(FLIGHT_PHASES.BELLYFLOP));
@@ -44,6 +57,7 @@ for (const planet of ['earth', 'mars']) {
     assert.ok(phases.has(FLIGHT_PHASES.LANDED));
     assert.ok(phases.has(FLIGHT_PHASES.TOUCHDOWN));
     assert.equal(m.shipCaughtByTower, true);
+    assert.ok(terminalSamples > 5);
     assert.ok(maxHeat > 0.1);
   });
 }
@@ -75,7 +89,23 @@ for (const planet of ['earth', 'mars']) {
     assert.ok(phases.has(FLIGHT_PHASES.STARSHIP_ASCENT));
     assert.ok(phases.has(FLIGHT_PHASES.ORBIT), `ended ${m.phase}, altitude ${m.altitude}`);
     assert.equal(m.vehicle.isMated, false);
-    for(let i=0;i<60*1200 && m.boosterState!=='CAUGHT';i++)m.update(1/60);
+    let boosterTerminalSamples=0;
+    let previousBooster=m.boosterPosition.clone();
+    for(let i=0;i<60*1200 && m.boosterState!=='CAUGHT';i++) {
+      m.update(1/60);
+      const height=m.boosterPosition.y-m.boosterCatchBaseY;
+      if(height>=0 && height<12 && m.boosterState!=='CAUGHT') {
+        boosterTerminalSamples++;
+        assert.ok(Math.hypot(m.boosterPosition.x-m.boosterCatchCoords.x,m.boosterPosition.z-m.boosterCatchCoords.y)<2,
+          `${planet} booster is beside the arms during final descent`);
+        assert.ok(m.boosterPosition.distanceTo(previousBooster)<1,
+          `${planet} booster jumps during final descent`);
+      }
+      if(m.boosterState==='CAUGHT') assert.ok(m.boosterPosition.distanceTo(previousBooster)<1,
+        `${planet} booster jumps into the catch`);
+      previousBooster.copy(m.boosterPosition);
+    }
     assert.equal(m.boosterState,'CAUGHT',`${planet} booster ended ${m.boosterState}`);
+    assert.ok(boosterTerminalSamples>5);
   });
 }

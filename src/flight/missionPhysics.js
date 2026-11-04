@@ -229,6 +229,9 @@ export class StarshipMissionPhysics {
     this._relVel = new THREE.Vector3();
     this._wind = new THREE.Vector3();
     this._capturePoint = new THREE.Vector3();
+    this._shipCatchAx = 0;
+    this._shipCatchAy = 0;
+    this._shipCatchAz = 0;
 
     this.resetToPad();
   }
@@ -480,7 +483,7 @@ export class StarshipMissionPhysics {
     this.vehicle.boosterGroup.visible = false;
     // Arrival propellant state: the ship has spent most of its propellant on
     // the transfer and only retains the landing reserve.
-    this.starshipFuel = planetId === 'moon' ? 35 : 18;
+    this.starshipFuel = planetId === 'moon' ? 35 : planetId === 'mars' ? 30 : 18;
     this.starshipFlameout = false;
     this.cargoDoorsDeployed = false;
     this.landingLegsDeployed = false;
@@ -494,7 +497,11 @@ export class StarshipMissionPhysics {
     const entryAlt = options.altitude ?? profile.entryAltitude;
     const entrySpeed = options.speed ?? profile.arrivalSpeed;
     const flightAngle = 6 * Math.PI / 180;
-    this.position.set(target.x, this.padElevation + entryAlt, target.y - entryAlt * 8);
+    // Match the entry corridor to the distance this atmosphere actually lets
+    // the vehicle travel before the landing burn. The old 8:1 offset left the
+    // ship tens to hundreds of kilometres from the tower at low altitude.
+    const entryDownrange = planetId === 'mars' ? 6.511 : 6.3;
+    this.position.set(target.x, this.padElevation + entryAlt, target.y - entryAlt * entryDownrange);
     this.velocity.set(0, -entrySpeed * Math.sin(flightAngle), entrySpeed * Math.cos(flightAngle));
     if (planetId === 'moon') {
       this.position.set(target.x, this.padElevation + entryAlt, target.y);
@@ -875,25 +882,13 @@ export class StarshipMissionPhysics {
 
       const thrustAccel = this._thrustAccel.copy(bodyNose).multiplyScalar(thrustAccelMag);
 
-      // Add TVC lateral steering vector when descending in assisted landing/catch modes.
-      // Uses impact-point guidance: dtGo is the time to the catch plane, so the
-      // ship brakes before the tower instead of overshooting at high speed.
+      // Add the lateral acceleration requested by the recovery controller.
       if (this.autoMission && (this.phase === FLIGHT_PHASES.LANDING_FLIP || this.phase === FLIGHT_PHASES.TOUCHDOWN) && this.throttle > 0.05) {
-        const dxPad = this.shipCatchCoords.x - this.position.x;
-        const dzPad = this.shipCatchCoords.y - this.position.z;
-        const catchY = this.shipCatchBaseY;
-        const dtGo = Math.max(1.6, (this.position.y - catchY) / Math.max(6.0, -this.velocity.y));
-        const latDen = Math.max(3.0, dtGo * dtGo);
-        // Impact-point guidance: aim the predicted arrival point at the centre
-        // of the ship tower's arms, not merely at the geometric pad centre.
-        const latAx = THREE.MathUtils.clamp((2.0 * (dxPad - this.velocity.x * dtGo)) / latDen, -12.0, 12.0);
-        const latAz = THREE.MathUtils.clamp((2.0 * (dzPad - this.velocity.z * dtGo)) / latDen, -12.0, 12.0);
-        const lateral = Math.hypot(latAx, latAz);
-        const lateralLimit = thrustAccelMag * 0.65;
-        const steeringScale = lateral > lateralLimit ? lateralLimit / lateral : 1;
-        thrustAccel.x = latAx * steeringScale;
-        thrustAccel.z = latAz * steeringScale;
-        thrustAccel.y = Math.sqrt(Math.max(0, thrustAccelMag ** 2 - thrustAccel.x ** 2 - thrustAccel.z ** 2));
+        const latAx = this._shipCatchAx;
+        const latAz = this._shipCatchAz;
+        const commanded = Math.hypot(latAx, this._shipCatchAy, latAz);
+        const steeringScale = commanded > thrustAccelMag ? thrustAccelMag / commanded : 1;
+        thrustAccel.set(latAx * steeringScale, this._shipCatchAy * steeringScale, latAz * steeringScale);
       }
 
       // B. AERODYNAMICS: quadratic drag on the instantaneous reference area,
@@ -940,18 +935,13 @@ export class StarshipMissionPhysics {
           const missZ = dzPad - this.velocity.z * tGo;
           const aeroSteerMax = THREE.MathUtils.clamp(
             (this.dynamicPressure * 1.8 * SHIP_PLANFORM_AREA) / activeMass,
-            1.8, 26.0
+            2.0, 45.0
           );
           const gain = 2.0 / (tGo * tGo);
           aeroAccel.x += THREE.MathUtils.clamp(missX * gain, -aeroSteerMax, aeroSteerMax);
           aeroAccel.z += THREE.MathUtils.clamp(missZ * gain, -aeroSteerMax, aeroSteerMax);
-          // Bank guidance redirects available lift; it cannot add thrust or
-          // make aerodynamic forces accelerate the craft along its airspeed.
-          const along = aeroAccel.dot(velHat);
-          aeroAccel.addScaledVector(velHat, -along);
-          const liftLimit = this.dynamicPressure * 0.55 * SHIP_PLANFORM_AREA / activeMass;
-          aeroAccel.clampLength(0, liftLimit);
-          aeroAccel.addScaledVector(velHat, -dragAccel);
+          // Keep the braking component. Projecting the correction off the
+          // velocity vector discarded the downrange command entirely.
         }
       }
       this.angleOfAttack = angleOfAttack;
@@ -1336,22 +1326,36 @@ export class StarshipMissionPhysics {
         const shipAvailAccel = this.getShipAvailAccel(engineCount);
         // Reserve thrust for lateral braking and controller response near the catch.
         const usableDecel = Math.max(1, shipAvailAccel * 0.32 - localGravity);
-        const desiredVy = -Math.min(250, Math.sqrt(2.0 * usableDecel * heightAboveCatch)) - 1.2;
+        const catchOffset = Math.hypot(this.shipCatchCoords.x - this.position.x, this.shipCatchCoords.y - this.position.z);
+        const lateralSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+        const aligned = catchOffset < 12 && lateralSpeed < 5;
+        // Brake into a hover above the arms until lateral guidance has settled.
+        const hoverHeight = aligned ? 0 : 120;
+        const heightToGo = heightAboveCatch - hoverHeight;
+        const desiredVy = heightToGo < 0
+          ? Math.min(12, Math.sqrt(2 * usableDecel * -heightToGo))
+          : -Math.min(250, Math.sqrt(2.0 * usableDecel * heightToGo));
         const vyError = desiredVy - this.velocity.y;
+        const dx = this.shipCatchCoords.x - this.position.x;
+        const dz = this.shipCatchCoords.y - this.position.z;
+        const distance = Math.hypot(dx, dz);
+        const timeToHover = Math.max(6, Math.max(0, heightAboveCatch - hoverHeight) / Math.max(20, -this.velocity.y));
+        const desiredSpeed = Math.min(180, Math.sqrt(40 * distance), distance / timeToHover);
+        this._shipCatchAx = THREE.MathUtils.clamp(((distance > 0.01 ? dx / distance * desiredSpeed : 0) - this.velocity.x) / 2, -35, 35);
+        this._shipCatchAz = THREE.MathUtils.clamp(((distance > 0.01 ? dz / distance * desiredSpeed : 0) - this.velocity.z) / 2, -35, 35);
         // Feedforward the profile decel, then close the velocity loop.
         const neededAccelY = localGravity + vyError * 1.2;
-        this.throttle = THREE.MathUtils.clamp(neededAccelY / Math.max(0.35, Math.cos(this.pitch) * shipAvailAccel), 0, 1.0);
+        this._shipCatchAy = Math.max(0, neededAccelY);
+        this.throttle = THREE.MathUtils.clamp(Math.hypot(this._shipCatchAy, this._shipCatchAx, this._shipCatchAz) / shipAvailAccel, 0, 1.0);
 
         if (heightAboveCatch <= 90.0) {
           const preClose = THREE.MathUtils.clamp((90.0 - heightAboveCatch) / 180.0, 0.0, 0.45);
           this.vehicle.setShipChopsticks(preClose, this.shipArmY);
         }
 
-        // Terminal alignment funnel: null the horizontal offset onto the catch
-        // centreline over the last 60 m so the pins arrive perfectly centred.
         this.alignShipToCatch(dt, heightAboveCatch);
 
-        if (heightAboveCatch <= 12.0 && this.velocity.y > -12.0) {
+        if (heightAboveCatch <= 50.0 && aligned) {
           this.phase = FLIGHT_PHASES.TOUCHDOWN;
         }
         break;
@@ -1366,18 +1370,28 @@ export class StarshipMissionPhysics {
         this.pitch += this.pitchVel * dt;
         this.yaw = THREE.MathUtils.lerp(this.yaw, 0.0, 1.0 - Math.exp(-dt * 5.0));
 
-        const targetVy = -THREE.MathUtils.clamp(0.35 + hAbovePins * 0.16, 0.35, 5.5);
+        const catchOffset = Math.hypot(this.shipCatchCoords.x - this.position.x, this.shipCatchCoords.y - this.position.z);
+        const lateralSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+        const aligned = catchOffset < 0.6 && lateralSpeed < 0.6;
+        const targetVy = aligned
+          ? -THREE.MathUtils.clamp(0.35 + hAbovePins * 0.16, 0.35, 5.5)
+          : THREE.MathUtils.clamp((8 - hAbovePins) * 1.2, -5.5, 5.5);
         const vyErr = targetVy - this.velocity.y;
         const neededAy = localGravity + THREE.MathUtils.clamp(vyErr * 3.8, -2.5, 22.0);
         const shipAvailAccel = this.getShipAvailAccel(6);
-        this.throttle = THREE.MathUtils.clamp(neededAy / shipAvailAccel, 0, 0.90);
+        const dx = this.shipCatchCoords.x - this.position.x;
+        const dz = this.shipCatchCoords.y - this.position.z;
+        this._shipCatchAx = THREE.MathUtils.clamp(dx * 3 - this.velocity.x * 3, -12, 12);
+        this._shipCatchAz = THREE.MathUtils.clamp(dz * 3 - this.velocity.z * 3, -12, 12);
+        this._shipCatchAy = Math.max(0, neededAy);
+        this.throttle = THREE.MathUtils.clamp(Math.hypot(this._shipCatchAy, this._shipCatchAx, this._shipCatchAz) / shipAvailAccel, 0, 0.90);
 
         this.alignShipToCatch(dt, hAbovePins);
 
         const clampProgress = THREE.MathUtils.clamp(1.0 - (hAbovePins / 28.0), 0.45, 1.0);
         this.vehicle.setShipChopsticks(clampProgress, this.shipArmY);
 
-        if (hAbovePins <= 0.45 || this.position.y <= targetShipCatchY + 0.45) {
+        if (Math.abs(this.position.y - targetShipCatchY) <= 0.45 && aligned && Math.abs(this.velocity.y) < 2) {
           this.position.set(this.shipCatchCoords.x, targetShipCatchY, this.shipCatchCoords.y);
           this.velocity.set(0, 0, 0);
           this.pitch = 0;
@@ -1398,18 +1412,12 @@ export class StarshipMissionPhysics {
     }
   }
 
-  // Captures the last few metres of the approach on the arm centreline. The
-  // physical catch point and the arm tips are the same coordinate, so any
-  // residual lateral error is nulled here instead of arriving beside the pins.
+  // TVC in the flight integrator steers toward the arm centreline. Keep this
+  // helper for attitude only; changing position here made catches teleport.
   alignShipToCatch(dt, heightAboveCatch) {
-    if (heightAboveCatch > 80.0) return;
+    if (heightAboveCatch > 180.0) return;
     const gain = heightAboveCatch < 12.0 ? 5.5 : 2.2;
     const k = 1.0 - Math.exp(-dt * gain);
-    this.position.x += (this.shipCatchCoords.x - this.position.x) * k;
-    this.position.z += (this.shipCatchCoords.y - this.position.z) * k;
-    const damp = Math.exp(-dt * (heightAboveCatch < 12.0 ? 6.0 : 2.6));
-    this.velocity.x *= damp;
-    this.velocity.z *= damp;
     this.yaw = THREE.MathUtils.lerp(this.yaw, 0.0, k);
     this.roll = THREE.MathUtils.lerp(this.roll, 0.0, k);
   }
@@ -1595,22 +1603,26 @@ export class StarshipMissionPhysics {
 
         // Suicide-burn profile v = -sqrt(2*a*h), capped near the pad so the
         // final metres are a gentle 2.5 m/s instead of the profile's 8 m/s.
-        const profileSpeed = Math.sqrt(2.0 * decelCap * Math.max(0.0, altitudeAboveCatch));
+        const lateralSpeed = Math.hypot(this.boosterVelocity.x, this.boosterVelocity.z);
+        const aligned = horizDist < 1.5 && lateralSpeed < 1.2;
+        const hoverHeight = aligned ? 0 : 120;
+        const heightToGo = altitudeAboveCatch - hoverHeight;
+        const profileSpeed = Math.sqrt(2.0 * decelCap * Math.max(0.0, heightToGo));
         const terminalSpeed = 2.5 + 0.12 * altitudeAboveCatch;
-        const targetVy = -THREE.MathUtils.clamp(
-          Math.min(profileSpeed, terminalSpeed),
-          2.5, 420.0
-        );
+        const targetVy = heightToGo < 0
+          ? Math.min(12, Math.sqrt(2 * decelCap * -heightToGo))
+          : -Math.min(profileSpeed, terminalSpeed, 420.0);
         const vyError = targetVy - this.boosterVelocity.y;
         // Feedforward the profile's instantaneous decel + gravity, then close
         // the velocity loop. Without this the last metres arrive too hot.
-        const profileDecel = (targetVy * targetVy) / (2.0 * Math.max(0.5, altitudeAboveCatch));
+        const profileDecel = heightToGo > 0 ? (targetVy * targetVy) / (2.0 * Math.max(0.5, heightToGo)) : 0;
         let ay = localG + profileDecel + THREE.MathUtils.clamp(vyError * 3.2, -approachAvail * 0.92, approachAvail * 0.92);
 
         // Lateral TVC: null the miss and arrive over the pad.
-        const latitude = Math.max(2.0, tFall);
-        const desiredVx = toPadDir.x * THREE.MathUtils.clamp(horizDist / latitude, 0.0, 110.0);
-        const desiredVz = toPadDir.z * THREE.MathUtils.clamp(horizDist / latitude, 0.0, 110.0);
+        const lateralAccel = approachAvail * 0.3;
+        const approachSpeed = Math.min(110, horizDist / 4, Math.sqrt(2 * lateralAccel * horizDist));
+        const desiredVx = toPadDir.x * approachSpeed;
+        const desiredVz = toPadDir.z * approachSpeed;
         let ax = THREE.MathUtils.clamp((desiredVx - this.boosterVelocity.x) * 0.9, -approachAvail * 0.42, approachAvail * 0.42);
         let az = THREE.MathUtils.clamp((desiredVz - this.boosterVelocity.z) * 0.9, -approachAvail * 0.42, approachAvail * 0.42);
 
@@ -1657,24 +1669,12 @@ export class StarshipMissionPhysics {
           THREE.MathUtils.clamp(toPadDir.z * 0.25, -0.25, 0.25)
         );
 
-        // Terminal alignment funnel: within 60 m, pull the booster onto the
-        // arm centreline and bleed lateral velocity. This is the final capture
-        // guidance that makes the pins meet the pads dead-centre.
-        if (altitudeAboveCatch <= 60.0) {
-          const k = 1.0 - Math.exp(-dt * (altitudeAboveCatch < 10.0 ? 6.0 : 2.4));
-          this.boosterPosition.x += (this.boosterCatchCoords.x - this.boosterPosition.x) * k;
-          this.boosterPosition.z += (this.boosterCatchCoords.y - this.boosterPosition.z) * k;
-          const damp = Math.exp(-dt * (altitudeAboveCatch < 10.0 ? 6.5 : 3.0));
-          this.boosterVelocity.x *= damp;
-          this.boosterVelocity.z *= damp;
-        }
-
         if (altitudeAboveCatch <= 42.0) {
           const clampProgress = THREE.MathUtils.clamp(1.0 - altitudeAboveCatch / 42.0, 0.0, 1.0);
           this.vehicle.setBoosterChopsticks(clampProgress, carriageHeight);
         }
 
-        if (altitudeAboveCatch <= 1.2 || this.boosterPosition.y <= targetCatchElevation + 1.2) {
+        if (Math.abs(this.boosterPosition.y - targetCatchElevation) <= 0.45 && aligned && Math.abs(this.boosterVelocity.y) < 2) {
           this.boosterPosition.set(this.boosterCatchCoords.x, targetCatchElevation, this.boosterCatchCoords.y);
           this.boosterVelocity.set(0, 0, 0);
           this.boosterQuaternion.identity();
