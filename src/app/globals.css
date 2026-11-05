@@ -2886,6 +2886,13 @@ html, body {
   display: flex;
 }
 
+.spx-top-right .spx-dropdown-menu {
+  left: auto;
+  right: 0;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+}
+
 @keyframes dropdownFadeIn {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -2983,23 +2990,24 @@ html, body {
     left: auto;
     right: 0;
   }
+  #rover-actions-menu {
+    position: fixed;
+    top: calc(92px + env(safe-area-inset-top));
+    left: auto;
+    right: 8px;
+    width: min(240px, calc(100vw - 16px));
+    min-width: 0;
+  }
   .spx-broadcast-bar {
     padding: 6px 10px;
     gap: 8px;
   }
 }
 
-/* Flight deck: essentials first, optional instruments behind Details. */
+/* Flight deck instruments are always visible. */
 #flight-hud .spx-top-bar { top: max(12px, env(safe-area-inset-top)); gap: 8px; }
 #flight-hud .hud-pill-btn { min-height: 44px; border-radius: 12px !important; background: #101923ed !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 #flight-hud .spx-broadcast-bar { border-radius: 20px 20px 0 0; background: #0c141ef5 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-#flight-hud:not(.show-details) .spx-booster-wing,
-#flight-hud:not(.show-details) .spx-engine-graphic,
-#flight-hud:not(.show-details) .spx-timeline,
-#flight-hud:not(.show-details) .spx-gimbal-bar,
-#flight-hud:not(.show-details) .flight-attitude-gauge,
-#flight-hud:not(.show-details) .flight-score-card { display: none !important; }
-#flight-hud:not(.show-details) .spx-broadcast-bar { grid-template-columns: auto 1fr; }
 #flight-hud .spx-dropdown-menu { max-height: min(65dvh, 480px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
 #flight-hud .dropdown-item { min-height: 44px; }
 #flight-hud button:focus-visible { outline: 2px solid #8fddff; outline-offset: 3px; }
@@ -3030,11 +3038,11 @@ html, body {
   #flight-hud .flight-mobile-steering { left: 12px; bottom: calc(120px + env(safe-area-inset-bottom)); }
   #flight-hud .spx-manual-controls { max-width: 48vw; flex-wrap: wrap; gap: 4px; }
   #flight-hud .spx-thr-btn { min-width: 44px; min-height: 44px; }
-  #flight-hud.show-details .spx-broadcast-bar { grid-template-columns: auto 1fr; }
-  #flight-hud.show-details .spx-booster-wing { position: absolute; bottom: calc(120px + env(safe-area-inset-bottom)); right: 12px; padding: 10px; background: #0c141eee; border-radius: 12px; }
-  #flight-hud.show-details .spx-engine-graphic, #flight-hud.show-details .spx-timeline { display: none; }
-  #flight-hud.show-details .flight-attitude-gauge { bottom: 230px; right: 12px; }
-  #flight-hud.show-details .spx-gimbal-bar { top: 180px; bottom: auto; }
+  #flight-hud .spx-broadcast-bar { grid-template-columns: auto 1fr; }
+  #flight-hud .spx-booster-wing { position: absolute; bottom: calc(120px + env(safe-area-inset-bottom)); right: 12px; padding: 10px; background: #0c141eee; border-radius: 12px; }
+  #flight-hud .spx-engine-graphic, #flight-hud .spx-timeline { display: none; }
+  #flight-hud .flight-attitude-gauge { bottom: 230px; right: 12px; }
+  #flight-hud .spx-gimbal-bar { top: 180px; bottom: auto; }
 }
 @media (max-height: 500px) and (orientation: landscape) {
   #flight-hud .spx-top-bar { display: flex; flex-wrap: nowrap; }

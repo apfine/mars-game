@@ -102,11 +102,6 @@ export class MissionFlightHUD {
   }
 
   initEvents() {
-    const details = document.getElementById('flight-details-btn');
-    details?.addEventListener('click', () => {
-      const expanded = this.dom.container.classList.toggle('show-details');
-      details.setAttribute('aria-expanded', String(expanded));
-    });
     document.getElementById('flight-roadster-shortcut')?.addEventListener('click', () => this.options.onToggleRoadster?.());
     if (this.dom.stageBtn) {
       this.dom.stageBtn.addEventListener('click', (e) => {

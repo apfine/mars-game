@@ -389,7 +389,6 @@ export default function MarsCanvas() {
           </div>
 
           <div className="spx-top-right">
-            <button id="flight-details-btn" className="hud-pill-btn" aria-expanded="false" aria-label="Toggle flight instruments">DETAILS</button>
             {/* Mission & Destination Dropdown */}
             <div className="spx-dropdown" id="flight-mission-dropdown">
               <button className="hud-pill-btn spx-dropdown-trigger" id="flight-mission-btn" aria-label="Mission Profile & Destination">

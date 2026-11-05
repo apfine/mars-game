@@ -34,6 +34,8 @@ assert.equal(await evaluate(`Array.from(document.querySelectorAll('.compact-driv
 await evaluate(`document.getElementById('btn-launch-mobile').click()`);
 await delay(3000);
 assert.equal(await evaluate(`Array.from(document.querySelectorAll('.flight-touch-dpad button')).filter(b=>b.getBoundingClientRect().width>0).length`),6);
+assert.equal(await evaluate(`document.getElementById('flight-details-btn')`),null);
+assert.equal(await evaluate(`getComputedStyle(document.querySelector('#flight-hud .spx-booster-wing')).display==='none'`),false);
 const shot = await call('Page.captureScreenshot', { format: 'png' });
 await writeFile('.browser-phone.png', Buffer.from(shot.data, 'base64'));
 for (const [width, height] of [[320, 740], [390, 844], [844, 390], [1280, 800]]) {
@@ -47,11 +49,37 @@ for (const [width, height] of [[320, 740], [390, 844], [844, 390], [1280, 800]])
   }
   console.log(`Layout ${width} x ${height}: pass`);
 }
+await evaluate(`document.querySelector('canvas').game.setMode('rover')`);
+for (const [width,height] of [[320,740],[390,844],[768,800],[844,390],[1024,768],[1280,800]]) {
+  await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<900});
+  await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  const bounds=await evaluate(`(() => {
+    const menu=document.getElementById('rover-actions-menu');menu.classList.add('open');
+    const rect=id=>{const r=document.getElementById(id).getBoundingClientRect();return [r.left,r.right]};
+    return {button:rect('rover-actions-btn'),menu:rect('rover-actions-menu')};
+  })()`);
+  for(const [name,[left,right]] of Object.entries(bounds)) {
+    assert.ok(left>=0 && right<=width+1,`${width}px: rover ${name} clipped (${left}..${right})`);
+  }
+  console.log('Rover options bounds',width,bounds);
+  await evaluate(`document.getElementById('rover-actions-menu').classList.remove('open')`);
+}
+await evaluate(`document.querySelector('canvas').game.setMode('starship')`);
 await evaluate(`(()=>{const g=document.querySelector('canvas').game;g.roadster.board(g.physics.position,g.physics.yaw);g.setMode('roadster')})()`);
 assert.equal(await evaluate(`Array.from(document.querySelectorAll('.compact-drive-pad button')).filter(b=>b.getBoundingClientRect().width>0).length`),6);
 await call('Emulation.setTouchEmulationEnabled', { enabled: false });
 await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
 assert.equal(await evaluate(`getComputedStyle(document.getElementById('mobile-controls')).display`),'none');
+await evaluate(`document.querySelector('canvas').game.setMode('rover')`);
+const desktopOptions=await evaluate(`(() => {
+  const menu=document.getElementById('rover-actions-menu');menu.classList.add('open');
+  const rect=id=>{const r=document.getElementById(id).getBoundingClientRect();return [r.left,r.right]};
+  const bounds={button:rect('rover-actions-btn'),menu:rect('rover-actions-menu')};
+  menu.classList.remove('open');return bounds;
+})()`);
+for(const [name,[left,right]] of Object.entries(desktopOptions)) {
+  assert.ok(left>=0 && right<=1281,`desktop rover ${name} clipped (${left}..${right})`);
+}
 await evaluate(`document.querySelector('canvas').game.setMode('starship')`);
 assert.equal(await evaluate(`getComputedStyle(document.getElementById('flight-mobile-steering')).display`),'none');
 console.log('Touch controls: rover 4, flight 6, roadster 6; desktop hidden');
