@@ -20,8 +20,6 @@ import { FlyingRoadster } from '../flight/roadster.js';
 import { PLANET_PROFILES } from '../flight/planetProfiles.js';
 import { earthSurfaceHeight } from '../terrain/earthSurface.js';
 import { getMoonHeight, getMoonNormal } from '../terrain/moonSurface.js';
-import { InterstellarSimulation } from '../flight/interstellarSimulation.js';
-import { InterstellarUI } from '../flight/interstellarUI.js';
 
 export class MarsGameEngine {
   constructor(container, options = {}) {
@@ -291,13 +289,10 @@ export class MarsGameEngine {
         this.missionPhysics.setTrajectoryMode(mode);
       },
       onSelectDestination: (planetId) => {
-        if (planetId === 'interstellar') { this.startInterstellarExpedition(); } else { this.selectDestination(planetId); }
+        this.selectDestination(planetId);
       },
       onTransfer: () => {
         this.beginTransfer();
-      },
-      onInterstellar: () => {
-        this.startInterstellarExpedition();
       },
       onDeorbit: () => {
         this.beginDeorbit();
@@ -392,17 +387,6 @@ export class MarsGameEngine {
         this.toggleRoadster();
       });
     }
-
-    // 10. Interstellar Gargantua & Miller's Planet Simulation
-    this.interstellar = new InterstellarSimulation(this, this.scene, this.camera, this.renderer);
-    this.interstellarUI = new InterstellarUI(this.interstellar);
-    this.cameraController.onInterstellarGimbal = (dYaw, dPitch) => this.interstellar?.adjustGimbal(dYaw, dPitch);
-    this.cameraController.onInterstellarZoom = (delta) => this.interstellar?.adjustZoom(delta * 0.001);
-
-    document.getElementById('flight-interstellar-btn')?.addEventListener('click', () => this.startInterstellarExpedition());
-    document.getElementById('flight-interstellar-action-btn')?.addEventListener('click', () => this.startInterstellarExpedition());
-    document.getElementById('rover-interstellar-btn')?.addEventListener('click', () => this.startInterstellarExpedition());
-    document.getElementById('flight-dest-interstellar')?.addEventListener('click', () => this.startInterstellarExpedition());
 
     const optimalPreset = this.detectOptimalQuality();
     this.applyQuality(optimalPreset);
@@ -731,12 +715,6 @@ export class MarsGameEngine {
     if (this.scatter?.setVisible) this.scatter.setVisible(planetId === 'mars');
   }
 
-  startInterstellarExpedition() {
-    this.setMode('interstellar');
-    this.interstellar?.start();
-    this.interstellarUI?.show();
-  }
-
   toggleRoadster() {
     if (!this.roadster) return;
     if (this.mode === 'roadster') {
@@ -836,35 +814,6 @@ export class MarsGameEngine {
     const roverHud = document.getElementById('hud-layer');
     const mobileControls = document.getElementById('mobile-controls');
     if (mobileControls) mobileControls.style.display = targetMode !== 'starship' && this.input.detectMobile() ? 'block' : 'none';
-
-    if (targetMode !== 'interstellar' && this.interstellar?.active) {
-      this.interstellar.stop();
-      this.interstellarUI?.hide();
-      if (this.journey?.celestialGroup) this.journey.celestialGroup.visible = true;
-    }
-
-    if (this.mode === 'interstellar') {
-      this.camera.near = 0.5;
-      this.camera.far = 8000000;
-      this.camera.updateProjectionMatrix();
-      this.cameraController.activeSimMode = 'interstellar';
-
-      if (this.starship?.group) this.starship.group.visible = false;
-      if (this.roverModel?.group) this.roverModel.group.visible = false;
-      if (this.astronaut?.group) this.astronaut.group.visible = false;
-      if (this.roadster?.group) this.roadster.group.visible = false;
-      if (this.terrain?.group) this.terrain.group.visible = false;
-      if (this.scatter?.group) this.scatter.group.visible = false;
-      if (this.journey?.earthSurface) this.journey.earthSurface.visible = false;
-      if (this.journey?.celestialGroup) this.journey.celestialGroup.visible = false;
-
-      if (roverHud) roverHud.style.display = 'none';
-      if (mobileControls) mobileControls.style.display = 'none';
-      this.flightHud?.show(false);
-      this.interstellarUI?.show();
-      this.audio.updateRocket(0, 0, 0);
-      return;
-    }
 
     if (this.mode === 'starship') {
       this.camera.near = 0.4;
@@ -1219,16 +1168,6 @@ export class MarsGameEngine {
     }
 
     // =========================================================
-    // MODE: INTERSTELLAR EXPEDITION
-    if (this.mode === 'interstellar') {
-      if (this.interstellar) {
-        this.interstellar.update(dt);
-      }
-      this.renderer.render(this.scene, this.camera);
-      this.notifyFirstFrame();
-      return;
-    }
-
     // MODE A: STARSHIP FLIGHT SIMULATION
     // =========================================================
     if (this.mode === 'starship') {
