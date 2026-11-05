@@ -400,6 +400,7 @@ export default function MarsCanvas() {
                 <div className="dropdown-section-header">TRANSFER & LAND</div>
                 <button className="dropdown-item" data-dest="earth">🌍 EARTH STARBASE</button>
                 <button className="dropdown-item" data-dest="mars">🔴 MARS STARBASE</button>
+                <button className="dropdown-item" data-dest="moon">🌕 MOON STARBASE</button>
               </div>
             </div>
             <div id="flight-dest-switch" style={{ display: 'none' }}></div>

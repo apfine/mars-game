@@ -19,6 +19,7 @@ import { StarbaseObstacleSystem } from '../flight/solidCollisions.js';
 import { FlyingRoadster } from '../flight/roadster.js';
 import { PLANET_PROFILES } from '../flight/planetProfiles.js';
 import { earthSurfaceHeight } from '../terrain/earthSurface.js';
+import { getMoonHeight, getMoonNormal } from '../terrain/moonSurface.js';
 
 export class MarsGameEngine {
   constructor(container, options = {}) {
@@ -424,7 +425,7 @@ export class MarsGameEngine {
   getTransferFuelRequirement(target) {
     // Enough for the injection burn, mid-course correction, and a propulsive
     // entry reserve. The exact value is intentionally legible in the HUD.
-    return target === 'earth' ? 62 : 68;
+    return target === 'moon' ? 35 : target === 'earth' ? 62 : 68;
   }
 
   // Transfer, deorbit and refuelling operations. If requested while on the ground,
@@ -433,7 +434,11 @@ export class MarsGameEngine {
     const physics = this.missionPhysics;
     if (physics.yardControl || this.journey.active) return;
     physics.autoMission = true;
-    const target = physics.destination || (physics.planetId === 'mars' ? 'earth' : 'mars');
+    const requestedTarget = physics.destination || (physics.planetId === 'mars' || physics.planetId === 'moon' ? 'earth' : 'mars');
+    const needsEarthLeg = (physics.planetId === 'mars' && requestedTarget === 'moon')
+      || (physics.planetId === 'moon' && requestedTarget === 'mars');
+    const target = needsEarthLeg ? 'earth' : requestedTarget;
+    this.pendingTransferFinalTarget = needsEarthLeg ? requestedTarget : null;
 
     // If on pad or landed on either world, launch into orbit first and queue transfer
     if (physics.phase === FLIGHT_PHASES.ON_PAD || physics.phase === FLIGHT_PHASES.LANDED) {
@@ -458,8 +463,12 @@ export class MarsGameEngine {
       return;
     }
 
-    // Direct automated injection burn: ensure nominal propellant and initiate transfer
-    physics.starshipFuel = Math.max(physics.starshipFuel, 95);
+    // Schedule the existing orbital tanker when launch propellant is short.
+    // Transfer selection must not create propellant in the ship's tanks.
+    if (physics.starshipFuel < this.getTransferFuelRequirement(target)) {
+      this.beginOrbitalRefuel(target);
+      return;
+    }
     physics.pendingTransfer = null;
     this.startInterplanetaryTransfer(target);
   }
@@ -472,7 +481,7 @@ export class MarsGameEngine {
       this.missionPhysics.boosterTracking = false;
       this.flightHud?.notifyCameraMode('CHASE');
     }
-    this.setTimeScale(this.missionPhysics.autoMission ? 4 : Math.max(1, Math.min(this.timeScale, 4)));
+    this.setTimeScale(1);
     this.ensureTransferStarted();
     return true;
   }
@@ -596,7 +605,7 @@ export class MarsGameEngine {
     const target = this.missionPhysics.transferTarget || this.missionPhysics.destination;
     if (target && target !== this.missionPhysics.planetId) {
       this.journey.start(target);
-      this.setTimeScale(this.missionPhysics.autoMission ? 100 : Math.max(8, this.timeScale));
+      this.setTimeScale(1);
       this.flightHud?.notifyTransfer(target);
     }
   }
@@ -615,7 +624,7 @@ export class MarsGameEngine {
     this.missionPhysics.transferProgress = 0;
     this.missionPhysics.opsMessage = planetId === 'earth' ? 'EARTH ORBIT // SELECT DEORBIT WHEN READY' : '';
     this.applyPlanetEnvironment(planetId);
-    this.missionPhysics.setDestination(planetId === 'mars' ? 'earth' : 'mars');
+    this.missionPhysics.setDestination(planetId === 'mars' || planetId === 'moon' ? 'earth' : 'mars');
     this.setTimeScale(1);
     if (this.cameraController.getFlightMode?.() === 'BOOSTER_CAM') {
       this.cameraController.setFlightMode('CHASE');
@@ -625,6 +634,16 @@ export class MarsGameEngine {
     this.cameraController.initialized = false;
     this.flightHud?.notifyTransfer(null);
     this.flightHud?.notifyPlanet(planetId);
+    if (planetId === 'earth' && this.pendingTransferFinalTarget) {
+      const nextTarget = this.pendingTransferFinalTarget;
+      this.pendingTransferFinalTarget = null;
+      this.missionPhysics.setDestination(nextTarget);
+      if (this.missionPhysics.starshipFuel < this.getTransferFuelRequirement(nextTarget)) {
+        this.beginOrbitalRefuel(nextTarget);
+      } else {
+        this.startInterplanetaryTransfer(nextTarget);
+      }
+    }
   }
 
   applyPlanetEnvironment(planetId) {
@@ -632,14 +651,15 @@ export class MarsGameEngine {
     this.atmosphere.setPlanet(planetId);
     this.terrain.setPlanet(planetId);
     this.physics.gravity = PLANET_PROFILES[planetId].gravity;
-    const surfaceHeight = isEarth ? (x, z) => this.getSurfaceHeight(x, z) : getMarsHeight;
-    this.physics.setSurface(surfaceHeight);
+    const surfaceHeight = isEarth || planetId === 'moon'
+      ? (x, z) => this.getSurfaceHeight(x, z) : getMarsHeight;
+    this.physics.setSurface(surfaceHeight, planetId === 'moon' ? getMoonNormal : null);
     this.cameraController.surfaceHeight = surfaceHeight;
     this.journey.setPlanet(planetId);
     this.hud?.map?.setPlanet(planetId, this.missionPhysics.padCoords);
     this.roadster?.setPlanet(planetId);
     if (this.terrain?.group) this.terrain.group.visible = !isEarth;
-    if (this.scatter?.setVisible) this.scatter.setVisible(!isEarth);
+    if (this.scatter?.setVisible) this.scatter.setVisible(planetId === 'mars');
   }
 
   toggleRoadster() {
@@ -759,7 +779,7 @@ export class MarsGameEngine {
       if (this.terrain) this.terrain.setFlightMode(true);
       const onEarth = this.missionPhysics.planetId === 'earth';
       if (this.terrain?.group) this.terrain.group.visible = !onEarth;
-      if (this.scatter?.group) this.scatter.group.visible = !onEarth;
+      if (this.scatter?.group) this.scatter.group.visible = this.missionPhysics.planetId === 'mars';
 
       this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
     } else if (this.mode === 'roadster') {
@@ -792,7 +812,7 @@ export class MarsGameEngine {
       this.roverModel.group.visible = true;
       this.starship.group.visible = true;
       const onEarth = this.missionPhysics.planetId === 'earth';
-      if (this.scatter?.group) this.scatter.group.visible = !onEarth;
+      if (this.scatter?.group) this.scatter.group.visible = this.missionPhysics.planetId === 'mars';
       if (this.terrain?.group) this.terrain.group.visible = !onEarth;
 
       this.flightHud.show(false);
@@ -801,7 +821,7 @@ export class MarsGameEngine {
       if (roverBadge) roverBadge.textContent = this.mode === 'walking'
         ? 'EVA // STARBASE APPROACH' : 'ROVER // STARBASE APPROACH';
       const roverTitle = document.getElementById('rover-left-title');
-      if (roverTitle) roverTitle.textContent = onEarth ? 'EARTH ROVER' : 'MARS ROVER';
+      if (roverTitle) roverTitle.textContent = `${this.missionPhysics.planetId.toUpperCase()} ROVER`;
       if (mobileControls && this.input.isMobile) {
         mobileControls.style.display = 'block';
       }
@@ -936,7 +956,8 @@ export class MarsGameEngine {
         x-this.missionPhysics.padCoords.x, z-this.missionPhysics.padCoords.y);
       return this.obstacles.supportHeight(x,z,ground);
     }
-    return this.obstacles.supportHeight(x,z,getMarsHeight(x,z));
+    return this.obstacles.supportHeight(x,z,this.missionPhysics.planetId === 'moon'
+      ? getMoonHeight(x,z) : getMarsHeight(x,z));
   }
 
   resolveWorldCollisions(position, radius = 1.0, feetY = 0) {
@@ -1131,8 +1152,8 @@ export class MarsGameEngine {
       this.cameraController.updateFlight(scaledDt, this.missionPhysics);
       this.flightHud.update(this.missionPhysics);
       this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
-      const onMarsLaunch = this.missionPhysics.planetId === 'mars';
-      if (this.missionPhysics.throttle > 0.25 && this.missionPhysics.altitude < 140 && onMarsLaunch) {
+      const dustyLanding = this.missionPhysics.planetId === 'mars' || this.missionPhysics.planetId === 'moon';
+      if (this.missionPhysics.throttle > 0.25 && this.missionPhysics.altitude < 140 && dustyLanding) {
         this.atmosphere.burstLaunchDust(this.missionPhysics.position, this.missionPhysics.throttle);
       }
 
@@ -1226,11 +1247,12 @@ export class MarsGameEngine {
       this.cameraController.updateWalking(scaledDt, this.walker);
 
       const activePos = this.walker.position;
-      const onMars = this.missionPhysics.planetId !== 'earth';
-      if (onMars) {
-        this.scatter.setVisible(true);
+      const onLocalTerrain = this.missionPhysics.planetId !== 'earth';
+      const onMars = this.missionPhysics.planetId === 'mars';
+      if (onLocalTerrain) {
         this.terrain.update(activePos);
-        this.scatter.update(activePos);
+        this.scatter.setVisible(onMars);
+        if (onMars) this.scatter.update(activePos);
       } else {
         // The Earth Starbase uses its own ocean/grass ground disc. Never let
         // Mars terrain chunks or scattered rocks poke through it.
@@ -1266,11 +1288,12 @@ export class MarsGameEngine {
       );
       this.cameraController.updateRoadster(scaledDt, this.roadster);
       const activePos = this.roadster.group.position;
-      const onMars = this.missionPhysics.planetId !== 'earth';
-      if (onMars) {
-        this.scatter.setVisible(true);
+      const onLocalTerrain = this.missionPhysics.planetId !== 'earth';
+      const onMars = this.missionPhysics.planetId === 'mars';
+      if (onLocalTerrain) {
         this.terrain.update(activePos);
-        this.scatter.update(activePos);
+        this.scatter.setVisible(onMars);
+        if (onMars) this.scatter.update(activePos);
       }
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
       this.atmosphere.update(scaledDt, activePos, {
@@ -1310,11 +1333,12 @@ export class MarsGameEngine {
       }
       this.lastOnGround = this.physics.onGroundCount;
 
-      const onMars = this.missionPhysics.planetId !== 'earth';
-      if (onMars) {
-        this.scatter.setVisible(true);
+      const onLocalTerrain = this.missionPhysics.planetId !== 'earth';
+      const onMars = this.missionPhysics.planetId === 'mars';
+      if (onLocalTerrain) {
         this.terrain.update(this.physics.position);
-        this.scatter.update(this.physics.position);
+        this.scatter.setVisible(onMars);
+        if (onMars) this.scatter.update(this.physics.position);
       } else {
         if (this.terrain?.group) this.terrain.group.visible = false;
         this.scatter?.setVisible(false);

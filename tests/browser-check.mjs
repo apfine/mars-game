@@ -18,7 +18,11 @@ ws.addEventListener('message', e => {
   }
 });
 function call(method, params = {}) { return new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })); }); }
-async function evaluate(expression) { return (await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.value; }
+async function evaluate(expression) {
+  const result = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
+  return result.result.value;
+}
 const delay = ms => new Promise(r => setTimeout(r, ms));
 await call('Runtime.enable'); await call('Log.enable');
 await call('Runtime.discardConsoleEntries'); await call('Log.clear'); errors.length=0;
@@ -36,6 +40,7 @@ await delay(3000);
 assert.equal(await evaluate(`Array.from(document.querySelectorAll('.flight-touch-dpad button')).filter(b=>b.getBoundingClientRect().width>0).length`),6);
 assert.equal(await evaluate(`document.getElementById('flight-details-btn')`),null);
 assert.equal(await evaluate(`getComputedStyle(document.querySelector('#flight-hud .spx-booster-wing')).display==='none'`),false);
+assert.equal(await evaluate(`!!document.querySelector('[data-dest="moon"]')`),true);
 const shot = await call('Page.captureScreenshot', { format: 'png' });
 await writeFile('.browser-phone.png', Buffer.from(shot.data, 'base64'));
 for (const [width, height] of [[320, 740], [390, 844], [844, 390], [1280, 800]]) {
@@ -89,17 +94,22 @@ const transferResults = await evaluate(`(() => {
   const results=[];
   p.setPlanet('earth');g.applyPlanetEnvironment('earth');
   for(const target of ['mars','earth','moon','earth']) {
-    p.phase='ORBIT';p.scriptedControl=false;p.yardControl=false;p.autoMission=true;
+    p.phase='ORBIT';p.scriptedControl=false;p.yardControl=false;p.autoMission=true;p.starshipFuel=94;
     g.selectDestination(target);g.beginTransfer();g.ensureTransferStarted();
-    const started=g.journey.active;
+    const started=g.journey.active,initialTimeScale=g.timeScale,cruiseDuration=g.journey.duration;
     for(let i=0;i<100 && g.journey.active;i++)g.journey.update(1,3,200000);
     const arrivedPhase=p.phase,boosterVisible=g.starship.boosterGroup.visible;
+    let moonLanded=null;
+    if(target==='moon'){
+      for(let i=0;i<60*1200 && p.phase!=='LANDED';i++)p.update(1/60);
+      moonLanded=p.phase==='LANDED' && p.shipCaughtByTower;
+    }
     if(target==='earth'){
       g.cameraController.setFlightMode('FREE_ORBIT');
       g.cameraController.adjustGimbal(0.8,0.9);
       g.beginDeorbit();
     }
-    results.push({target,started,arrived:p.planetId,phase:arrivedPhase,boosterVisible,
+    results.push({target,started,initialTimeScale,cruiseDuration,arrived:p.planetId,phase:arrivedPhase,moonLanded,boosterVisible,
       afterDeorbit:target==='earth'?p.phase:null,
       entryCamera:target==='earth'?g.cameraController.getFlightMode():null,
       entryPitch:target==='earth'?g.cameraController.gimbalPitch:null});
@@ -107,6 +117,9 @@ const transferResults = await evaluate(`(() => {
   return results;
 })()`);
 for(const r of transferResults) { assert.equal(r.started,true);assert.equal(r.arrived,r.target); }
+for(const r of transferResults) assert.equal(r.initialTimeScale,1);
+for(const r of transferResults) assert.ok(r.cruiseDuration>40 && r.cruiseDuration<300);
+assert.equal(transferResults.find(r=>r.target==='moon').moonLanded,true);
 for(const r of transferResults) assert.equal(r.boosterVisible,false);
 for(const r of transferResults.filter(r=>r.target==='earth')) {
   assert.equal(r.phase,'ORBIT');
@@ -115,6 +128,35 @@ for(const r of transferResults.filter(r=>r.target==='earth')) {
   assert.equal(r.entryPitch,0);
 }
 console.log('Round trip and lunar transfers',transferResults);
+const lunarApproach=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  p.enterPlanetEntry('moon');g.applyPlanetEnvironment('moon');g.cameraController.setFlightMode('CHASE');g.cameraController.resetGimbal();
+  for(let i=0;i<60*600 && p.position.y-p.padGroundY>65;i++)p.update(1/60);
+  g.terrain.setCameraAltitude(65);g.terrain.update(p.position);
+  g.cameraController.updateFlight(1/60,p);
+  g.atmosphere.setAltitude(65);g.atmosphere.update(1/60,g.camera.position,{altitude:65,speed:p.speed});
+  g.renderer.render(g.scene,g.camera);
+  return {planet:p.planetId,phase:p.phase,altitude:p.position.y-p.padGroundY,terrainVisible:g.terrain.group.visible,scatterVisible:g.scatter.enabled};
+})()`);
+await writeFile('.browser-moon-landing.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+assert.equal(lunarApproach.planet,'moon');
+assert.ok(lunarApproach.altitude<65);
+assert.equal(lunarApproach.scatterVisible,false);
+console.log('Moon approach',lunarApproach);
+const marsMoonRoute=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  p.setPlanet('mars');g.applyPlanetEnvironment('mars');p.phase='ORBIT';p.scriptedControl=false;p.starshipFuel=94;
+  g.selectDestination('moon');g.beginTransfer();
+  const firstLeg=g.journey.target;
+  for(let i=0;i<100 && g.journey.active;i++)g.journey.update(1,3,200000);
+  const parkedAtEarth=p.planetId==='earth' && p.phase==='ORBIT' && g.tankerOps.active;
+  for(let i=0;i<30 && g.tankerOps.active;i++)g.updateTankerOperations(1);
+  const secondLeg=g.journey.target;
+  for(let i=0;i<100 && g.journey.active;i++)g.journey.update(1,3,200000);
+  return {firstLeg,parkedAtEarth,secondLeg,arrived:p.planetId};
+})()`);
+assert.deepEqual(marsMoonRoute,{firstLeg:'earth',parkedAtEarth:true,secondLeg:'moon',arrived:'moon'});
+console.log('Mars to Moon route',marsMoonRoute);
 await evaluate(`(() => {
   const g=document.querySelector('canvas').game, p=g.missionPhysics;
   cancelAnimationFrame(g.animId); g.operations.reset(); p.setPlanet('earth'); g.applyPlanetEnvironment('earth');

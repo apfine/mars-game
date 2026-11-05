@@ -127,7 +127,9 @@ export class MarsAtmosphere {
           // 3D Undistorted Spherical Starfield & Milky Way (visible in upper atmosphere, space, and nocturnal night sky)
           float abovePlanetLimb = smoothstep(horizonDip - 0.02, horizonDip + 0.04, dir.y);
           float nightFactor = clamp(-sunDir.y * 4.0 + 0.2, 0.0, 1.0);
-          float starVisibility = clamp(((1.0 - atmoDensity * 0.88) + nightFactor * atmoDensity * 0.95) * abovePlanetLimb, 0.0, 1.0);
+          float starVisibility = uVacuum > 0.5
+            ? smoothstep(-0.08, 0.02, dir.y)
+            : clamp(((1.0 - atmoDensity * 0.88) + nightFactor * atmoDensity * 0.95) * abovePlanetLimb, 0.0, 1.0);
           vec3 cosmosCol = spaceBlack;
 
           if (starVisibility > 0.01) {
@@ -190,6 +192,11 @@ export class MarsAtmosphere {
             sky += uSunColor * (solarGlare + sunDisk * 2.2) * smoothstep(-0.02, 0.02, elevAboveHorizon);
           }
 
+          if (uVacuum > 0.5) {
+            float sunDisk = smoothstep(0.9991, 0.99975, sc);
+            sky = cosmosCol + uSunColor * (sunDisk * 2.2 + pow(sc, 42.0) * 0.35)
+              * smoothstep(-0.04, 0.02, dir.y);
+          }
           gl_FragColor = vec4(sky, 1.0);
           #include <colorspace_fragment>
         }
@@ -696,7 +703,23 @@ export class MarsAtmosphere {
   // Rayleigh-blue dome with a cool limb, Mars keeps its butterscotch dust
   // scattering. Called on arrival and when resetting to Mars.
   setPlanet(planetId) {
-    const sky = planetId === 'earth'
+    if (this.planetId !== planetId && this.dustPool) {
+      this.dustPool.alive.fill(0);
+      this.dustPool.aAlpha.fill(0);
+      this.dustPool.alphaAttr.needsUpdate = true;
+      this.dustPool.activeCount = 0;
+    }
+    if (this.sandTints) this.sandTints = planetId === 'moon'
+      ? [[0.65, 0.66, 0.69], [0.54, 0.56, 0.59], [0.74, 0.75, 0.77]]
+      : [[0.78, 0.50, 0.34], [0.72, 0.44, 0.30], [0.84, 0.58, 0.40]];
+    if (this.dustPool?.points) this.dustPool.points.visible = planetId === 'mars' || planetId === 'moon';
+    const sky = planetId === 'moon'
+      ? {
+          zenith: 0x020309, horizon: 0x020309, sun: 0xffffff,
+          halo: 0x020309, forward: 0x020309, limb: 0x020309,
+          ground: 0x292b31, atmoHeight: 1000
+        }
+      : planetId === 'earth'
       ? {
           zenith: 0x2f6fd0,
           horizon: 0xbcd8f0,
@@ -732,12 +755,12 @@ export class MarsAtmosphere {
     }
 
     if (this.sunLight) {
-      this.sunLight.color.setHex(planetId === 'earth' ? 0xfff5e2 : 0xffe6d0);
-      this.sunLight.intensity = planetId === 'earth' ? 2.35 : 1.8;
+      this.sunLight.color.setHex(planetId === 'moon' ? 0xffffff : planetId === 'earth' ? 0xfff5e2 : 0xffe6d0);
+      this.sunLight.intensity = planetId === 'earth' ? 2.35 : planetId === 'moon' ? 2.05 : 1.8;
     }
 
     if (this.scene?.fog) {
-      this.scene.fog.color.setHex(planetId === 'earth' ? 0xbcd8f0 : 0xe0aa8c);
+      this.scene.fog.color.setHex(planetId === 'moon' ? 0x020309 : planetId === 'earth' ? 0xbcd8f0 : 0xe0aa8c);
     }
 
     // Distant horizon ridges are tinted to the local atmosphere. Earth gets
@@ -747,6 +770,9 @@ export class MarsAtmosphere {
       if (planetId === 'earth') {
         mu.uHaze.value.setHex(0xa8c7d8);
         mu.uPeak.value.setHex(0x5d7d6a);
+      } else if (planetId === 'moon') {
+        mu.uHaze.value.setHex(0x353941);
+        mu.uPeak.value.setHex(0x777b83);
       } else {
         mu.uHaze.value.setHex(0xe0aa8c);
         mu.uPeak.value.setHex(0xc88d70);
@@ -769,7 +795,7 @@ export class MarsAtmosphere {
     this.isFlight = isFlight;
     const isMars = this.planetId === 'mars';
     if (this.dustPoints) this.dustPoints.visible = !isFlight && isMars;
-    if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = isMars;
+    if (this.dustPool && this.dustPool.points) this.dustPool.points.visible = isMars || this.planetId === 'moon';
     if (this.devilPool && this.devilPool.points) this.devilPool.points.visible = !isFlight && isMars && this.dustDensity > 0.45;
     if (this.tracks) this.tracks.visible = !isFlight && isMars;
     if (this.phobos) this.phobos.visible = !isFlight && isMars;
@@ -1259,7 +1285,7 @@ export class MarsAtmosphere {
       if (this.planetId === 'moon') { this.scene.fog.near=1e8; this.scene.fog.far=2e8; }
     }
     if (this.dustPoints) {
-      this.dustPoints.visible = !this.isFlight && a < 600 && this.planetId !== 'earth';
+      this.dustPoints.visible = !this.isFlight && a < 600 && this.planetId === 'mars';
     }
     this.updateSpeedStreamers(a, speed);
   }

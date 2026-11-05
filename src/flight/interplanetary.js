@@ -1492,10 +1492,14 @@ export class InterplanetaryJourney {
     this.arrived = false;
     this.active = true;
     this.time = 0;
-    this.duration = target === 'earth' ? 44 : 52;
     this.flightPhaseLabel = '';
 
     this.orbit = createTransfer(this.planetId, target);
+    // One transfer day per real second on interplanetary routes; two lunar
+    // transfer hours per second. The player-controlled time scale multiplies
+    // this baseline. Cruise duration therefore follows the orbital period.
+    this.cruiseSecondsPerRealSecond = this.orbit.lunar ? 7200 : 86400;
+    this.duration = this.orbit.seconds / this.cruiseSecondsPerRealSecond;
     this._configureSolarFrame(this.physics.position);
     if (this.orbit.lunar) {
       const departure = sampleTransfer(this.orbit,0);
@@ -1722,10 +1726,11 @@ export class InterplanetaryJourney {
     }
 
     // Scripted cinematic transit along the Keplerian gravitational ellipse.
-    const warp = Math.max(1, Math.min(timeScale, 3));
+    const warp = Math.max(1, Math.min(timeScale, 1000));
     this._lastScaleWarp = warp;
-    this.progress = Math.min(1, this.progress + (dt * warp) / this.duration);
-    this.physics.missionTime += dt * warp / this.duration * this.orbit.seconds;
+    const advance = Math.min(1 - this.progress, (dt * warp) / this.duration);
+    this.progress += advance;
+    this.physics.missionTime += advance * this.orbit.seconds;
 
     const t = this.progress;
     this._samplePath(t, this._pathPoint);
@@ -1771,13 +1776,13 @@ export class InterplanetaryJourney {
     // Mission time follows the semimajor axis, rather than a preset travel duration.
     const totalTransferDays = Math.round(this.orbit.seconds / 86400);
     const elapsedDays = Math.round(t * totalTransferDays);
-    const elapsedMonths = (elapsedDays / 30.4375).toFixed(1);
-    const totalMonths = (totalTransferDays / 30.4375).toFixed(1);
-
     const pct = Math.round(t * 100);
-    let status = `KEPLER COAST // Day ${elapsedDays} of ${totalTransferDays} (${elapsedMonths}/${totalMonths} Mo) · ${pct}% · ${Math.round(remainingKm / 1000000)}M KM (${distAu} AU)`;
-    if (t < 0.07) status = `TRANS-${this.target.toUpperCase()} INJECTION // Day ${elapsedDays} (${elapsedMonths} Mo) · ${pct}% · ${distAu} AU`;
-    if (t > 0.92) status = `ENTRY INTERFACE // TARGET: ${this.target.toUpperCase()} STARBASE · DAY ${elapsedDays} (${elapsedMonths} MO)`;
+    const deltaV = (this.orbit.injectionDeltaV / 1000).toFixed(2);
+    let status = this.orbit.lunar
+      ? `LUNAR HOHMANN // DAY ${elapsedDays}/${totalTransferDays} · ${pct}% · ${speedKmS} KM/S · ${remainingKm.toLocaleString()} KM TO TARGET`
+      : `SOLAR HOHMANN // DAY ${elapsedDays}/${totalTransferDays} · ${pct}% · ${speedKmS} KM/S · ${distAu} AU TO TARGET`;
+    if (t < 0.07) status = `INJECTION // IDEAL ΔV ${deltaV} KM/S · TARGET LEAD ${Math.round(this.orbit.phaseAngle * 180 / Math.PI)}°`;
+    if (t > 0.92) status = `${this.target === 'moon' ? 'LUNAR APPROACH' : 'ENTRY INTERFACE'} // ${this.target.toUpperCase()} STARBASE · DAY ${elapsedDays}/${totalTransferDays}`;
     this.transferStatus = status;
     this.physics.transferStatus = status;
 

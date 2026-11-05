@@ -10,6 +10,9 @@ for (const [from, to] of [['earth', 'mars'], ['mars', 'earth']]) {
   test(`${from} to ${to}: endpoints, time, energy, angular momentum`, () => {
     const orbit = createTransfer(from, to);
     assert.ok(Math.abs(orbit.seconds / 86400 - 258.86) < 1);
+    assert.ok(orbit.injectionDeltaV > 2400 && orbit.injectionDeltaV < 3500);
+    assert.ok(orbit.arrivalRelativeSpeed > 2000 && orbit.arrivalRelativeSpeed < 3500);
+    assert.ok(Number.isFinite(orbit.phaseAngle));
     const start = sampleTransfer(orbit, 0), end = sampleTransfer(orbit, 1);
     const radius = id => SOLAR_BODIES.find(b => b.id === id).au * AU;
     assert.ok(Math.abs(Math.hypot(start.x, start.z) - radius(from)) < 0.001);
@@ -35,4 +38,6 @@ test('Earth/Moon transfer uses Earth gravity and reverses the same ellipse',()=>
   assert.ok(out.seconds/86400>4 && out.seconds/86400<6);
   assert.ok(Math.abs(Math.hypot(sampleTransfer(out,1).x,sampleTransfer(out,1).z)-384400000)<0.01);
   assert.ok(sampleTransfer(back,1).speed>sampleTransfer(back,0).speed);
+  assert.ok(out.injectionDeltaV > 3000 && out.injectionDeltaV < 3300);
+  assert.ok(out.arrivalRelativeSpeed > 700 && out.arrivalRelativeSpeed < 1000);
 });

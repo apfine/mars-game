@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getMarsHeight } from './noise.js';
+import { getMoonHeight } from './moonSurface.js';
 
 // Mars High-Fidelity Geological Terrain Shader
 // Incorporates sedimentary bedrock flagstones (as seen in NASA Curiosity/Perseverance reference),
@@ -288,7 +289,45 @@ export class MarsTerrainManager {
   }
 
   setPlanet(id) {
+    if (this.planetId !== id) {
+      for (const chunk of this.chunks.values()) {
+        chunk.mesh.visible = false;
+        this.chunkPool.push(chunk.mesh);
+      }
+      this.chunks.clear();
+      this.pendingChunks.length = 0;
+      this.lastPlayerChunkX = this.lastPlayerChunkZ = NaN;
+      this.initializedChunks = false;
+    }
     this.planetId = id;
+    if (id === 'moon' && !this.moonBackdrop) {
+      const geometry = new THREE.PlaneGeometry(160000, 160000, 160, 160);
+      geometry.rotateX(-Math.PI / 2);
+      const positions = geometry.attributes.position;
+      const colors = new Float32Array(positions.count * 3);
+      const baseHeight = getMoonHeight(1400, 1150);
+      for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i) + 1400;
+        const z = positions.getZ(i) + 1150;
+        const height = getMoonHeight(x, z);
+        positions.setY(i, height - 0.7);
+        const shade = THREE.MathUtils.clamp(0.62 + (height - baseHeight) * 0.004, 0.38, 0.72);
+        colors[i * 3] = shade;
+        colors[i * 3 + 1] = shade;
+        colors[i * 3 + 2] = shade * 0.97;
+      }
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geometry.computeVertexNormals();
+      this.moonBackdrop = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+        vertexColors: true, roughness: 1, metalness: 0,
+        emissive: 0x25272d, emissiveIntensity: 0.35,
+        side: THREE.DoubleSide, fog: false
+      }));
+      this.moonBackdrop.position.set(1400, 0, 1150);
+      this.moonBackdrop.renderOrder = -600;
+      this.group.add(this.moonBackdrop);
+    }
+    if (this.moonBackdrop) this.moonBackdrop.visible = id === 'moon';
     this._originalColors ||= new Map(Object.entries(this.material.uniforms).filter(([,u])=>u.value?.isColor).map(([k,u])=>[k,u.value.clone()]));
     for (const [name,color] of this._originalColors) {
       this.material.uniforms[name].value.copy(color);
@@ -365,7 +404,9 @@ export class MarsTerrainManager {
     for (let i = 0, count = posAttr.count; i < count; i++) {
       const lx = xz[i * 2];
       const lz = xz[i * 2 + 1];
-      posArr[i * 3 + 1] = getMarsHeight(originX + lx, originZ + lz);
+      posArr[i * 3 + 1] = this.planetId === 'moon'
+        ? getMoonHeight(originX + lx, originZ + lz)
+        : getMarsHeight(originX + lx, originZ + lz);
     }
     posAttr.needsUpdate = true;
 
@@ -456,6 +497,10 @@ export class MarsTerrainManager {
   }
 
   dispose() {
+    if (this.moonBackdrop) {
+      this.moonBackdrop.geometry.dispose();
+      this.moonBackdrop.material.dispose();
+    }
     for (const chunk of this.chunks.values()) {
       this.group.remove(chunk.mesh);
       chunk.mesh.geometry.dispose();

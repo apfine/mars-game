@@ -1,5 +1,6 @@
 import { getMarsHeightFast } from '../terrain/noise.js';
 import { earthSurfaceHeight, earthCoastDistance } from '../terrain/earthSurface.js';
+import { getMoonHeight } from '../terrain/moonSurface.js';
 
 // Minimap (always on, heading arrow, off-screen landmark pointers) and full-screen expedition map.
 // Terrain layers are hill-shaded off-screen canvases rebuilt only when needed to stay cheap.
@@ -63,7 +64,8 @@ export class MarsMap {
         const wx = cx + (i / res - 0.5) * span;
         hGrid[rowOffset + i] = this.planetId === 'earth'
           ? earthSurfaceHeight(wx - this.padX, wz - this.padZ)
-          : getMarsHeightFast(wx, wz);
+          : this.planetId === 'moon' ? getMoonHeight(wx, wz)
+            : getMarsHeightFast(wx, wz);
       }
     }
 
@@ -83,6 +85,11 @@ export class MarsMap {
           data[k] = Math.min(255, (water ? 35 : 80 + 26 * t) * shade);
           data[k + 1] = Math.min(255, (water ? 111 : 132 + 35 * t) * shade);
           data[k + 2] = Math.min(255, (water ? 157 : 68 + 18 * t) * shade);
+        } else if (this.planetId === 'moon') {
+          const regolith = Math.min(255, (119 + 35 * t) * shade);
+          data[k] = regolith;
+          data[k + 1] = regolith;
+          data[k + 2] = regolith * 0.96;
         } else {
           data[k] = Math.min(255, (168 + 56 * t) * shade);
           data[k + 1] = Math.min(255, (86 + 70 * t) * shade);

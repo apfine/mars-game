@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getMarsHeight } from '../terrain/noise.js';
+import { getMoonHeight } from '../terrain/moonSurface.js';
 import { earthSurfaceHeight } from '../terrain/earthSurface.js';
 import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
 import { PLANET_PROFILES, getPlanetProfile } from './planetProfiles.js';
@@ -750,7 +751,8 @@ export class StarshipMissionPhysics {
     // Local terrain height beneath vehicle & altitude above pad/surface
     const localTerrainY = this.planetId === 'earth'
       ? this.padGroundY + earthSurfaceHeight(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y)
-      : getMarsHeight(this.position.x, this.position.z);
+      : this.planetId === 'moon' ? getMoonHeight(this.position.x, this.position.z)
+        : getMarsHeight(this.position.x, this.position.z);
     const supportFloorY = (this.vehicle.isMated && Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y) < 30.0)
       ? this.padElevation
       : (this.shipCaughtByTower ? this.shipCatchBaseY : localTerrainY);
@@ -1046,7 +1048,8 @@ export class StarshipMissionPhysics {
       // Ground / Pad / Tower Catch Physical Contact Constraints
       let updatedGroundY = this.planetId === 'earth'
         ? this.padGroundY + earthSurfaceHeight(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y)
-        : getMarsHeight(this.position.x, this.position.z);
+        : this.planetId === 'moon' ? getMoonHeight(this.position.x, this.position.z)
+          : getMarsHeight(this.position.x, this.position.z);
       updatedGroundY = this.obstacles.supportHeight(this.position.x, this.position.z, updatedGroundY);
       const minFloorY = (this.vehicle.isMated && Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y) < 30.0)
         ? this.padElevation
