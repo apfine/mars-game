@@ -632,7 +632,11 @@ export class MarsGameEngine {
     this.atmosphere.setPlanet(planetId);
     this.terrain.setPlanet(planetId);
     this.physics.gravity = PLANET_PROFILES[planetId].gravity;
+    const surfaceHeight = isEarth ? (x, z) => this.getSurfaceHeight(x, z) : getMarsHeight;
+    this.physics.setSurface(surfaceHeight);
+    this.cameraController.surfaceHeight = surfaceHeight;
     this.journey.setPlanet(planetId);
+    this.hud?.map?.setPlanet(planetId, this.missionPhysics.padCoords);
     this.roadster?.setPlanet(planetId);
     if (this.terrain?.group) this.terrain.group.visible = !isEarth;
     if (this.scatter?.setVisible) this.scatter.setVisible(!isEarth);
@@ -793,6 +797,11 @@ export class MarsGameEngine {
 
       this.flightHud.show(false);
       if (roverHud) roverHud.style.display = 'block';
+      const roverBadge = document.getElementById('rover-mode-badge');
+      if (roverBadge) roverBadge.textContent = this.mode === 'walking'
+        ? 'EVA // STARBASE APPROACH' : 'ROVER // STARBASE APPROACH';
+      const roverTitle = document.getElementById('rover-left-title');
+      if (roverTitle) roverTitle.textContent = onEarth ? 'EARTH ROVER' : 'MARS ROVER';
       if (mobileControls && this.input.isMobile) {
         mobileControls.style.display = 'block';
       }
@@ -805,6 +814,12 @@ export class MarsGameEngine {
       if (this.mode === 'walking') {
         this.audio.update({ speedKmh: 0, isNitroActive: false, onGroundCount: 0 });
       }
+    }
+    // Terrain mode setters may re-enable the Mars grid. Earth uses its own
+    // coastal height field and meshes in every ground and flight mode.
+    if (this.missionPhysics.planetId === 'earth') {
+      if (this.terrain?.group) this.terrain.group.visible = false;
+      if (this.scatter?.group) this.scatter.group.visible = false;
     }
   }
 

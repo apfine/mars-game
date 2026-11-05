@@ -1,4 +1,5 @@
 import { getMarsHeightFast } from '../terrain/noise.js';
+import { earthSurfaceHeight, earthCoastDistance } from '../terrain/earthSurface.js';
 
 // Minimap (always on, heading arrow, off-screen landmark pointers) and full-screen expedition map.
 // Terrain layers are hill-shaded off-screen canvases rebuilt only when needed to stay cheap.
@@ -10,6 +11,9 @@ export class MarsMap {
     this.modal = document.getElementById('map-modal');
     this.open = false;
     this.frame = 0;
+    this.planetId = 'mars';
+    this.padX = 1400;
+    this.padZ = 1150;
     this.miniLayer = { c: document.createElement('canvas'), cx: 1e9, cz: 1e9, span: 560, res: 64 };
     this.fullLayer = { c: document.createElement('canvas'), cx: 0, cz: 0, span: 3600, res: 96 };
     this._hGrid = new Float32Array(97 * 97);
@@ -28,6 +32,14 @@ export class MarsMap {
     this.open = force !== undefined ? force : !this.open;
     this.modal?.classList.toggle('active', this.open);
     this.needFull = this.open;
+  }
+
+  setPlanet(planetId, padCoords) {
+    this.planetId = planetId;
+    if (padCoords) { this.padX = padCoords.x; this.padZ = padCoords.y; }
+    this.fullLayer.span = planetId === 'earth' ? 12000 : 3600;
+    this.miniLayer.cx = this.fullLayer.cx = 1e9;
+    this.needFull = true;
   }
 
   buildLayer(L, cx, cz) {
@@ -49,7 +61,9 @@ export class MarsMap {
       const rowOffset = j * stride;
       for (let i = 0; i <= res; i++) {
         const wx = cx + (i / res - 0.5) * span;
-        hGrid[rowOffset + i] = getMarsHeightFast(wx, wz);
+        hGrid[rowOffset + i] = this.planetId === 'earth'
+          ? earthSurfaceHeight(wx - this.padX, wz - this.padZ)
+          : getMarsHeightFast(wx, wz);
       }
     }
 
@@ -62,9 +76,18 @@ export class MarsMap {
         const shade = Math.min(1.25, Math.max(0.55, 0.9 + dh * invStep2));
         const t = Math.min(1, Math.max(0, (h + 25) * 0.0142857));
         const k = (j * res + i) * 4;
-        data[k] = Math.min(255, (168 + 56 * t) * shade);
-        data[k + 1] = Math.min(255, (86 + 70 * t) * shade);
-        data[k + 2] = Math.min(255, (56 + 62 * t) * shade);
+        if (this.planetId === 'earth') {
+          const wx = cx + ((i + 0.5) / res - 0.5) * span - this.padX;
+          const wz = cz + (0.5 - (j + 0.5) / res) * span - this.padZ;
+          const water = earthCoastDistance(wx, wz) < 0;
+          data[k] = Math.min(255, (water ? 35 : 80 + 26 * t) * shade);
+          data[k + 1] = Math.min(255, (water ? 111 : 132 + 35 * t) * shade);
+          data[k + 2] = Math.min(255, (water ? 157 : 68 + 18 * t) * shade);
+        } else {
+          data[k] = Math.min(255, (168 + 56 * t) * shade);
+          data[k + 1] = Math.min(255, (86 + 70 * t) * shade);
+          data[k + 2] = Math.min(255, (56 + 62 * t) * shade);
+        }
         data[k + 3] = 255;
       }
     }
@@ -83,7 +106,7 @@ export class MarsMap {
     ctx.imageSmoothingEnabled = true;
     const size = L.span * s;
     ctx.drawImage(L.c, W / 2 + (L.cx - p.x) * s - size / 2, H / 2 - (L.cz - p.z) * s - size / 2, size, size);
-    ctx.fillStyle = 'rgba(30,12,6,0.18)';
+    ctx.fillStyle = this.planetId === 'earth' ? 'rgba(4,27,36,0.10)' : 'rgba(30,12,6,0.18)';
     ctx.fillRect(0, 0, W, H);
 
     // Tactical Crosshairs

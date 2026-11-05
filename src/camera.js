@@ -7,6 +7,7 @@ export class MarsCameraController {
   constructor(camera, domElement) {
     this.camera = camera;
     this.domElement = domElement;
+    this.surfaceHeight = getMarsHeight;
 
     this.modes = ['CHASE', 'COCKPIT', 'ORBIT'];
     this.modeIndex = 0;
@@ -186,7 +187,7 @@ export class MarsCameraController {
     const desiredZ = walker.position.z - Math.cos(totalYaw) * horizontal + rightZ * 0.55;
 
     // Never allow the third-person camera to clip through the terrain.
-    const camGround = getMarsHeight(desiredX, desiredZ);
+    const camGround = this.surfaceHeight(desiredX, desiredZ);
     const clampedY = Math.max(desiredY, camGround + 0.65);
     this._walkTarget.set(desiredX, clampedY, desiredZ);
 
@@ -329,7 +330,7 @@ export class MarsCameraController {
     }
 
     // Terrain collision clamp so camera never dips underground
-    const camGround = getMarsHeight(this.currentPos.x, this.currentPos.z);
+    const camGround = this.surfaceHeight(this.currentPos.x, this.currentPos.z);
     if (this.currentPos.y < camGround + 1.05) {
       this.currentPos.y = camGround + 1.05;
     }
@@ -376,7 +377,7 @@ export class MarsCameraController {
       const stationZ = padZ - 95.0;
       const groundY = physics.planetId === 'earth'
         ? physics.padGroundY + 4.5
-        : getMarsHeight(stationX, stationZ) + 4.5;
+        : this.surfaceHeight(stationX, stationZ) + 4.5;
       this.currentPos.set(stationX, groundY, stationZ);
 
       const cosP = Math.cos(this.groundGimbalPitch);
@@ -435,7 +436,7 @@ export class MarsCameraController {
 
       this.camera.fov = 62.0;
       this.camera.updateProjectionMatrix();
-      const gH = getMarsHeight(this.currentPos.x, this.currentPos.z);
+      const gH = this.surfaceHeight(this.currentPos.x, this.currentPos.z);
       if (this.currentPos.y < gH + 3.0) this.currentPos.y = gH + 3.0;
       this.camera.position.copy(this.currentPos);
       this.camera.lookAt(this.currentLook);
@@ -515,7 +516,7 @@ export class MarsCameraController {
       this.camera.position.copy(this.currentPos);
     }
 
-    const groundH = getMarsHeight(this.camera.position.x, this.camera.position.z);
+    const groundH = this.surfaceHeight(this.camera.position.x, this.camera.position.z);
     if (this.camera.position.y < groundH + 2.5) {
       this.camera.position.y = groundH + 2.5;
     }

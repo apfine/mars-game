@@ -27,6 +27,8 @@ export class MarsRoverPhysics {
 
     // Initial position on Mars surface
     this.rideHeight = 0.95; // Fixed chassis height above dune surface
+    this.surfaceHeight = getMarsHeight;
+    this.surfaceNormal = getMarsNormal;
     const initY = getMarsHeight(startX, startZ) + this.rideHeight;
     this.position.set(startX, initY, startZ);
 
@@ -81,6 +83,23 @@ export class MarsRoverPhysics {
     this.groundVy = 0;      // vertical speed of the ground under the rover (used for ramp launches)
     this.lastGroundY = null;
     this.collisionRadius = 1.7;
+  }
+
+  setSurface(height, normal = null) {
+    this.surfaceHeight = height;
+    this.surfaceNormal = normal || ((x, z) => {
+      const step = 2;
+      return new THREE.Vector3(
+        height(x - step, z) - height(x + step, z),
+        2 * step,
+        height(x, z - step) - height(x, z + step)
+      ).normalize();
+    });
+    this.position.y = height(this.position.x, this.position.z) + this.rideHeight;
+    this.verticalVelocity = 0;
+    this.isAirborne = false;
+    this.lastGroundY = null;
+    this.model.group.position.copy(this.position);
   }
 
   update(dt, input) {
@@ -206,7 +225,7 @@ export class MarsRoverPhysics {
     }
 
     // 7. Ground Adherence & Vertical Suspension (Y)
-    const centerGroundY = getMarsHeight(this.position.x, this.position.z);
+    const centerGroundY = this.surfaceHeight(this.position.x, this.position.z);
     const targetY = centerGroundY + this.rideHeight;
     const gvyNow = this.lastGroundY === null ? 0 : (centerGroundY - this.lastGroundY) / dt;
     this.lastGroundY = centerGroundY;
@@ -258,7 +277,7 @@ export class MarsRoverPhysics {
 
     // 8. Terrain Normal Alignment (Pitch & Roll)
     if (!this.isAirborne) {
-      const normal = getMarsNormal(this.position.x, this.position.z);
+      const normal = this.surfaceNormal(this.position.x, this.position.z);
       // Pitch aligns with forward slope: nose up when rising, nose down when descending
       const targetPitch = (normal.x * sinY + normal.z * cosY);
       // Gravity along the slope: climbing steep dunes bleeds speed, descending adds it
@@ -328,7 +347,7 @@ export class MarsRoverPhysics {
       const off = this.wheelOffsets[i];
       const wx = this.position.x + (off.x * cosY + off.z * sinY);
       const wz = this.position.z + (-off.x * sinY + off.z * cosY);
-      const gy = getMarsHeight(wx, wz);
+      const gy = this.surfaceHeight(wx, wz);
       this.wheelContacts[i].groundPoint.set(wx, gy, wz);
       this.wheelContacts[i].onGround = !this.isAirborne;
     }
@@ -338,7 +357,7 @@ export class MarsRoverPhysics {
   }
 
   resetAt(x, z) {
-    const y = getMarsHeight(x, z) + this.rideHeight;
+    const y = this.surfaceHeight(x, z) + this.rideHeight;
     this.position.set(x, y, z);
     this.speed = 0;
     this.verticalVelocity = 0;

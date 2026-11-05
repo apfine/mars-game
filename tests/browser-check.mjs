@@ -113,6 +113,35 @@ await writeFile('.browser-earth-space.png',Buffer.from((await call('Page.capture
 const angles=await evaluate(`(()=>{const g=document.querySelector('canvas').game,j=g.journey;const diameter=m=>2*Math.atan(m.geometry.parameters.radius*m.scale.x/m.position.distanceTo(g.camera.position))*180/Math.PI;return {mars:diameter(j.marsGlobe),moon:diameter(j.moon)}})()`);
 assert.ok(angles.mars<.01);assert.ok(angles.moon>.4 && angles.moon<.6);
 console.log('Apparent sizes from Earth',angles);
+const entrySurface=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  p.enterPlanetEntry('earth');g.applyPlanetEnvironment('earth');
+  let steps=0;while(steps<90000 && p.position.y-p.padElevation>18000){p.update(1/60);steps++}
+  g.cameraController.setFlightMode('CHASE');g.cameraController.resetGimbal();
+  g.cameraController.updateFlight(1/60,p);
+  const camAlt=g.camera.position.y-p.padElevation;
+  g.journey.update(0,1,camAlt);
+  g.atmosphere.setAltitude(camAlt);g.atmosphere.update(1/60,g.camera.position,{altitude:camAlt,speed:p.speed});
+  g.renderer.render(g.scene,g.camera);
+  return {altitude:p.position.y-p.padElevation,localSurfaceVisible:g.journey.earthSurface.visible,globeVisible:g.atmosphere.postLaunchSpace?.group.visible};
+})()`);
+await writeFile('.browser-earth-entry-18km.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+assert.ok(entrySurface.altitude<18000);
+assert.equal(entrySurface.localSurfaceVisible,false);
+console.log('Earth entry surface',entrySurface);
+const lowerEntry=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  let steps=0;while(steps<90000 && p.position.y-p.padElevation>10000){p.update(1/60);steps++}
+  g.cameraController.updateFlight(1/60,p);
+  const camAlt=g.camera.position.y-p.padElevation;
+  g.journey.update(0,1,camAlt);
+  g.atmosphere.setAltitude(camAlt);g.atmosphere.update(1/60,g.camera.position,{altitude:camAlt,speed:p.speed});
+  g.renderer.render(g.scene,g.camera);
+  return {altitude:p.position.y-p.padElevation,localOpacity:g.journey.earthOceanMat.opacity};
+})()`);
+await writeFile('.browser-earth-entry-10km.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+assert.ok(lowerEntry.altitude<10000);
+console.log('Earth lower entry',lowerEntry);
 const boosterPlasmaVisible=await evaluate(`(() => {
   const g=document.querySelector('canvas').game,p=g.missionPhysics;
   p.setPlanet('earth');g.applyPlanetEnvironment('earth');
@@ -144,5 +173,19 @@ console.log('landingView',landingView);
 assert.equal(landingView.phase,'LANDING_FLIP');
 assert.equal(landingView.shipVisible,true);
 assert.ok(Math.hypot(...landingView.camera.map((n,i)=>n-landingView.position[i]))<150);
+const roverGround=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  p.setPlanet('earth');g.applyPlanetEnvironment('earth');g.physics.resetAt(1260,1020);g.setMode('rover');
+  g.roadster.group.visible=false;
+  g.cameraController.resetGimbal();g.cameraController.update(1/60,g.physics);
+  g.atmosphere.setAltitude(2);g.atmosphere.update(1/60,g.camera.position,{altitude:2,speed:0});
+  g.journey.update(0,1,2);g.hud.map.frame=5;g.hud.map.update(g.physics,[]);g.renderer.render(g.scene,g.camera);
+  return {roverY:g.physics.position.y,groundY:g.getSurfaceHeight(1260,1020),mapPlanet:g.hud.map.planetId,marsTerrainVisible:g.terrain.group.visible};
+})()`);
+await writeFile('.browser-earth-rover.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+assert.ok(Math.abs(roverGround.roverY-roverGround.groundY-0.95)<0.01);
+assert.equal(roverGround.mapPlanet,'earth');
+assert.equal(roverGround.marsTerrainVisible,false);
+console.log('Earth rover ground',roverGround);
 ws.close();
 if (errors.some(e => e.startsWith('Uncaught') || e.includes('THREE.') || e.includes('VALIDATE_STATUS'))) process.exitCode = 1;

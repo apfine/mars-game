@@ -145,12 +145,7 @@ function makeOceanTexture() {
   cv.width = 512;
   cv.height = 512;
   const g = cv.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0, '#0b3766');
-  grad.addColorStop(0.45, '#0b5a91');
-  grad.addColorStop(0.7, '#126ca3');
-  grad.addColorStop(1, '#08294f');
-  g.fillStyle = grad;
+  g.fillStyle = '#0b5b89';
   g.fillRect(0, 0, 512, 512);
   for (let i = 0; i < 700; i++) {
     const y = Math.random() * 512;
@@ -165,7 +160,7 @@ function makeOceanTexture() {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(18, 18);
+  tex.repeat.set(360, 360);
   tex.anisotropy = 8;
   return tex;
 }
@@ -631,7 +626,9 @@ export class InterplanetaryJourney {
       transparent: true,
       opacity: 0.95
     });
-    const oceanGeo = new THREE.PlaneGeometry(80000, 80000, 96, 96);
+    // Entry is still hundreds of kilometres downrange at 15–20 km altitude.
+    // Keep the curved ocean beyond the visible horizon throughout descent.
+    const oceanGeo = new THREE.PlaneGeometry(1600000, 1600000, 160, 160);
     oceanGeo.rotateX(-Math.PI / 2);
     const oPos = oceanGeo.attributes.position;
     for (let i = 0; i < oPos.count; i++) {
@@ -1676,15 +1673,15 @@ export class InterplanetaryJourney {
     this.time += dt;
     this._satelliteTime += dt;
 
-    // Altitude-based fading for Earth local terrain:
-    // When ascending above 1200m, fade out the regional landing zone so it seamlessly gives way
-    // to the 3D spherical Earth globe with zero flat-plane cutoffs in the sky!
+    // Fade the regional detail into the spherical Earth before its finite
+    // geometry can be seen from entry altitude. The wide ocean stays beyond
+    // the atmospheric horizon during the blend.
     if (this.planetId === 'earth' && this.earthSurface) {
-      if (currentAltitude > 26000) {
+      if (currentAltitude > 14000) {
         this.earthSurface.visible = false;
       } else {
         this.earthSurface.visible = true;
-        const fade = 1-THREE.MathUtils.smoothstep(currentAltitude,8000,26000);
+        const fade = 1-THREE.MathUtils.smoothstep(currentAltitude,8000,14000);
 
         if (this.earthOceanMat) this.earthOceanMat.opacity = 0.95 * fade;
         if (this.earthGroundMat) this.earthGroundMat.opacity = fade;
