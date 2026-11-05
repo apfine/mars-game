@@ -195,6 +195,7 @@ export default function MarsCanvas() {
               </button>
               <div className="spx-dropdown-menu" id="rover-actions-menu">
                 <button id="rover-roadster-btn" className="dropdown-item roadster-toggle-btn">🏎️ TESLA ROADSTER</button>
+                <button id="rover-interstellar-btn" className="dropdown-item">🌌 INTERSTELLAR EXPEDITION</button>
                 <button id="map-btn" className="dropdown-item">🗺️ EXPEDITION MAP [M]</button>
                 <button id="esc-btn" className="dropdown-item">⚙️ SYSTEM SETTINGS</button>
               </div>
@@ -401,6 +402,8 @@ export default function MarsCanvas() {
                 <button className="dropdown-item" data-dest="earth">🌍 EARTH STARBASE</button>
                 <button className="dropdown-item" data-dest="mars">🔴 MARS STARBASE</button>
                 <button className="dropdown-item" data-dest="moon">🌕 MOON STARBASE</button>
+                <div className="dropdown-section-header">DEEP SPACE RELATIVITY</div>
+                <button className="dropdown-item interstellar-menu-btn" data-dest="interstellar" id="flight-dest-interstellar">🌌 GARGANTUA & MILLER (INTERSTELLAR)</button>
               </div>
             </div>
             <div id="flight-dest-switch" style={{ display: 'none' }}></div>
@@ -433,6 +436,7 @@ export default function MarsCanvas() {
                 <button className="dropdown-item" id="flight-reset-btn">🔄 RESET TO PAD</button>
                 <button className="dropdown-item" id="flight-hide-ui-btn">👁️ TOGGLE HUD [H]</button>
                 <button className="dropdown-item" id="flight-roadster-btn">🏎️ TESLA ROADSTER</button>
+                <button className="dropdown-item" id="flight-interstellar-action-btn">🌌 GARGANTUA & MILLER EXPEDITION</button>
                 <button className="dropdown-item" id="flight-exit-btn">🧑‍🚀 RETURN TO EVA</button>
               </div>
             </div>

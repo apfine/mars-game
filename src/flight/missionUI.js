@@ -129,6 +129,7 @@ export class MissionFlightHUD {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         const dest = btn.getAttribute('data-dest')?.toLowerCase();
+        if (dest === 'interstellar') { if (this.options.onInterstellar) this.options.onInterstellar(); const menu = document.getElementById('flight-mission-menu'); if (menu) menu.classList.remove('open'); return; }
         if (dest && this.options.onSelectDestination) this.options.onSelectDestination(dest);
         destBtns.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
@@ -549,7 +550,7 @@ export class MissionFlightHUD {
     const allDestBtns = document.querySelectorAll('[data-dest]');
     allDestBtns.forEach((btn) => {
       const canDepart = inOrbit || preLaunch || ['BOOSTER_ASCENT','HOT_STAGING','STARSHIP_ASCENT'].includes(physics.phase);
-      btn.disabled = btn.getAttribute('data-dest')?.toLowerCase() === currentPlanet || !canDepart || physics.yardControl;
+      const isInt = btn.getAttribute('data-dest')?.toLowerCase() === 'interstellar'; btn.disabled = isInt ? false : (btn.getAttribute('data-dest')?.toLowerCase() === currentPlanet || !canDepart || physics.yardControl);
       btn.classList.toggle('active', btn.getAttribute('data-dest')?.toLowerCase() === currentPlanet);
     });
     if (this.dom.destSwitch) {

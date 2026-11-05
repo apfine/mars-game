@@ -87,11 +87,17 @@ export class MarsCameraController {
         this.orbitRadius = THREE.MathUtils.clamp(this.orbitRadius + e.deltaY * 0.08, 25.0, 320.0);
       } else if (this.activeSimMode === 'rover') {
         this.roverOrbitRadius = THREE.MathUtils.clamp(this.roverOrbitRadius + e.deltaY * 0.015, 5.0, 42.0);
+      } else if (this.activeSimMode === 'interstellar') {
+        this.onInterstellarZoom?.(e.deltaY);
       }
     }, { passive: true });
   }
 
   adjustGimbal(dYaw, dPitch) {
+    if (this.activeSimMode === 'interstellar') {
+      this.onInterstellarGimbal?.(dYaw, dPitch);
+      return;
+    }
     if (this.activeSimMode === 'starship') {
       const mode = this.flightModes[this.flightModeIndex];
       if (mode === 'GROUND_CAM') {
