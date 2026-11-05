@@ -201,6 +201,14 @@ export class MarsGameEngine {
     this.journey = new InterplanetaryJourney(this.scene, this.missionPhysics, this.starship, {
       onArrive: (planetId) => this.handlePlanetArrival(planetId)
     });
+    this.trajectoryVisible = false;
+    this.localTrajectory = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({
+      color: 0xb6c7d2, transparent: true, opacity: 0.72, depthWrite: false, depthTest: true
+    }));
+    this.localTrajectory.visible = false;
+    this.localTrajectory.frustumCulled = false;
+    this.scene.add(this.localTrajectory);
+    this.trajectoryRefresh = 0;
     this.journey.setPlanet('mars');
     this.atmosphere.setPlanet('mars');
 
@@ -299,6 +307,8 @@ export class MarsGameEngine {
         this.missionPhysics.boosterTracking = (selected === 'BOOSTER_CAM');
         this.flightHud.notifyCameraMode(selected);
       },
+      onToggleTrajectory: () => this.toggleTrajectory(),
+      onSelectTimeScale: (rate) => this.setTimeScale(rate),
       onGimbalMove: (dYaw, dPitch) => {
         this.cameraController.adjustGimbal(dYaw, dPitch);
       },
@@ -368,7 +378,6 @@ export class MarsGameEngine {
         });
       }
     };
-    bindSpeedBtn('flight-speed-btn');
     bindSpeedBtn('rover-speed-btn');
 
     const roverRoadsterBtn = document.getElementById('rover-roadster-btn');
@@ -402,18 +411,62 @@ export class MarsGameEngine {
 
     const flightBtn = document.getElementById('flight-speed-btn');
     if (flightBtn) {
-      flightBtn.textContent = `${this.timeScale}X`;
+      flightBtn.firstChild.textContent = `${this.timeScale}X `;
       flightBtn.classList.toggle('active', isWarped);
-      flightBtn.title = this.timeScale >= 100
-        ? 'High time compression for orbit and interplanetary cruise'
-        : 'Cycle Simulation Speed (1x / 2x / 4x / 8x / 100x / 1000x)';
     }
+    document.querySelectorAll('[data-time-scale]').forEach(button =>
+      button.classList.toggle('active', Number(button.dataset.timeScale) === this.timeScale));
 
     const roverBtn = document.getElementById('rover-speed-btn');
     if (roverBtn) {
       roverBtn.textContent = `${this.timeScale}X`;
       roverBtn.classList.toggle('active', isWarped);
     }
+  }
+
+  toggleTrajectory() {
+    this.trajectoryVisible = !this.trajectoryVisible;
+    const button = document.getElementById('flight-trajectory-btn');
+    button?.classList.toggle('active', this.trajectoryVisible);
+    button?.setAttribute('aria-pressed', String(this.trajectoryVisible));
+    this.trajectoryRefresh = 0;
+    this.journey.setTrajectoryVisible(this.trajectoryVisible);
+    if (!this.trajectoryVisible) {
+      this.localTrajectory.visible = false;
+    }
+  }
+
+  updateTrajectory(dt) {
+    const p = this.missionPhysics;
+    const booster = this.cameraController.getFlightMode() === 'BOOSTER_CAM' && p.boosterState !== 'ATTACHED';
+    this.journey.setTrajectoryVisible(this.trajectoryVisible && this.journey.active && !booster);
+    if (!this.trajectoryVisible || this.journey.active || p.phase === FLIGHT_PHASES.ON_PAD) {
+      this.localTrajectory.visible = false;
+      return;
+    }
+    this.localTrajectory.visible = true;
+    this.trajectoryRefresh -= dt;
+    if (this.trajectoryRefresh > 0) return;
+    this.trajectoryRefresh = 0.35;
+
+    const position = (booster ? p.boosterPosition : p.position).clone();
+    const velocity = (booster ? p.boosterVelocity : p.velocity).clone();
+    const radius = PLANET_PROFILES[p.planetId].radius;
+    const mu = PLANET_PROFILES[p.planetId].gravity * radius * radius;
+    const center = new THREE.Vector3(p.padCoords.x, p.padGroundY - radius, p.padCoords.y);
+    const points = [position.clone()];
+    const step = position.y - p.padGroundY > 20000 ? 5 : 0.5;
+    for (let i = 0; i < 620; i++) {
+      const radial = position.clone().sub(center);
+      const r = radial.length();
+      velocity.addScaledVector(radial, -mu * step / (r * r * r));
+      position.addScaledVector(velocity, step);
+      if (position.distanceTo(center) <= radius) break;
+      if (i % 3 === 0) points.push(position.clone());
+    }
+    if (points.length < 2) points.push(position.clone());
+    this.localTrajectory.geometry.dispose();
+    this.localTrajectory.geometry = new THREE.BufferGeometry().setFromPoints(points);
   }
 
   selectDestination(planetId) {
@@ -1150,6 +1203,7 @@ export class MarsGameEngine {
       const scaledDt = Math.min(dt * Math.min(warp, 8), 0.25);
 
       this.cameraController.updateFlight(scaledDt, this.missionPhysics);
+      this.updateTrajectory(dt);
       this.flightHud.update(this.missionPhysics);
       this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
       const dustyLanding = this.missionPhysics.planetId === 'mars' || this.missionPhysics.planetId === 'moon';
@@ -1402,6 +1456,8 @@ export class MarsGameEngine {
     if (this.scene.environment && typeof this.scene.environment.dispose === 'function') {
       this.scene.environment.dispose();
     }
+    this.localTrajectory.geometry.dispose();
+    this.localTrajectory.material.dispose();
     this.terrain.dispose();
     this.renderer.dispose();
   }

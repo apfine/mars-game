@@ -406,9 +406,14 @@ export default function MarsCanvas() {
             <div id="flight-dest-switch" style={{ display: 'none' }}></div>
             <div id="flight-traj-switch" style={{ display: 'none' }}></div>
 
-            <button id="flight-speed-btn" className="hud-pill-btn flight-speed-btn" aria-label="Time Speed" title="Cycle Simulation Speed (1x / 2x / 4x / 8x / 100x / 1000x)">
-              1X
-            </button>
+            <button id="flight-trajectory-btn" className="hud-pill-btn flight-trajectory-btn" aria-pressed="false" title="Show the path of the vehicle in the current camera">TRAJECTORY</button>
+            <div className="spx-dropdown" id="flight-speed-dropdown">
+              <button id="flight-speed-btn" className="hud-pill-btn spx-dropdown-trigger flight-speed-btn" aria-label="Simulation time scale" aria-expanded="false">1X <span className="dropdown-arrow">▾</span></button>
+              <div className="spx-dropdown-menu" id="flight-speed-menu">
+                <div className="dropdown-section-header">SIMULATION RATE</div>
+                {[1, 2, 4, 8, 100, 1000].map(rate => <button key={rate} className={`dropdown-item time-scale-option${rate === 1 ? ' active' : ''}`} data-time-scale={rate}>{rate}X</button>)}
+              </div>
+            </div>
             <button id="flight-auto-btn" className="hud-pill-btn flight-auto-btn active" aria-label="Toggle Auto or Manual Control">
               AUTO
             </button>

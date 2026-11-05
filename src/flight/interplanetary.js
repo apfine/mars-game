@@ -1454,50 +1454,17 @@ export class InterplanetaryJourney {
     this.transferTrail = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
       new THREE.LineBasicMaterial({
-        color: 0x7de3ff,
+        color: 0xb6c7d2,
         transparent: true,
         opacity: 0.0,
-        blending: THREE.AdditiveBlending,
         depthWrite: false,
-        toneMapped: false
+        depthTest: true
       })
     );
     this.transferTrail.frustumCulled = false;
     this.transferTrail.renderOrder = 3;
-
-    this.transferTube = new THREE.Mesh(
-      new THREE.BufferGeometry(),
-      new THREE.MeshBasicMaterial({
-        color: 0x2b9fd0,
-        transparent: true,
-        opacity: 0.16,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        toneMapped: false
-      })
-    );
-    this.transferTube.frustumCulled = false;
-    this.transferTube.renderOrder = 2;
-
-    this.transferDots = new THREE.Points(
-      new THREE.BufferGeometry(),
-      new THREE.PointsMaterial({
-        map: makeStarGlowTexture(0x9fe9ff),
-        color: 0xbdefff,
-        size: 900,
-        sizeAttenuation: true,
-        transparent: true,
-        opacity: 0.65,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        toneMapped: false
-      })
-    );
-    this.transferDots.frustumCulled = false;
-    this.transferDots.renderOrder = 4;
-
-    this.transferGroup.add(this.transferTube, this.transferTrail, this.transferDots);
+    this.transferGroup.add(this.transferTrail);
+    this.showTrajectory = false;
   }
 
   start(target = 'earth') {
@@ -1529,10 +1496,8 @@ export class InterplanetaryJourney {
     this._samplePath(1, this.pathEnd);
     this.flybyPoint = null;
     this._rebuildRouteGeometry();
-    this.transferGroup.visible = true;
-    this.transferTrail.material.opacity = 0.88;
-    this.transferTube.material.opacity = 0.2;
-    this.transferDots.material.opacity = 0.72;
+    this.transferGroup.visible = this.showTrajectory;
+    this.transferTrail.material.opacity = 0.7;
 
     this.celestialGroup.visible = true;
     this.earth.position.copy(this.earthAnchor);
@@ -1652,17 +1617,11 @@ export class InterplanetaryJourney {
     this.transferTrail.geometry.dispose();
     this.transferTrail.geometry = new THREE.BufferGeometry().setFromPoints(points);
 
-    this.transferDots.geometry.dispose();
-    const dotPoints = [];
-    for (let i = 0; i <= 46; i++) {
-      dotPoints.push(this._samplePath(i / 46, new THREE.Vector3()));
-    }
-    this.transferDots.geometry = new THREE.BufferGeometry().setFromPoints(dotPoints);
+  }
 
-    const curve = new THREE.CatmullRomCurve3(points);
-    const tube = new THREE.TubeGeometry(curve, 150, 260, 5, false);
-    this.transferTube.geometry.dispose();
-    this.transferTube.geometry = tube;
+  setTrajectoryVisible(visible) {
+    this.showTrajectory = visible;
+    this.transferGroup.visible = visible && this.active;
   }
 
   _samplePath(t, out) {
@@ -1685,8 +1644,6 @@ export class InterplanetaryJourney {
   hideTransferTrail() {
     if (this.transferGroup) this.transferGroup.visible = false;
     if (this.transferTrail) this.transferTrail.material.opacity = 0;
-    if (this.transferTube) this.transferTube.material.opacity = 0;
-    if (this.transferDots) this.transferDots.material.opacity = 0;
   }
 
   update(dt, timeScale = 1, currentAltitude = 0) {
@@ -1741,7 +1698,7 @@ export class InterplanetaryJourney {
       this.vehicle.boosterGroup.visible = false;
     }
 
-    // Scripted cinematic transit along the Keplerian gravitational ellipse.
+    // Sample the Keplerian transfer ellipse at the elapsed mission time.
     const warp = Math.max(1, Math.min(timeScale, 1000));
     this._lastScaleWarp = warp;
     const advance = Math.min(1 - this.progress, (dt * warp) / this.duration);
@@ -1754,10 +1711,7 @@ export class InterplanetaryJourney {
     this.physics.position.copy(this._pathPoint);
 
     this._updateSolarBodies(t * this.orbit.seconds);
-    this._toDestination.copy(this.pathEnd).sub(this._pathPoint).normalize();
-    this._flightDir.copy(this._pathTangent)
-      .lerp(this._toDestination, 0.42)
-      .normalize();
+    this._flightDir.copy(this._pathTangent);
     this.physics.quaternion.setFromUnitVectors(
       this._upAxis,
       this._flightDir
@@ -1777,8 +1731,10 @@ export class InterplanetaryJourney {
     this.physics.speed = helioSpeed;
     this.physics.transferProgress = t;
 
-    const burn = t < 0.055 || t > 0.952;
-    this.vehicle.setStarshipThrottle(burn ? 0.9 : 0.0, true);
+    const injectionBurnFraction = this.orbit.injectionDeltaV / 12 / this.orbit.seconds;
+    const arrivalBurnFraction = this.orbit.arrivalRelativeSpeed / 12 / this.orbit.seconds;
+    const burn = t < injectionBurnFraction || t > 1 - arrivalBurnFraction;
+    this.vehicle.setStarshipThrottle(burn ? 0.65 : 0.0, true);
     this.vehicle.setReentryHeat(0);
 
     // Instantaneous separation from the moving destination, using the shared AU scale.

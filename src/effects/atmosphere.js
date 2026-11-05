@@ -51,6 +51,7 @@ export class MarsAtmosphere {
       uniforms: {
         uTime: { value: 0 },
         uVacuum: { value: 0 },
+        uDeepSpace: { value: 0 },
         uSunPos: { value: SUN_DIR.clone() },
         uSkyZenith: { value: new THREE.Color(0xc47e5a) },     // Deep Martian butterscotch zenith
         uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Luminous dusty salmon horizon matched to terrain fog
@@ -74,6 +75,7 @@ export class MarsAtmosphere {
       fragmentShader: `
         uniform float uTime;
         uniform float uVacuum;
+        uniform float uDeepSpace;
         uniform vec3 uSunPos;
         uniform vec3 uSkyZenith;
         uniform vec3 uSkyHorizon;
@@ -92,6 +94,16 @@ export class MarsAtmosphere {
           p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
           p3 += dot(p3, p3.yxz + 33.33);
           return fract((p3.xxy + p3.yxx) * p3.zyx);
+        }
+
+        float skyNoise(vec3 p) {
+          vec3 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(mix(hash33(i).x, hash33(i + vec3(1,0,0)).x, f.x),
+                mix(hash33(i + vec3(0,1,0)).x, hash33(i + vec3(1,1,0)).x, f.x), f.y),
+            mix(mix(hash33(i + vec3(0,0,1)).x, hash33(i + vec3(1,0,1)).x, f.x),
+                mix(hash33(i + vec3(0,1,1)).x, hash33(i + vec3(1,1,1)).x, f.x), f.y), f.z);
         }
 
         float starLayer(vec3 dir, float scale, float threshold) {
@@ -127,7 +139,7 @@ export class MarsAtmosphere {
           // 3D Undistorted Spherical Starfield & Milky Way (visible in upper atmosphere, space, and nocturnal night sky)
           float abovePlanetLimb = smoothstep(horizonDip - 0.02, horizonDip + 0.04, dir.y);
           float nightFactor = clamp(-sunDir.y * 4.0 + 0.2, 0.0, 1.0);
-          float starVisibility = uVacuum > 0.5
+          float starVisibility = uDeepSpace > 0.5 ? 1.0 : uVacuum > 0.5
             ? smoothstep(-0.08, 0.02, dir.y)
             : clamp(((1.0 - atmoDensity * 0.88) + nightFactor * atmoDensity * 0.95) * abovePlanetLimb, 0.0, 1.0);
           vec3 cosmosCol = spaceBlack;
@@ -140,12 +152,16 @@ export class MarsAtmosphere {
             float twinkle = 0.88 + 0.12 * sin(uTime * 2.8 + tintSeed.x * 30.0);
             cosmosCol += starTint * (s1 * twinkle + s2) * starVisibility;
 
-            // Subtle Milky Way galactic glow. Keep it additive and starlit:
-            // an unlit dust lane reads as a giant dark stripe across the sky.
-            float galLat = abs(dot(dir, normalize(vec3(0.58, 0.68, -0.44))));
-            float galacticBand = exp(-galLat * galLat * 22.0);
-            float bandCore = 1.0 - 0.25 * smoothstep(0.0, 0.2, galLat);
-            cosmosCol += vec3(0.032, 0.042, 0.072) * galacticBand * bandCore * starVisibility * 0.28;
+            // A faint star-rich galactic plane with soft cloud structure.
+            vec3 pole = normalize(vec3(0.58, 0.68, -0.44));
+            float galLat = dot(dir, pole);
+            float cloud = skyNoise(dir * 31.0);
+            float warpedLat = galLat + (cloud - 0.5) * 0.028;
+            float band = exp(-pow(warpedLat / 0.09, 2.0));
+            float bulge = pow(max(dot(dir, normalize(vec3(0.72, -0.28, 0.63))), 0.0), 9.0);
+            vec3 milkyWay = mix(vec3(0.015, 0.018, 0.025), vec3(0.035, 0.030, 0.026), bulge);
+            cosmosCol += milkyWay * band * (0.75 + 0.35 * cloud) * starVisibility;
+            cosmosCol += starTint * starLayer(dir, 220.0, 0.977) * band * 0.42 * starVisibility;
           }
 
           // Physical Planetary Rayleigh + Dust Mie Scattering with Diurnal Day/Night attenuation
@@ -196,6 +212,10 @@ export class MarsAtmosphere {
             float sunDisk = smoothstep(0.9991, 0.99975, sc);
             sky = cosmosCol + uSunColor * (sunDisk * 2.2 + pow(sc, 42.0) * 0.35)
               * smoothstep(-0.04, 0.02, dir.y);
+          }
+          if (uDeepSpace > 0.5) {
+            float sunDisk = smoothstep(0.9997, 0.99992, sc);
+            sky = cosmosCol + uSunColor * sunDisk;
           }
           gl_FragColor = vec4(sky, 1.0);
           #include <colorspace_fragment>
@@ -1349,10 +1369,11 @@ export class MarsAtmosphere {
     // Deep-space navigation has its own Sun, no local sky light or ground skirt.
     if (physics?.isInterplanetary) {
       this.sunLight.intensity = 0;
-      this.ambientLight.intensity = 0.08;
+      this.ambientLight.intensity = 0.28;
       this.hemiLight.intensity = 0;
       if (this.scene.fog) { this.scene.fog.near = 1e7; this.scene.fog.far = 2e7; }
     }
+    this.skyMat.uniforms.uDeepSpace.value = physics?.isInterplanetary ? 1 : 0;
     // 1. Anchor skydome, regional surface, distant mountains and directional light to active camera/player
     this.skyMesh.position.copy(playerPos);
     if (this.regionalSurfaceMesh && this.regionalSurfaceMesh.visible) {

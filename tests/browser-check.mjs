@@ -41,13 +41,19 @@ assert.equal(await evaluate(`Array.from(document.querySelectorAll('.flight-touch
 assert.equal(await evaluate(`document.getElementById('flight-details-btn')`),null);
 assert.equal(await evaluate(`getComputedStyle(document.querySelector('#flight-hud .spx-booster-wing')).display==='none'`),false);
 assert.equal(await evaluate(`!!document.querySelector('[data-dest="moon"]')`),true);
+assert.equal(await evaluate(`!!document.getElementById('flight-trajectory-btn')`),true);
+await evaluate(`document.getElementById('flight-speed-btn').click()`);
+assert.equal(await evaluate(`document.getElementById('flight-speed-menu').classList.contains('open')`),true);
+await evaluate(`document.querySelector('[data-time-scale="100"]').click()`);
+assert.equal(await evaluate(`document.querySelector('canvas').game.timeScale`),100);
+await evaluate(`document.querySelector('canvas').game.setTimeScale(1)`);
 const shot = await call('Page.captureScreenshot', { format: 'png' });
 await writeFile('.browser-phone.png', Buffer.from(shot.data, 'base64'));
 for (const [width, height] of [[320, 740], [390, 844], [844, 390], [1280, 800]]) {
   await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 900 });
   await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await delay(500);
-  const controls = await evaluate(`['flight-cam-btn','flight-mission-btn','flight-actions-btn','flight-auto-btn'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {id,left:r.left,right:r.right,height:r.height}})`);
+  const controls = await evaluate(`['flight-cam-btn','flight-mission-btn','flight-trajectory-btn','flight-speed-btn','flight-actions-btn','flight-auto-btn'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {id,left:r.left,right:r.right,height:r.height}})`);
   for (const c of controls) {
     assert.ok(c.left >= 0 && c.right <= width + 1, `${width}px: ${c.id} overflows (${c.left}..${c.right})`);
     assert.ok(c.height >= 36, `${c.id} is too small`);
@@ -88,6 +94,32 @@ for(const [name,[left,right]] of Object.entries(desktopOptions)) {
 await evaluate(`document.querySelector('canvas').game.setMode('starship')`);
 assert.equal(await evaluate(`getComputedStyle(document.getElementById('flight-mobile-steering')).display`),'none');
 console.log('Touch controls: rover 4, flight 6, roadster 6; desktop hidden');
+await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  cancelAnimationFrame(g.animId);g.operations.reset();p.enterPlanetOrbit('earth');g.applyPlanetEnvironment('earth');
+  p.update(1/60);g.cameraController.setFlightMode('CHASE');g.cameraController.updateFlight(1/60,p);
+  g.atmosphere.setAltitude(p.altitude);g.atmosphere.update(1/60,g.camera.position,{altitude:p.altitude,speed:p.speed,isInterplanetary:false});
+  g.journey.update(0,1,p.altitude);g.renderer.render(g.scene,g.camera);
+})()`);
+await writeFile('.browser-earth-orbit.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+const transferVisual=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  p.yardControl=false;p.phase='ORBIT';p.scriptedControl=false;p.starshipFuel=94;
+  g.selectDestination('moon');g.beginTransfer();g.ensureTransferStarted();
+  g.journey.update(8,1,120000);p.update(1/60);
+  g.cameraController.setFlightMode('CHASE');g.cameraController.updateFlight(1/60,p);
+  g.atmosphere.setAltitude(120000);g.atmosphere.update(1/60,g.camera.position,{altitude:120000,speed:p.speed,isInterplanetary:true});
+  g.starship.updateLOD(g.camera.position);g.renderer.render(g.scene,g.camera);
+  return {progress:g.journey.progress,routeHidden:!g.journey.transferGroup.visible,tube:g.journey.transferTube};
+})()`);
+await writeFile('.browser-lunar-transfer.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+assert.ok(transferVisual.progress>0.1);
+assert.equal(transferVisual.routeHidden,true);
+assert.equal(transferVisual.tube,undefined);
+await evaluate(`document.getElementById('flight-trajectory-btn').click()`);
+assert.equal(await evaluate(`document.querySelector('canvas').game.trajectoryVisible`),true);
+assert.equal(await evaluate(`document.querySelector('canvas').game.journey.transferGroup.visible`),true);
+await evaluate(`(() => { const g=document.querySelector('canvas').game;g.toggleTrajectory();g.journey.reset(); })()`);
 const transferResults = await evaluate(`(() => {
   const g=document.querySelector('canvas').game,p=g.missionPhysics;
   cancelAnimationFrame(g.animId);g.operations.reset();p.yardControl=false;
@@ -272,5 +304,18 @@ assert.ok(Math.abs(roverGround.roverY-roverGround.groundY-0.95)<0.01);
 assert.equal(roverGround.mapPlanet,'earth');
 assert.equal(roverGround.marsTerrainVisible,false);
 console.log('Earth rover ground',roverGround);
+const boosterTrajectory=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  g.setMode('starship');p.phase='ORBIT';p.boosterState='BOOSTBACK';
+  p.boosterPosition.set(1820,p.padGroundY+2500,1330);p.boosterVelocity.set(80,140,15);
+  g.cameraController.setFlightMode('BOOSTER_CAM');g.toggleTrajectory();g.updateTrajectory(1);
+  const a=g.localTrajectory.geometry.attributes.position;
+  const first=[a.getX(0),a.getY(0),a.getZ(0)];
+  const visible=g.localTrajectory.visible;g.toggleTrajectory();
+  return {first,visible};
+})()`);
+assert.equal(boosterTrajectory.visible,true);
+assert.deepEqual(boosterTrajectory.first,[1820,boosterTrajectory.first[1],1330]);
+assert.ok(boosterTrajectory.first[1]>2400);
 ws.close();
 if (errors.some(e => e.startsWith('Uncaught') || e.includes('THREE.') || e.includes('VALIDATE_STATUS'))) process.exitCode = 1;

@@ -220,9 +220,20 @@ export class MissionFlightHUD {
     };
     bindDropdown('flight-cam-btn', 'flight-cam-menu');
     bindDropdown('flight-mission-btn', 'flight-mission-menu');
+    bindDropdown('flight-speed-btn', 'flight-speed-menu');
     bindDropdown('flight-actions-btn', 'flight-actions-menu');
     bindDropdown('rover-cam-btn', 'rover-cam-menu');
     bindDropdown('rover-actions-btn', 'rover-actions-menu');
+
+    document.getElementById('flight-trajectory-btn')?.addEventListener('click', () => {
+      this.options.onToggleTrajectory?.();
+    });
+    document.querySelectorAll('[data-time-scale]').forEach(button => {
+      button.addEventListener('click', () => {
+        this.options.onSelectTimeScale?.(Number(button.dataset.timeScale));
+        document.getElementById('flight-speed-menu')?.classList.remove('open');
+      });
+    });
 
     if (typeof window !== 'undefined') {
       window.addEventListener('click', () => {

@@ -2,256 +2,21 @@ import * as THREE from 'three';
 import { getEarthMaps, getMoonMap } from './earthMaps.js';
 import { getPlanetProfile } from '../flight/planetProfiles.js';
 
-// ---------------------------------------------------------------------------
-// Realistic Procedural Mars Planetary Texture Generator
-// Creates a 2048 x 1024 equirectangular texture of Mars with iconic landmarks:
-// - Valles Marineris (4,000 km grand canyon rift)
-// - Olympus Mons (22 km shield volcano caldera & scarp)
-// - Tharsis Montes (Ascraeus, Pavonis, Arsia Mons)
-// - Dark basaltic mare (Syrtis Major, Acidalia Planitia, Sinus Meridiani)
-// - Northern Polar Ice Cap (Planum Boreum with Chasma Boreale)
-// - Southern Polar Frost (Planum Australe)
-// - Impact Basins & Crater Rings (Hellas, Argyre, and crater fields)
-// - Orographic water-ice clouds over volcanic summits
-// ---------------------------------------------------------------------------
+// Bundled NASA/JPL maps are shared by the local globe and transfer scene.
 let _cachedMarsTexture = null;
-let _cachedEarthTexture = null;
 
-// A hand-shaped but geographically recognisable Earth albedo map. We avoid
-// external image dependencies, yet keep the silhouette of the real continents
-// so the globe reads as Earth from orbit instead of a generic blue marble.
 export function createProceduralEarthTexture() {
   return typeof document === 'undefined' ? null : getEarthMaps().map;
 }
 
 export function createProceduralMarsTexture() {
   if (typeof document === 'undefined') return null;
-  if (_cachedMarsTexture) return _cachedMarsTexture;
-
-  const width = 1024;
-  const height = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  const imgData = ctx.createImageData(width, height);
-  const data = imgData.data;
-
-  // Ultra-fast integer bitwise hash (replaces slow Math.sin per pixel)
-  const hash2d = (x, y) => {
-    let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263)) | 0;
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-  };
-
-  const smoothNoise = (x, y) => {
-    const ix = Math.floor(x);
-    const iy = Math.floor(y);
-    const fx = x - ix;
-    const fy = y - iy;
-    const ux = fx * fx * (3.0 - 2.0 * fx);
-    const uy = fy * fy * (3.0 - 2.0 * fy);
-
-    const a = hash2d(ix, iy);
-    const b = hash2d(ix + 1, iy);
-    const c = hash2d(ix, iy + 1);
-    const d = hash2d(ix + 1, iy + 1);
-
-    return a * (1 - ux) * (1 - uy) + b * ux * (1 - uy) + c * (1 - ux) * uy + d * ux * uy;
-  };
-
-  const fbm = (x, y, octaves = 3) => {
-    let val = 0;
-    let amp = 0.5;
-    let freq = 1.0;
-    for (let o = 0; o < octaves; o++) {
-      val += smoothNoise(x * freq, y * freq) * amp;
-      freq *= 2.02;
-      amp *= 0.5;
-    }
-    return val;
-  };
-
-  // Color Palette Constants
-  // Ferric red-ochre highlands
-  const COL_HIGHLAND_R = 198, COL_HIGHLAND_G = 102, COL_HIGHLAND_B = 64;
-  // Dark volcanic basalt (Syrtis Major, Acidalia)
-  const COL_BASALT_R = 54, COL_BASALT_G = 38, COL_BASALT_B = 32;
-  // Canyon floor shadow
-  const COL_CANYON_R = 36, COL_CANYON_G = 22, COL_CANYON_B = 16;
-  // Polar ice cap (white/ice-blue)
-  const COL_ICE_R = 244, COL_ICE_G = 249, COL_ICE_B = 255;
-  // Hellas basin dust
-  const COL_HELLAS_R = 216, COL_HELLAS_G = 136, COL_HELLAS_B = 92;
-
-  // Precompute longitude trig table
-  const cosU = new Float32Array(width);
-  const sinU = new Float32Array(width);
-  for (let x = 0; x < width; x++) {
-    const a = (x / width) * Math.PI * 2;
-    cosU[x] = Math.cos(a);
-    sinU[x] = Math.sin(a);
+  if (!_cachedMarsTexture) {
+    _cachedMarsTexture = new THREE.TextureLoader().load('/textures/mars-viking.jpg');
+    _cachedMarsTexture.colorSpace = THREE.SRGBColorSpace;
+    _cachedMarsTexture.anisotropy = 4;
   }
-
-  for (let y = 0; y < height; y++) {
-    const v = y / height; // 0 (North Pole) to 1 (South Pole)
-    const lat = (0.5 - v) * Math.PI; // +PI/2 to -PI/2
-    const cosLat = Math.cos(lat);
-    const ny = Math.sin(lat);
-
-    for (let x = 0; x < width; x++) {
-      const u = x / width; // 0 to 1 (Longitude 0° to 360°)
-      const idx = (y * width + x) * 4;
-
-      // Spherical coordinates for seamless wrapping
-      const nx = cosLat * cosU[x];
-      const nz = cosLat * sinU[x];
-
-      // Base planetary fractal terrain
-      const n1 = fbm(nx * 3.5 + 10.0, ny * 3.5 + 10.0, 3);
-      const n2 = fbm(nz * 7.0 + 20.0, ny * 7.0 + 20.0, 2) * 0.4;
-      let elevation = n1 + n2; // ~0.0 to 1.3
-
-      // 1. Dark Volcanic Basaltic Mare (Albedo Features)
-      const dSyrtis = Math.hypot(u - 0.79, (v - 0.50) * 1.8);
-      const isSyrtis = Math.max(0, 1.0 - dSyrtis / 0.08);
-
-      const dAcidalia = Math.hypot(u - 0.48, (v - 0.32) * 1.5);
-      const isAcidalia = Math.max(0, 1.0 - dAcidalia / 0.12);
-
-      const dMeridiani = Math.hypot(u - 0.56, (v - 0.52) * 3.2);
-      const isMeridiani = Math.max(0, 1.0 - dMeridiani / 0.14);
-
-      const darkMare = Math.min(1.0, isSyrtis * 1.6 + isAcidalia * 1.2 + isMeridiani * 1.1 + (elevation < 0.42 ? (0.42 - elevation) * 2.5 : 0.0));
-
-      // 2. Valles Marineris (Grand Canyon of Mars)
-      let isCanyon = 0.0;
-      if (u > 0.20 && u < 0.44 && Math.abs(v - 0.52) < 0.045) {
-        const canyonProgress = (u - 0.20) / 0.24;
-        const canyonMeander = Math.sin(canyonProgress * Math.PI * 3.5) * 0.008;
-        const distToCenter = Math.abs((v - 0.52) - canyonMeander);
-        if (distToCenter < 0.016) {
-          isCanyon = Math.pow(1.0 - distToCenter / 0.016, 1.8);
-          isCanyon *= 0.75 + 0.25 * Math.sin(canyonProgress * Math.PI * 8.0);
-        }
-      }
-
-      // 3. Tharsis Shield Volcanoes
-      const dOlympus = Math.hypot(u - 0.17, (v - 0.38) * 1.3);
-      let isOlympus = 0.0;
-      let isCaldera = 0.0;
-      if (dOlympus < 0.038) {
-        isOlympus = Math.pow(1.0 - dOlympus / 0.038, 2.2);
-        if (dOlympus < 0.008) {
-          isCaldera = Math.cos((dOlympus / 0.008) * Math.PI * 0.5);
-        }
-      }
-
-      const dAscraeus = Math.hypot(u - 0.24, (v - 0.39) * 1.4);
-      const dPavonis = Math.hypot(u - 0.22, (v - 0.47) * 1.4);
-      const dArsia = Math.hypot(u - 0.20, (v - 0.55) * 1.4);
-      const isTharsisMons = Math.max(0, 1.0 - Math.min(dAscraeus, dPavonis, dArsia) / 0.024);
-
-      // 4. Hellas Planitia Impact Basin
-      const dHellas = Math.hypot(u - 0.72, (v - 0.72) * 1.2);
-      const isHellas = Math.max(0, 1.0 - dHellas / 0.11);
-
-      // 5. Northern Polar Ice Cap
-      let isNorthIce = 0.0;
-      if (v < 0.14) {
-        const iceEdge = 0.14 - smoothNoise(nx * 12.0, nz * 12.0) * 0.03;
-        if (v < iceEdge) {
-          isNorthIce = Math.min(1.0, (iceEdge - v) / 0.05);
-          const spiral = Math.sin(Math.atan2(nz, nx) * 3.0 + v * 30.0);
-          if (spiral > 0.6) isNorthIce *= 0.78;
-        }
-      }
-
-      // Southern Polar Frost
-      let isSouthIce = 0.0;
-      if (v > 0.88) {
-        const iceEdge = 0.88 + smoothNoise(nx * 10.0, nz * 10.0) * 0.03;
-        if (v > iceEdge) {
-          isSouthIce = Math.min(1.0, (v - iceEdge) / 0.06);
-        }
-      }
-
-      // Base color blending
-      let r = COL_HIGHLAND_R;
-      let g = COL_HIGHLAND_G;
-      let b = COL_HIGHLAND_B;
-
-      const terraVar = (elevation - 0.7) * 42.0;
-      r = Math.min(255, Math.max(0, r + terraVar));
-      g = Math.min(255, Math.max(0, g + terraVar * 0.75));
-      b = Math.min(255, Math.max(0, b + terraVar * 0.5));
-
-      if (darkMare > 0.05) {
-        const m = Math.min(1.0, darkMare);
-        r = r * (1 - m) + COL_BASALT_R * m;
-        g = g * (1 - m) + COL_BASALT_G * m;
-        b = b * (1 - m) + COL_BASALT_B * m;
-      }
-
-      if (isHellas > 0.05) {
-        const h = Math.min(1.0, isHellas);
-        r = r * (1 - h) + COL_HELLAS_R * h;
-        g = g * (1 - h) + COL_HELLAS_G * h;
-        b = b * (1 - h) + COL_HELLAS_B * h;
-      }
-
-      if (isCanyon > 0.05) {
-        r = r * (1 - isCanyon) + COL_CANYON_R * isCanyon;
-        g = g * (1 - isCanyon) + COL_CANYON_G * isCanyon;
-        b = b * (1 - isCanyon) + COL_CANYON_B * isCanyon;
-      }
-
-      if (isOlympus > 0.05) {
-        const oR = 212, oG = 114, oB = 74;
-        r = r * (1 - isOlympus) + oR * isOlympus;
-        g = g * (1 - isOlympus) + oG * isOlympus;
-        b = b * (1 - isOlympus) + oB * isOlympus;
-        if (isCaldera > 0.1) {
-          r = r * (1 - isCaldera) + COL_CANYON_R * isCaldera;
-          g = g * (1 - isCaldera) + COL_CANYON_G * isCaldera;
-          b = b * (1 - isCaldera) + COL_CANYON_B * isCaldera;
-        }
-      }
-
-      if (isTharsisMons > 0.05) {
-        const tm = isTharsisMons * 0.75;
-        r = r * (1 - tm) + 215 * tm;
-        g = g * (1 - tm) + 115 * tm;
-        b = b * (1 - tm) + 75 * tm;
-      }
-
-      const iceTotal = Math.min(1.0, isNorthIce + isSouthIce);
-      if (iceTotal > 0.02) {
-        r = r * (1 - iceTotal) + COL_ICE_R * iceTotal;
-        g = g * (1 - iceTotal) + COL_ICE_G * iceTotal;
-        b = b * (1 - iceTotal) + COL_ICE_B * iceTotal;
-      }
-
-      data[idx + 0] = Math.round(r);
-      data[idx + 1] = Math.round(g);
-      data[idx + 2] = Math.round(b);
-      data[idx + 3] = 255;
-    }
-  }
-
-  ctx.putImageData(imgData, 0, 0);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = true;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  _cachedMarsTexture = texture;
-  return texture;
+  return _cachedMarsTexture;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +56,7 @@ export class PostLaunchSpace {
       this.planetRadius = radius;
       this.planetMesh.geometry.dispose();
       this.planetMesh.geometry = new THREE.SphereGeometry(radius, 192, 128);
+      if (!earth) this.planetMesh.geometry.rotateX(Math.PI / 2);
       this.airglowMesh.geometry.dispose();
       this.airglowMesh.geometry = new THREE.SphereGeometry(radius * 1.014, 64, 48);
     }
@@ -451,11 +217,10 @@ export class PostLaunchSpace {
           baseAlbedo *= mix(0.78 + 0.32 * h0, 0.93 + 0.12 * h0, earth);
           baseAlbedo *= mix(0.90 + 0.18 * microTex, 0.96 + 0.08 * microTex, earth);
 
-          // Cloud systems. Earth gets broad white frontal bands and tropical
-          // convection; Mars keeps only thin water-ice cirrus.
+          // Thin cloud cover leaves the orbital imagery legible.
           float latMask = mix(1.0 - smoothstep(0.15, 0.75, abs(S.z)), 1.0, earth);
           float cloudNoise = fbm3D(S * mix(14.0, 10.0, earth) + vec3(uTime * mix(0.002, 0.006, earth), 0.0, uTime * 0.001));
-          float cloudFactor = smoothstep(mix(0.64, 0.53, earth), mix(0.85, 0.76, earth), cloudNoise) * latMask * mix(0.24, 0.78, earth);
+          float cloudFactor = smoothstep(mix(0.68, 0.61, earth), mix(0.86, 0.82, earth), cloudNoise) * latMask * mix(0.08, 0.15, earth);
           cloudFactor *= 1.0-uMoon;
           baseAlbedo = mix(baseAlbedo, mix(vec3(0.82, 0.68, 0.58), vec3(0.95, 0.98, 1.0), earth), cloudFactor);
 
@@ -463,7 +228,7 @@ export class PostLaunchSpace {
           float NdotL = dot(bumpN, L);
           float macroNdotL = dot(N, L);
           float dayFactor = smoothstep(-0.14, 0.28, macroNdotL);
-          float diff = clamp((NdotL + 0.26) * 0.78, 0.04, 1.0) * dayFactor;
+          float diff = clamp((NdotL + 0.36) * 0.88, 0.04, 1.0) * dayFactor;
 
           float twilight = smoothstep(-0.22, 0.06, macroNdotL) * (1.0 - smoothstep(0.04, 0.40, macroNdotL));
 
@@ -480,13 +245,13 @@ export class PostLaunchSpace {
           float sunIllum = max(0.12, macroNdotL * 0.70 + 0.30);
 
           // Smooth volumetric atmospheric blending without a razor-sharp neon ring
-          float atmoDepth = pow(fresnel, mix(2.6, 3.2, earth));
+          float atmoDepth = pow(fresnel, mix(3.5, 4.4, earth));
           vec3 limbColor = mix(uAtmosphereColor, uAirglowBlue, smoothstep(0.35, 0.92, fresnel));
-          surfaceColor = mix(surfaceColor, limbColor * sunIllum, atmoDepth * (earth > 0.5 ? 0.62 : 0.50));
+          surfaceColor = mix(surfaceColor, limbColor * sunIllum, atmoDepth * (earth > 0.5 ? 0.18 : 0.22));
 
           // Soft edge feathering so there is zero artificial sharp polygon ring cutting into space
           float edgeFeather = smoothstep(0.002, 0.075, dot(N, V));
-          float finalAlpha = uFade * mix(1.0, edgeFeather, earth > 0.5 ? 0.88 : 0.75);
+          float finalAlpha = uFade * mix(1.0, edgeFeather, earth > 0.5 ? 0.32 : 0.3);
 
           if (uMoon > 0.5) surfaceColor = baseAlbedo * (max(0.0, dot(N,L)) * 0.95 + 0.025);
           gl_FragColor = vec4(surfaceColor, finalAlpha);
@@ -712,13 +477,14 @@ export class PostLaunchSpace {
       this.airglowMat.uniforms.uFade.value = fade;
     }
 
-    // Keep the 165km Mars globe horizontally centered directly beneath the active camera (shipPos.x, shipPos.z)
-    // and keep visual altitude close to the planetary surface during atmospheric entry (12km - 50km)
+    // Rebase the globe beneath the observer. The flight scene uses local metre
+    // coordinates; keeping the globe at the launch pad made its horizon slide
+    // sideways once the vehicle was hundreds of kilometres downrange.
     const clampedAlt = Math.max(0.0, alt);
     const visualSpaceAlt = clampedAlt;
     const globeCenterY = shipPos.y - this.planetRadius - visualSpaceAlt;
 
-    this.planetMesh.position.set(this.padCoords.x, globeCenterY, this.padCoords.y);
+    this.planetMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
     this.airglowMesh.position.copy(this.planetMesh.position);
 
     // Roll the planet surface along its equator (Z-axis polar spin) as the spacecraft travels downrange (+X) and orbits
@@ -727,7 +493,8 @@ export class PostLaunchSpace {
     const downrangeLat = (shipPos.z - this.padCoords.y) * 0.000008;
     if (this.planetId === 'earth') {
       // A Gulf coast launch site, aligned to the satellite map's latitude/longitude.
-      const lat = 25.997 * Math.PI / 180, lon = -97.156 * Math.PI / 180;
+      const lat = 25.997 * Math.PI / 180 + (shipPos.z - this.padCoords.y) / this.planetRadius;
+      const lon = -97.156 * Math.PI / 180 + (shipPos.x - this.padCoords.x) / (this.planetRadius * Math.cos(lat));
       const normal = this._siteNormal || (this._siteNormal = new THREE.Vector3());
       normal.set(Math.cos(lat) * Math.cos(lon), Math.sin(lat), -Math.cos(lat) * Math.sin(lon));
       this.planetMesh.quaternion.setFromUnitVectors(normal, this._siteUp || (this._siteUp = new THREE.Vector3(0, 1, 0)));
