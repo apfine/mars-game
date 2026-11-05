@@ -169,6 +169,21 @@ await evaluate(`(() => {
 })()`);
 await delay(1000);
 await writeFile('.browser-earth-ground.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+const earthCoast=await evaluate(`(() => {
+  const g=document.querySelector('canvas').game,p=g.missionPhysics;
+  g.camera.position.set(p.padCoords.x+3600,p.padGroundY+3500,p.padCoords.y+900);
+  g.camera.lookAt(p.padCoords.x+2900,p.padGroundY,p.padCoords.y+900);
+  g.journey.update(0,1,3500);
+  g.atmosphere.setAltitude(3500);
+  g.atmosphere.update(1/60,g.camera.position,{altitude:3500,speed:0});
+  g.renderer.render(g.scene,g.camera);
+  return {land:g.journey.earthGround.visible,ocean:g.journey.earthOcean.visible,
+    apronOffset:g.journey.earthSurface.children.find(o=>o.material===g.journey.earthApronMat)?.position.y-p.padGroundY};
+})()`);
+await writeFile('.browser-earth-coast.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+assert.equal(earthCoast.land,true);
+assert.equal(earthCoast.ocean,true);
+assert.ok(earthCoast.apronOffset>0);
 await evaluate(`(() => {
   const g=document.querySelector('canvas').game,p=g.missionPhysics;
   g.camera.position.set(p.padCoords.x,p.padElevation+400000,p.padCoords.y+160000);

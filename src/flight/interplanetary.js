@@ -112,12 +112,6 @@ function makeGrassTexture() {
     g.fillStyle = `rgba(${shade},${shade + 4},${shade - 8},${0.08 + Math.random() * 0.17})`;
     g.fillRect(Math.random() * 512, Math.random() * 512, 1 + Math.random() * 4, 1 + Math.random() * 4);
   }
-  for (let i = 0; i < 18; i++) {
-    g.fillStyle = `rgba(128,120,95,${0.05 + Math.random() * 0.07})`;
-    g.beginPath();
-    g.arc(Math.random() * 512, Math.random() * 512, 14 + Math.random() * 48, 0, Math.PI * 2);
-    g.fill();
-  }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -626,6 +620,17 @@ export class InterplanetaryJourney {
       transparent: true,
       opacity: 0.95
     });
+    oceanMat.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vEarthLocalXZ;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEarthLocalXZ = position.xz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vEarthLocalXZ;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          float coast = 2300.0 + sin(vEarthLocalXZ.y * 0.00045) * 650.0
+            + sin(vEarthLocalXZ.y * 0.0013) * 170.0 - vEarthLocalXZ.x;
+          if (coast >= 0.0) discard;`);
+    };
     // Entry is still hundreds of kilometres downrange at 15–20 km altitude.
     // Keep the curved ocean beyond the visible horizon throughout descent.
     const oceanGeo = new THREE.PlaneGeometry(1600000, 1600000, 160, 160);
@@ -658,6 +663,21 @@ export class InterplanetaryJourney {
       polygonOffsetFactor: 4,
       polygonOffsetUnits: 4
     });
+    // The regional and detailed grids share a material. Clip both to the
+    // coastline and leave the concrete apron free of grass at every camera
+    // height; otherwise the submerged grid flickers through the ocean and
+    // the ground bleeds over the Starbase floor.
+    groundMat.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vEarthLocalXZ;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEarthLocalXZ = position.xz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vEarthLocalXZ;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          float coast = 2300.0 + sin(vEarthLocalXZ.y * 0.00045) * 650.0
+            + sin(vEarthLocalXZ.y * 0.0013) * 170.0 - vEarthLocalXZ.x;
+          if (coast < 0.0 || length(vEarthLocalXZ) < 490.0) discard;`);
+    };
 
     const makeGroundGeometry = (size, segments, centerHole = 0) => {
       const geo = new THREE.PlaneGeometry(size, size, segments, segments);
@@ -745,7 +765,7 @@ export class InterplanetaryJourney {
     this.earthSurface.add(beach);
     this.earthBeachMat = beachMat;
 
-    // Graded concrete apron around the launch complex - set beneath pad structures to prevent Z-fighting
+    // The apron is the visible contact surface inside the grass cutout.
     const apronMat = new THREE.MeshStandardMaterial({
       map: makeEarthConcreteTexture(),
       color: 0x8e9594,
@@ -759,7 +779,7 @@ export class InterplanetaryJourney {
     });
     const apron = new THREE.Mesh(new THREE.CircleGeometry(490, 80), apronMat);
     apron.rotation.x = -Math.PI / 2;
-    apron.position.set(this.padCoords.x, this.padGroundY - 0.04, this.padCoords.y);
+    apron.position.set(this.padCoords.x, this.padGroundY + 0.02, this.padCoords.y);
     apron.receiveShadow = true;
     this.earthSurface.add(apron);
     this.earthApronMat = apronMat;
@@ -852,13 +872,18 @@ export class InterplanetaryJourney {
 
     // Helper to evaluate carved surface height for tree placement
     const sampleCarvedY = (vx, vz) => this.padGroundY + earthSurfaceHeight(vx, vz);
+    const landCoords = (angle, radius) => {
+      const z = Math.sin(angle) * radius;
+      const x = Math.cos(angle) * radius;
+      const shoreSetback = 80 + 220 * (0.5 + 0.5 * Math.sin(angle * 37 + radius * 0.013));
+      return [x - Math.max(0, shoreSetback - earthCoastDistance(x, z)), z];
+    };
 
     // 1. Plant Palms along coastal beaches & peninsulas
     for (let i = 0; i < countPalm; i++) {
       const angle = (i / countPalm) * Math.PI * 2 + (i % 7) * 0.2;
       const radius = 6200 + (i % 23) * 95 + Math.sin(i * 3.1) * 240;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -887,8 +912,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countPine; i++) {
       const angle = (i / countPine) * Math.PI * 2 + (i % 9) * 0.24;
       const radius = 950 + (i % 31) * 120 + Math.sin(i * 2.7) * 320;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -919,8 +943,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countOak; i++) {
       const angle = (i / countOak) * Math.PI * 2 + 0.45 + (i % 7) * 0.18;
       const radius = 680 + (i % 29) * 110 + Math.cos(i * 2.3) * 180;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -948,8 +971,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countCypress; i++) {
       const angle = (i / countCypress) * Math.PI * 2 + (i % 5) * 0.15;
       const radius = 540 + (i % 17) * 70;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -972,8 +994,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countWillow; i++) {
       const angle = (i / countWillow) * Math.PI * 2 + 1.2;
       const radius = 2400 + (i % 15) * 85 + Math.sin(i * 1.7) * 150;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -996,8 +1017,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countMaple; i++) {
       const angle = (i / countMaple) * Math.PI * 2 + 2.1;
       const radius = 1800 + (i % 21) * 110 + Math.cos(i * 2.1) * 200;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -1020,8 +1040,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countBirch; i++) {
       const angle = (i / countBirch) * Math.PI * 2 + 0.8;
       const radius = 2900 + (i % 25) * 130 + Math.sin(i * 2.5) * 260;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -1044,8 +1063,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countFir; i++) {
       const angle = (i / countFir) * Math.PI * 2 + 3.1;
       const radius = 3800 + (i % 27) * 140 + Math.cos(i * 1.9) * 320;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -1076,8 +1094,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countMangrove; i++) {
       const angle = (i / countMangrove) * Math.PI * 2 + 0.3;
       const radius = 7800 + (i % 17) * 75 + Math.sin(i * 2.2) * 140;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
@@ -1100,8 +1117,7 @@ export class InterplanetaryJourney {
     for (let i = 0; i < countMagnolia; i++) {
       const angle = (i / countMagnolia) * Math.PI * 2 + 1.8;
       const radius = 620 + (i % 19) * 80;
-      const vx = Math.cos(angle) * radius;
-      const vz = Math.sin(angle) * radius;
+      const [vx, vz] = landCoords(angle, radius);
       const x = this.padCoords.x + vx;
       const z = this.padCoords.y + vz;
       const y = sampleCarvedY(vx, vz);
