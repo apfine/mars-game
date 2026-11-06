@@ -1,5 +1,15 @@
 # Starship overhaul
 
+## Current correction pass
+
+- [x] Replace placeholder Gargantua with a black-hole shadow, accretion disk, and lensing approximation grounded in published rendering work.
+- [x] Replace the blue-striped wormhole with a spherical view of the destination sky and rim lensing; visibly cross its mouth near Saturn.
+- [x] Give Miller's planet its own ocean, atmosphere, lighting, terrain collision, tide hazards, and local/distant clocks throughout arrival and surface play.
+- [x] Make transfers proceed through alignment, a fuel-consuming injection burn, computed coast, and destination encounter without an instant transfer jump.
+- [x] Show docking stages and conserved ship/tanker tank quantities; verify routes to every destination.
+- [x] Make navigation, vehicle controls, and stage timeline relevant to rover, EVA, roadster, booster/Starship, transfer, and flyby states.
+- [x] Check rendered browser scenes, regressions, and production build; document what the physics model still approximates.
+
 - [x] Consistent solar distances, eight planets and Sun; detailed Earth/Mars.
 - [x] Kepler transfer in both directions, truthful distance/time/speed.
 - [x] Planet-specific air, bounded launch/entry integration and hypersonic arrival.
@@ -17,7 +27,7 @@ Follow-up fixes:
 - [x] Four/six compact touch controls, desktop suppression and neutral steel reflections.
 - [x] Booster RCS/boostback sequence, refined Roadster body and expedition rover hardware.
 
-Scope: Earth, Mars and Moon are landable. Other planets are visual navigation bodies.
+Scope: Earth, Mars, the Moon and Miller are landable. Mercury, Venus, Jupiter, Saturn, Uranus and Neptune are flyby waypoints without capture or surface landing. Gargantua is a non-Newtonian waypoint through the Saturn wormhole.
 Circular coplanar orbits and automatic launch-window alignment are gameplay
 approximations. Navigation distances and globe radii share one AU scale; local
 backgrounds preserve angular size. Local flight uses metres; cruise time is compressed.

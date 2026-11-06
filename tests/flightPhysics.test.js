@@ -53,8 +53,9 @@ for (const planet of ['earth', 'mars']) {
       phases.add(m.phase);
       maxHeat = Math.max(maxHeat, m.heat);
       assert.ok(Number.isFinite(m.position.length() + m.velocity.length()));
-      if (planet === 'earth' && (m.phase === FLIGHT_PHASES.LANDING_FLIP || m.phase === FLIGHT_PHASES.TOUCHDOWN)) {
-        assert.ok(m.velocity.z > -0.1, 'Earth landing reverses against the entry direction');
+      if (planet === 'earth' && m.phase === FLIGHT_PHASES.TOUCHDOWN) {
+        assert.ok(Math.hypot(m.velocity.x, m.velocity.z) < 5,
+          'Earth touchdown cancels downrange velocity before the tower catch');
       }
       const height = m.position.y - m.shipCatchBaseY;
       if (height >= 0 && height < 12 && m.phase !== FLIGHT_PHASES.LANDED) {
@@ -108,6 +109,48 @@ test('Earth arrival waits in orbit for deorbit and brings no booster to the dest
   assert.equal(m.shipCaughtByTower, true);
   assert.equal(m.boosterState, 'LEFT_BEHIND');
   assert.equal(m.vehicle.boosterGroup.visible, false);
+});
+
+test('Newtonian worlds coast on inverse-square gravity and keep staging propellant', () => {
+  const m = mission();
+  m.starshipFuel = 61;
+  m.enterPlanetOrbit('jupiter', { preserveFuel: true });
+  assert.equal(m.starshipFuel, 61);
+  assert.equal(m.scriptedControl, false);
+  assert.equal(m.phase, FLIGHT_PHASES.ORBIT);
+  const startAltitude = m.altitude;
+  const startSpeed = m.speed;
+  assert.ok(startSpeed > 40000 && startSpeed < 43000);
+  for (let i = 0; i < 120; i++) m.update(1 / 60);
+  assert.equal(m.phase, FLIGHT_PHASES.ORBIT);
+  assert.ok(Math.abs(m.altitude - startAltitude) < 50);
+  assert.ok(Math.abs(m.speed - startSpeed) < 5);
+  assert.ok(Number.isFinite(m.position.x + m.velocity.z));
+  m.triggerDeorbit();
+  assert.equal(m.phase, FLIGHT_PHASES.ORBIT);
+});
+
+test('a gas giant has no surface to land on', () => {
+  const m = mission();
+  m.enterPlanetOrbit('jupiter', { preserveFuel: true });
+  m.autoMission = false;
+  m.position.y = m.padElevation - 20;
+  m.velocity.set(0, -30, 0);
+  m.update(1 / 60);
+  assert.equal(m.phase, FLIGHT_PHASES.CRASHED);
+  assert.match(m.opsMessage, /NO SOLID SURFACE/);
+});
+
+test('assisted orbit correction spends propellant instead of snapping velocity', () => {
+  const m = mission();
+  m.enterPlanetOrbit('earth');
+  m.velocity.z *= 0.98;
+  const initialFuel = m.starshipFuel;
+  const initialSpeed = m.velocity.z;
+  m.update(1 / 60);
+  assert.ok(m.starshipFuel < initialFuel);
+  assert.ok(m.velocity.z > initialSpeed);
+  assert.ok(m.velocity.z - initialSpeed < 1, 'correction is bounded by real thrust');
 });
 
 test('manual transfer also leaves the booster on the departure world', () => {

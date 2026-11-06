@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getMarsHeight, getMarsNormal } from '../terrain/noise.js';
 import { SoftParticlePool } from './particles.js';
 import { PostLaunchSpace } from './postLaunchSpace.js';
+import { getPlanetProfile } from '../flight/planetProfiles.js';
 
 const SUN_DIR = new THREE.Vector3(0.5, 0.65, 0.45).normalize();
 
@@ -723,6 +724,7 @@ export class MarsAtmosphere {
   // Rayleigh-blue dome with a cool limb, Mars keeps its butterscotch dust
   // scattering. Called on arrival and when resetting to Mars.
   setPlanet(planetId) {
+    const profile = getPlanetProfile(planetId);
     if (this.planetId !== planetId && this.dustPool) {
       this.dustPool.alive.fill(0);
       this.dustPool.aAlpha.fill(0);
@@ -760,10 +762,14 @@ export class MarsAtmosphere {
           ground: 0x94502f,
           atmoHeight: 13500
         };
+    if (!['mars','earth','moon'].includes(planetId)) {
+      Object.assign(sky, profile.sky, { atmoHeight: profile.surfaceDensity === 0 ? 1000 :
+        planetId === 'venus' ? 16000 : 12000 });
+    }
 
     if (this.skyMat) {
       const u = this.skyMat.uniforms;
-      u.uVacuum.value = planetId === 'moon' ? 1 : 0;
+      u.uVacuum.value = profile.surfaceDensity === 0 ? 1 : 0;
       u.uSkyZenith.value.setHex(sky.zenith);
       u.uSkyHorizon.value.setHex(sky.horizon);
       u.uSunColor.value.setHex(sky.sun);
@@ -780,7 +786,7 @@ export class MarsAtmosphere {
     }
 
     if (this.scene?.fog) {
-      this.scene.fog.color.setHex(planetId === 'moon' ? 0x020309 : planetId === 'earth' ? 0xbcd8f0 : 0xe0aa8c);
+      this.scene.fog.color.setHex(profile.sky.horizon || 0x020309);
     }
 
     // Distant horizon ridges are tinted to the local atmosphere. Earth gets
@@ -806,7 +812,7 @@ export class MarsAtmosphere {
     if (this.phobos) this.phobos.visible = isMars && !this.isFlight;
     if (this.deimos) this.deimos.visible = isMars && !this.isFlight;
     this.planetId = planetId;
-    if (this.postLaunchSpace) this.postLaunchSpace.setPlanet(planetId);
+    if (this.postLaunchSpace && planetId !== 'gargantua') this.postLaunchSpace.setPlanet(planetId);
     // Refresh IBL so steel and paint reflect the world they are standing on.
     this.rebuildEnvironment();
   }
@@ -1279,14 +1285,14 @@ export class MarsAtmosphere {
 
   setAltitude(alt, speed = 0) {
     const a = Math.max(0, alt);
-    const spaceFade = this.planetId === 'moon' ? 1 : 1-Math.exp(-a/(this.planetId === 'earth' ? 14000 : 11000));
+    const spaceFade = getPlanetProfile(this.planetId).surfaceDensity === 0 ? 1 : 1-Math.exp(-a/(this.planetId === 'earth' ? 14000 : 11000));
     if (this.skyMat) {
       this.skyMat.uniforms.uSpaceFade.value = spaceFade;
       this.skyMat.uniforms.uAltitude.value = a;
     }
     if (this.distantMountains) {
       // Only show the 950m horizon silhouette ring when near the surface (< 180m)
-      this.distantMountains.visible = a < 180;
+      this.distantMountains.visible = a < 180 && (this.planetId === 'mars' || this.planetId === 'moon');
     }
     if (this.regionalSurfaceMesh && this.regionalMat) {
       // Regional 36km surface is Martian-only. Earth uses its dedicated ocean,
@@ -1302,7 +1308,7 @@ export class MarsAtmosphere {
       const isEarth = this.planetId === 'earth';
       this.scene.fog.near = THREE.MathUtils.lerp(isEarth ? 260 : 110, 80000, spaceFade);
       this.scene.fog.far = THREE.MathUtils.lerp(isEarth ? 7600 : 520, 250000, spaceFade);
-      if (this.planetId === 'moon') { this.scene.fog.near=1e8; this.scene.fog.far=2e8; }
+      if (getPlanetProfile(this.planetId).surfaceDensity === 0 || !getPlanetProfile(this.planetId).landable) { this.scene.fog.near=1e8; this.scene.fog.far=2e8; }
     }
     if (this.dustPoints) {
       this.dustPoints.visible = !this.isFlight && a < 600 && this.planetId === 'mars';

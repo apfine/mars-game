@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { getMarsHeight } from '../terrain/noise.js';
 import { getMoonHeight } from '../terrain/moonSurface.js';
+import { getMillerHeight } from '../terrain/millerSurface.js';
 import { earthSurfaceHeight } from '../terrain/earthSurface.js';
 import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
 import { PLANET_PROFILES, getPlanetProfile } from './planetProfiles.js';
 import { StarbaseObstacleSystem } from './solidCollisions.js';
+import { localCentralAcceleration, localOrbitElements } from './localOrbitalDynamics.js';
 
 export const FLIGHT_PHASES = {
   ON_PAD: 'ON_PAD',
@@ -20,7 +22,8 @@ export const FLIGHT_PHASES = {
   BELLYFLOP: 'BELLYFLOP',
   LANDING_FLIP: 'LANDING_FLIP',
   TOUCHDOWN: 'TOUCHDOWN',
-  LANDED: 'LANDED'
+  LANDED: 'LANDED',
+  CRASHED: 'CRASHED'
 };
 
 export const BOOSTER_STATES = {
@@ -274,7 +277,8 @@ export class StarshipMissionPhysics {
       density = layer.densityBottom * Math.exp(-(h - layer.bottom) / layer.scaleHeight);
     }
 
-    const windMagnitude = (this.planetId === 'moon' ? 0 : this.planetId === 'earth' ? 18.0 : 6.2) * Math.exp(-h / 9000.0);
+    const windMagnitude = (this.surfaceDensity === 0 ? 0 : (this.planetProfile.windSurfaceSpeed ??
+      (this.planetId === 'earth' || this.planetId === 'miller' ? 18.0 : 6.2))) * Math.exp(-h / 9000.0);
     const windDirection = 0.62 + h * 0.000012;
     out.wind.set(
       Math.cos(windDirection) * windMagnitude,
@@ -285,7 +289,7 @@ export class StarshipMissionPhysics {
     out.density = density;
     out.temperature = temperature;
     out.pressure = density * this.planetProfile.gasConstant * temperature;
-    out.soundSpeed = Math.sqrt(this.planetProfile.gamma * this.planetProfile.gasConstant * temperature);
+    out.soundSpeed = density > 0 ? Math.sqrt(this.planetProfile.gamma * this.planetProfile.gasConstant * temperature) : Infinity;
     out.layer = layerIndex;
     return out;
   }
@@ -421,11 +425,10 @@ export class StarshipMissionPhysics {
     this.phase = FLIGHT_PHASES.ON_PAD;
   }
 
-  // Swaps gravity, atmosphere layers and sky metadata. The Starbase layout is
-  // identical on every world (one master plan), so the catch points remain at
-  // the same local coordinates and all guidance laws keep working unchanged.
+  // Swaps gravity, atmosphere layers and the physical landing target.
   setPlanet(planetId) {
     const profile = getPlanetProfile(planetId);
+    if (profile.id === 'miller' && this.planetId !== 'miller') this.localSurfaceTime = 0;
     this.planetId = profile.id;
     this.planetProfile = profile;
     this.planetRadius = profile.radius;
@@ -439,6 +442,10 @@ export class StarshipMissionPhysics {
     this.soundSpeed = Math.sqrt(this.planetProfile.gamma * this.planetProfile.gasConstant * this.atmoTempK);
     this.boosterArmY = L.boosterTower.armY;
     this.shipArmY = L.shipTower.armY;
+    this.shipCatchCoords.set(
+      this.padCoords.x + (profile.id === 'miller' ? 0 : L.shipCatch.x),
+      this.padCoords.y + (profile.id === 'miller' ? 0 : L.shipCatch.z));
+    this.shipCatchBaseY = this.padGroundY + (profile.id === 'miller' ? 0 : L.shipCatch.baseY);
     return profile;
   }
 
@@ -482,6 +489,7 @@ export class StarshipMissionPhysics {
   // HYPERSONIC_ENTRY -> BELLYFLOP -> LANDING_FLIP -> TOUCHDOWN chain used at
   // Mars, with the destination profile's gravity and atmosphere.
   enterPlanetEntry(planetId, options = {}) {
+    const arrivalFuel = this.starshipFuel;
     const profile = this.setPlanet(planetId);
     this.scriptedControl = false;
     this.yardControl = false;
@@ -493,7 +501,8 @@ export class StarshipMissionPhysics {
     this.arrivalOrbit = false;
     // Arrival propellant state: the ship has spent most of its propellant on
     // the transfer and only retains the landing reserve.
-    this.starshipFuel = planetId === 'moon' ? 35 : planetId === 'mars' ? 30 : 18;
+    this.starshipFuel = options.preserveFuel ? arrivalFuel
+      : planetId === 'moon' ? 35 : planetId === 'mars' ? 30 : 18;
     this.starshipFlameout = false;
     this.cargoDoorsDeployed = false;
     this.landingLegsDeployed = false;
@@ -510,7 +519,11 @@ export class StarshipMissionPhysics {
     // Match the entry corridor to the distance this atmosphere actually lets
     // the vehicle travel before the landing burn. The old 8:1 offset left the
     // ship tens to hundreds of kilometres from the tower at low altitude.
-    const entryDownrange = ENTRY_DOWNRANGE[planetId] ?? 6.3;
+    // Miller's entry footprint shifts with arrival mass. A heavier vehicle
+    // sheds less speed in the same air and travels farther before the flip.
+    const entryDownrange = planetId === 'miller'
+      ? 6.3 + Math.max(0, this.starshipFuel - 18) * 0.0115
+      : ENTRY_DOWNRANGE[planetId] ?? 6.3;
     this.position.set(target.x, this.padElevation + entryAlt, target.y - entryAlt * entryDownrange);
     this.velocity.set(0, -entrySpeed * Math.sin(flightAngle), entrySpeed * Math.cos(flightAngle));
     if (planetId === 'moon') {
@@ -536,7 +549,8 @@ export class StarshipMissionPhysics {
 
   // Transfer arrival parks only the ship in a stable local orbit. Deorbit is
   // a separate pilot action; the booster remains on its departure world.
-  enterPlanetOrbit(planetId) {
+  enterPlanetOrbit(planetId, options = {}) {
+    const preservedFuel = this.starshipFuel;
     const profile = this.setPlanet(planetId);
     this.scriptedControl = false;
     this.yardControl = false;
@@ -552,15 +566,20 @@ export class StarshipMissionPhysics {
     this.boosterSpeed = 0;
     this.boosterHeat = 0;
     this.vehicle.setBoosterReentryHeat?.(0);
-    this.starshipFuel = 18;
+    // A final landable arrival keeps the guided landing reserve. A staging
+    // stop or a world with no surface keeps the propellant the injection
+    // burn actually left in the tanks.
+    this.starshipFuel = options.preserveFuel ? preservedFuel : 18;
     this.starshipFlameout = false;
     this.shipCaughtByTower = false;
     this.cargoDoorsDeployed = false;
     this.landingLegsDeployed = false;
     const entryAlt = profile.entryAltitude;
+    const orbitalRadius = profile.radius + entryAlt;
     this.position.set(this.shipCatchCoords.x, this.padElevation + entryAlt,
       this.shipCatchCoords.y - entryAlt * (ENTRY_DOWNRANGE[planetId] ?? 6.42));
-    this.velocity.set(0, 0, Math.sqrt(profile.gravity * (profile.radius + entryAlt)));
+    // Inverse-square circular speed, the speed localCentralAcceleration balances.
+    this.velocity.set(0, 0, Math.sqrt(profile.gravity * profile.radius * profile.radius / orbitalRadius));
     this.altitude = entryAlt;
     this.speed = this.velocity.length();
     this.horizontalSpeed = this.speed;
@@ -577,6 +596,29 @@ export class StarshipMissionPhysics {
     this.starshipScore = 0;
     this.vehicle.setStarshipThrottle(0, true);
     this.vehicle.setReentryHeat(0);
+    return profile;
+  }
+
+  // A rendezvous frame at an encounter. The ship has not magically performed
+  // a capture burn; the local display stays stationary only while the pilot
+  // selects the next leg or meets a prepositioned tanker.
+  enterFlybyWaypoint(planetId) {
+    const profile = this.setPlanet(planetId);
+    this.phase = FLIGHT_PHASES.ORBIT;
+    this.scriptedControl = true;
+    this.yardControl = false;
+    this.arrivalOrbit = false;
+    this.pendingTransfer = null;
+    this.vehicle.setMated(false);
+    this.vehicle.starshipGroup.visible = true;
+    this.vehicle.boosterGroup.visible = false;
+    this.boosterState = BOOSTER_STATES.LEFT_BEHIND;
+    this.position.set(this.padCoords.x, this.padElevation + profile.entryAltitude, this.padCoords.y);
+    this.velocity.set(0, 0, 0);
+    this.speed = 0;
+    this.altitude = profile.entryAltitude;
+    this.throttle = 0;
+    this.vehicle.setStarshipThrottle(0, true);
     return profile;
   }
 
@@ -692,6 +734,7 @@ export class StarshipMissionPhysics {
   }
 
   triggerDeorbit() {
+    if (!this.planetProfile.landable) return;
     if (!this.vehicle.isMated && this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.LANDED) {
       if (this.arrivalOrbit) {
         // The local scene compresses the orbital coast to the next entry pass.
@@ -726,8 +769,13 @@ export class StarshipMissionPhysics {
     // Orbit coasting is stable at high compression, so 100×/1000× warp can be
     // integrated in larger steps. Atmospheric phases remain at 20 Hz.
     if (dt > 0.05) {
-      dt = this.phase === FLIGHT_PHASES.ORBIT ? Math.min(dt, 1.5) : 0.05;
+      const deepInArrivalAir = this.phase === FLIGHT_PHASES.ORBIT
+        && !this.planetProfile.landable
+        && this.altitude < this.planetProfile.entryAltitude * 0.35;
+      dt = this.phase === FLIGHT_PHASES.ORBIT && !deepInArrivalAir ? Math.min(dt, 1.5) : 0.05;
     }
+    if (this.planetId === 'miller' && !this.scriptedControl && !this.yardControl) this.localSurfaceTime += dt;
+    if (this.phase === FLIGHT_PHASES.CRASHED) { this.updateYardVisuals(dt); return; }
 
     // Automated Starbase recovery/production owns both vehicle transforms while
     // a catch is being unloaded, inspected, rebuilt and re-stacked. Flight
@@ -752,7 +800,8 @@ export class StarshipMissionPhysics {
     const localTerrainY = this.planetId === 'earth'
       ? this.padGroundY + earthSurfaceHeight(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y)
       : this.planetId === 'moon' ? getMoonHeight(this.position.x, this.position.z)
-        : getMarsHeight(this.position.x, this.position.z);
+        : this.planetId === 'miller' ? getMillerHeight(this.position.x, this.position.z, this.localSurfaceTime)
+          : getMarsHeight(this.position.x, this.position.z);
     const supportFloorY = (this.vehicle.isMated && Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y) < 30.0)
       ? this.padElevation
       : (this.shipCaughtByTower ? this.shipCatchBaseY : localTerrainY);
@@ -1013,21 +1062,33 @@ export class StarshipMissionPhysics {
       }
       this.angleOfAttack = angleOfAttack;
 
-      // C. GRAVITATIONAL & SPHERICAL ORBITAL CENTRIFUGAL ACCELERATION (v_horiz^2 / r)
-      // At Mars orbital velocity (~3,400 m/s horizontal), centrifugal lift v_horiz^2 / r balances localGravity!
-      const centrifugalUp = (this.horizontalSpeed * this.horizontalSpeed) / rFromCenter;
-      const effectiveGravityVec = this._gravityVec.set(0, centrifugalUp - localGravity, 0);
+      // C. CENTRAL GRAVITY IN THE LOCAL RADIAL/TANGENT FRAME. The horizontal
+      // curvature terms conserve angular momentum during climbs and descents.
+      const effectiveGravityVec = localCentralAcceleration(
+        this.planetRadius, this.marsGravity, this.altitude, this.velocity, this._gravityVec);
 
-      // In stable orbit (FLIGHT_PHASES.ORBIT): centrifugal force balances local gravity exactly (zero altitude decay)
-      if (this.autoMission && this.phase === FLIGHT_PHASES.ORBIT) {
-        effectiveGravityVec.set(0, 0, 0);
-        this.velocity.y *= Math.pow(0.01, dt);
-        const orbitalCircSpeed = Math.sqrt(localGravity * rFromCenter);
-        if (this.horizontalSpeed < orbitalCircSpeed * 0.95 || this.horizontalSpeed > orbitalCircSpeed * 1.05) {
-          const horizDirX = this.horizontalSpeed > 0.001 ? this.velocity.x / this.horizontalSpeed : 1.0;
-          const horizDirZ = this.horizontalSpeed > 0.001 ? this.velocity.z / this.horizontalSpeed : 0.0;
-          this.velocity.x = horizDirX * orbitalCircSpeed;
-          this.velocity.z = horizDirZ * orbitalCircSpeed;
+      // The assisted orbit controller makes a real, bounded correction with
+      // ship propellant. It never snaps the velocity or cancels gravity.
+      if (this.autoMission && this.phase === FLIGHT_PHASES.ORBIT &&
+          !this.vehicle.isMated && this.starshipFuel > 0.001) {
+        const tangentSpeed = Math.max(0.001, this.horizontalSpeed);
+        const circularSpeed = Math.sqrt(this.marsGravity * this.planetRadius ** 2 / rFromCenter);
+        const tangentAccel = THREE.MathUtils.clamp((circularSpeed - tangentSpeed) / 45, -2, 2);
+        const radialAccel = THREE.MathUtils.clamp(-this.velocity.y / 45, -2, 2);
+        const requestedAccel = Math.hypot(tangentAccel, radialAccel);
+        if (requestedAccel > 0.025) {
+          const availableAccel = this.getShipAvailAccel(3);
+          const throttle = Math.min(1, requestedAccel / availableAccel);
+          const thrust = this.burnPropellant(false, 3, throttle, dt);
+          const actualAccel = thrust / Math.max(1, this.getShipMass());
+          const scale = actualAccel / requestedAccel;
+          thrustAccel.x += tangentAccel * this.velocity.x / tangentSpeed * scale;
+          thrustAccel.y += radialAccel * scale;
+          thrustAccel.z += tangentAccel * this.velocity.z / tangentSpeed * scale;
+          this.throttle = throttle;
+          this.shipEngineCount = 3;
+          this.shipRaptorMode = 'LANDING_3';
+          this.vehicle.setStarshipThrottle(throttle, true);
         }
       }
 
@@ -1038,7 +1099,7 @@ export class StarshipMissionPhysics {
       // Strict Symplectic Euler Integration: v(t+dt) = v(t) + a*dt, x(t+dt) = x(t) + v(t+dt)*dt
       this.velocity.addScaledVector(this.acceleration, dt);
       this.position.addScaledVector(this.velocity, dt);
-      const solidHit = this.obstacles.resolve(this.position, 4.5,
+      const solidHit = this.planetId === 'miller' ? null : this.obstacles.resolve(this.position, 4.5,
         this.position.y-this.padGroundY, this.vehicle.isMated ? 120 : 50);
       if (solidHit) {
         const inward = this.velocity.x*solidHit.nx+this.velocity.z*solidHit.nz;
@@ -1049,19 +1110,48 @@ export class StarshipMissionPhysics {
       let updatedGroundY = this.planetId === 'earth'
         ? this.padGroundY + earthSurfaceHeight(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y)
         : this.planetId === 'moon' ? getMoonHeight(this.position.x, this.position.z)
-          : getMarsHeight(this.position.x, this.position.z);
-      updatedGroundY = this.obstacles.supportHeight(this.position.x, this.position.z, updatedGroundY);
+          : this.planetId === 'miller' ? getMillerHeight(this.position.x, this.position.z, this.localSurfaceTime)
+            : getMarsHeight(this.position.x, this.position.z);
+      if (this.planetId !== 'miller') updatedGroundY = this.obstacles.supportHeight(this.position.x, this.position.z, updatedGroundY);
       const minFloorY = (this.vehicle.isMated && Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y) < 30.0)
         ? this.padElevation
         : updatedGroundY;
 
+      if (!this.planetProfile.landable && this.altitude < this.planetProfile.entryAltitude * 0.2
+          && this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.COUNTDOWN
+          && this.phase !== FLIGHT_PHASES.CRASHED) {
+        this.phase = FLIGHT_PHASES.CRASHED;
+        this.opsMessage = this.planetProfile.surfaceType === 'gas'
+          ? 'NO SOLID SURFACE // VEHICLE LOST IN THE ATMOSPHERE'
+          : 'NO LANDING SITE // SURFACE NOT IN THIS MODEL';
+        this.velocity.set(0, 0, 0);
+        this.throttle = 0;
+        this.scriptedControl = true;
+      }
+
       if (this.position.y <= minFloorY) {
         this.position.y = minFloorY;
+        const oceanImpact = this.planetId === 'miller' &&
+          Math.hypot(this.position.x - this.padCoords.x, this.position.z - this.padCoords.y) > 350 &&
+          this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.COUNTDOWN;
+        const noSurface = !this.planetProfile.landable
+          && this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.COUNTDOWN;
+        if (oceanImpact || noSurface) {
+          this.phase = FLIGHT_PHASES.CRASHED;
+          this.opsMessage = oceanImpact
+            ? 'OCEAN IMPACT // STARSHIP LOST · RESET MISSION'
+            : this.planetProfile.surfaceType === 'gas'
+              ? 'NO SOLID SURFACE // VEHICLE LOST IN THE ATMOSPHERE'
+              : 'NO LANDING SITE // SURFACE NOT IN THIS MODEL';
+          this.velocity.set(0, 0, 0);
+          this.throttle = 0;
+          this.scriptedControl = !oceanImpact;
+        }
         if (this.velocity.y < 0) {
           this.velocity.set(0, 0, 0);
           this.acceleration.set(0, 0, 0);
           this.properAcceleration.set(0, localGravity, 0);
-          if (this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.COUNTDOWN) {
+          if (this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.COUNTDOWN && this.phase !== FLIGHT_PHASES.CRASHED) {
             this.phase = FLIGHT_PHASES.LANDED;
             this.throttle = 0.0;
             this.landingLegsDeployed = true;
@@ -1075,7 +1165,7 @@ export class StarshipMissionPhysics {
       const towerDistZ = this.position.z - (this.padCoords.y + L.launchTower.z);
       const towerDist = Math.hypot(towerDistX, towerDistZ);
       const minTowerDist = 13.5;
-      if (towerDist < minTowerDist && this.position.y < this.padElevation + L.launchTower.height) {
+      if (this.planetId !== 'miller' && towerDist < minTowerDist && this.position.y < this.padElevation + L.launchTower.height) {
         const pen = minTowerDist - towerDist;
         this.position.x += (towerDistX / (towerDist || 1)) * pen;
         this.position.z += (towerDistZ / (towerDist || 1)) * pen;
@@ -1137,14 +1227,12 @@ export class StarshipMissionPhysics {
     this.gForce = properG.toFixed(2);
 
     // Orbital & Aerodynamic Telemetry
-    const vY = this.velocity.y;
-    const effGrav = Math.max(0.2, localGravity - (this.horizontalSpeed * this.horizontalSpeed) / rFromCenter);
-    const ballisticApex = vY > 0
-      ? this.altitude + (vY * vY) / (2.0 * effGrav)
-      : this.altitude;
-    this.apogeeKm = (Math.max(this.altitude, ballisticApex) / 1000.0).toFixed(1);
-    this.periapsisKm = (this.horizontalSpeed >= 3250.0)
-      ? Math.max(48.0, (this.altitude / 1000.0) - 4.0).toFixed(1)
+    const elements = localOrbitElements(this.planetRadius, this.marsGravity, this.altitude, this.velocity);
+    this.apogeeKm = Number.isFinite(elements.apoapsis)
+      ? (Math.max(this.altitude, elements.apoapsis) / 1000).toFixed(1)
+      : 'ESCAPE';
+    this.periapsisKm = elements.periapsis > 0
+      ? (elements.periapsis / 1000).toFixed(1)
       : 'SUBORBITAL';
     this.qKPa = (this.dynamicPressure / 1000.0).toFixed(1);
     this.isMaxQ = this.dynamicPressure > 9500 && this.altitude > 5000 && this.altitude < 18000;
@@ -1396,7 +1484,7 @@ export class StarshipMissionPhysics {
         const usableDecel = Math.max(1, shipAvailAccel * 0.32 - localGravity);
         const catchOffset = Math.hypot(this.shipCatchCoords.x - this.position.x, this.shipCatchCoords.y - this.position.z);
         const lateralSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-        const aligned = catchOffset < 12 && lateralSpeed < 5;
+        const aligned = catchOffset < (this.planetId === 'miller' ? 35 : 12) && lateralSpeed < 5;
         // Brake into a hover above the arms until lateral guidance has settled.
         const hoverHeight = aligned ? 0 : 120;
         const heightToGo = heightAboveCatch - hoverHeight;
@@ -1416,13 +1504,14 @@ export class StarshipMissionPhysics {
         this._shipCatchAy = Math.max(0, neededAccelY);
         this.throttle = THREE.MathUtils.clamp(Math.hypot(this._shipCatchAy, this._shipCatchAx, this._shipCatchAz) / shipAvailAccel, 0, 1.0);
 
-        if (heightAboveCatch <= 90.0) {
+        if (this.planetId !== 'miller' && heightAboveCatch <= 90.0) {
           const preClose = THREE.MathUtils.clamp((90.0 - heightAboveCatch) / 180.0, 0.0, 0.45);
           this.vehicle.setShipChopsticks(preClose, this.shipArmY);
         }
 
         this.alignShipToCatch(dt, heightAboveCatch);
 
+        if (this.planetId === 'miller' && heightAboveCatch <= 200) this.landingLegsDeployed = true;
         if (heightAboveCatch <= 50.0 && aligned) {
           this.phase = FLIGHT_PHASES.TOUCHDOWN;
         }
@@ -1440,7 +1529,8 @@ export class StarshipMissionPhysics {
 
         const catchOffset = Math.hypot(this.shipCatchCoords.x - this.position.x, this.shipCatchCoords.y - this.position.z);
         const lateralSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-        const aligned = catchOffset < 0.6 && lateralSpeed < 0.6;
+        const aligned = catchOffset < (this.planetId === 'miller' ? 35 : 0.6) &&
+          lateralSpeed < (this.planetId === 'miller' ? 1.5 : 0.6);
         const targetVy = aligned
           ? -THREE.MathUtils.clamp(0.35 + hAbovePins * 0.16, 0.35, 5.5)
           : THREE.MathUtils.clamp((8 - hAbovePins) * 1.2, -5.5, 5.5);
@@ -1457,17 +1547,19 @@ export class StarshipMissionPhysics {
         this.alignShipToCatch(dt, hAbovePins);
 
         const clampProgress = THREE.MathUtils.clamp(1.0 - (hAbovePins / 28.0), 0.45, 1.0);
-        this.vehicle.setShipChopsticks(clampProgress, this.shipArmY);
+        if (this.planetId !== 'miller') this.vehicle.setShipChopsticks(clampProgress, this.shipArmY);
 
         if (Math.abs(this.position.y - targetShipCatchY) <= 0.45 && aligned && Math.abs(this.velocity.y) < 2) {
-          this.position.set(this.shipCatchCoords.x, targetShipCatchY, this.shipCatchCoords.y);
+          if (this.planetId === 'miller') this.position.y = targetShipCatchY;
+          else this.position.set(this.shipCatchCoords.x, targetShipCatchY, this.shipCatchCoords.y);
           this.velocity.set(0, 0, 0);
           this.pitch = 0;
           this.yaw = 0;
           this.pitchVel = 0;
           this.throttle = 0;
-          this.shipCaughtByTower = true;
-          this.vehicle.setShipChopsticks(1.0, this.shipArmY);
+          this.shipCaughtByTower = this.planetId !== 'miller';
+          if (this.planetId !== 'miller') this.vehicle.setShipChopsticks(1.0, this.shipArmY);
+          else this.landingLegsDeployed = true;
           this.phase = FLIGHT_PHASES.LANDED;
           this.cargoDoorsDeployed = true;
         }

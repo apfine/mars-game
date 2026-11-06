@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FLIGHT_PHASES } from './missionPhysics.js';
+import { getPlanetProfile } from './planetProfiles.js';
 
 // SpaceX Glassmorphic Broadcast Flight HUD & Universal 360° Gimbal / Manual Controls
 export class MissionFlightHUD {
@@ -544,7 +545,7 @@ export class MissionFlightHUD {
     const preLaunch = physics.phase === FLIGHT_PHASES.ON_PAD || physics.phase === FLIGHT_PHASES.COUNTDOWN;
     const destLabel = document.getElementById('flight-dest-current');
     if (destLabel) {
-      destLabel.textContent = 'TRANSFER';
+      destLabel.textContent = inTransit ? destination.toUpperCase() : inOrbit ? `TO ${destination.toUpperCase()}` : 'MISSION';
     }
     const allDestBtns = document.querySelectorAll('[data-dest]');
     allDestBtns.forEach((btn) => {
@@ -560,7 +561,7 @@ export class MissionFlightHUD {
     }
     if (this.dom.transferBtn) {
       const targetName = destination === currentPlanet ? 'LOCAL DEORBIT' : destination.toUpperCase();
-      const required = destination === 'earth' ? 62 : 68;
+      const required = physics.transferRequiredPct ?? (destination === 'earth' ? 62 : 68);
       const needsTanker = destination !== currentPlanet && physics.starshipFuel < required - 0.25;
       if (inTransit) {
         this.dom.transferBtn.textContent = 'IN TRANSIT';
@@ -577,12 +578,12 @@ export class MissionFlightHUD {
       this.dom.transferBtn.classList.toggle('needs-tanker', needsTanker);
     }
     if (this.dom.deorbitBtn) {
-      this.dom.deorbitBtn.style.display = inOrbit ? 'inline-flex' : 'none';
-      this.dom.deorbitBtn.disabled = !inOrbit;
+      this.dom.deorbitBtn.style.display = inOrbit && getPlanetProfile(currentPlanet).landable ? 'inline-flex' : 'none';
+      this.dom.deorbitBtn.disabled = !inOrbit || !getPlanetProfile(currentPlanet).landable;
       this.dom.deorbitBtn.classList.toggle('available', inOrbit);
     }
     if (this.dom.roadsterBtn) {
-      this.dom.roadsterBtn.style.display = (inOrbit || preLaunch) ? 'inline-flex' : 'none';
+      this.dom.roadsterBtn.style.display = currentPlanet !== 'miller' && (inOrbit || preLaunch) ? 'inline-flex' : 'none';
     }
     if (this.dom.opsStatus) {
       const transferText = inTransit
@@ -655,6 +656,13 @@ export class MissionFlightHUD {
         LEFT_BEHIND: 'ON DEPARTURE WORLD'
       };
       this.dom.boosterTag.textContent = bTagMap[physics.boosterState] || physics.boosterState;
+    }
+    const boosterPresent = Boolean(physics.vehicle?.isMated ||
+      ['BOOSTBACK', 'DESCENT', 'APPROACH'].includes(physics.boosterState));
+    if (this.dom.boosterBox) this.dom.boosterBox.style.display = boosterPresent ? '' : 'none';
+    for (const cameraName of ['BOOSTER_CAM', 'TOWER_CAM', 'GROUND_CAM']) {
+      const button = document.querySelector(`[data-cam="${cameraName}"]`);
+      if (button) button.style.display = boosterPresent ? '' : 'none';
     }
 
     // 4. Starship Telemetry (Strict Physics Velocity M/S, Altitude KM & Proper IMU G-Force)
@@ -742,6 +750,19 @@ export class MissionFlightHUD {
 
     // 8. SpaceX Timeline Milestones
     if (this.dom.timeline) {
+      const transferSteps = ['ALIGN', 'INJECTION', 'COAST', 'ENCOUNTER'];
+      const tankerSteps = ['RENDEZVOUS', 'SOFT DOCK', 'HARD DOCK', 'FUEL TRANSFER'];
+      const waypointSteps = ['ENCOUNTER', 'FLYBY', 'ROUTE', 'DEPART'];
+      const millerSteps = ['ENTRY', 'FLIP', 'LEGS', 'TOUCHDOWN'];
+      const launchSteps = ['LIFTOFF', 'MAX-Q', 'HOT STAGE', 'BOOSTBACK', 'SECO', 'ENTRY', 'LANDING'];
+      const showTransfer = physics.phase === FLIGHT_PHASES.INTERPLANETARY;
+      const showTanker = Boolean(physics.tankerActive);
+      const showWaypoint = physics.phase === FLIGHT_PHASES.ORBIT && !getPlanetProfile(physics.planetId).landable;
+      const showMillerLanding = physics.planetId === 'miller' &&
+        ['HYPERSONIC_ENTRY', 'BELLYFLOP', 'LANDING_FLIP', 'TOUCHDOWN', 'LANDED'].includes(physics.phase);
+      const labels = showTransfer ? transferSteps : showTanker ? tankerSteps : showWaypoint ? waypointSteps : showMillerLanding ? millerSteps : launchSteps;
+      const transferIndex = Math.max(0, transferSteps.indexOf(physics.transferStage || 'ALIGN'));
+      const tankerIndex = Math.max(0, tankerSteps.indexOf(this.tankerPhase || 'RENDEZVOUS'));
       const phaseOrder = {
         [FLIGHT_PHASES.ON_PAD]: 0,
         [FLIGHT_PHASES.COUNTDOWN]: 0,
@@ -757,9 +778,14 @@ export class MissionFlightHUD {
         [FLIGHT_PHASES.TOUCHDOWN]: 7,
         [FLIGHT_PHASES.LANDED]: 8
       };
-      const currentIdx = phaseOrder[physics.phase] ?? 0;
+      const currentIdx = showTransfer ? transferIndex + 1 : showTanker ? tankerIndex + 1
+        : showWaypoint ? 2 : showMillerLanding ? ({ HYPERSONIC_ENTRY: 1, BELLYFLOP: 1,
+          LANDING_FLIP: 2, TOUCHDOWN: 3, LANDED: 5 }[physics.phase] ?? 0) : phaseOrder[physics.phase] ?? 0;
       const nodes = this.dom.timeline.querySelectorAll('.spx-tl-step');
       nodes.forEach((node, idx) => {
+        node.style.display = idx < labels.length ? '' : 'none';
+        const label = node.querySelector('.spx-tl-txt');
+        if (label && labels[idx]) label.textContent = labels[idx];
         const stepNum = idx + 1;
         node.classList.toggle('done', currentIdx > stepNum);
         node.classList.toggle('active', currentIdx === stepNum);
@@ -769,7 +795,7 @@ export class MissionFlightHUD {
     // 9. Orbital Score Card — a brief achievement banner, never a permanent
     // wall in the middle of the orbit view.
     if (this.dom.scoreCard) {
-      if (physics.phase === FLIGHT_PHASES.ORBIT && !physics.tankerActive && !physics.transferStatus) {
+      if (physics.phase === FLIGHT_PHASES.ORBIT && getPlanetProfile(physics.planetId).landable && !physics.tankerActive && !physics.transferStatus) {
         if (!this._orbitScoreSince) this._orbitScoreSince = Date.now();
         const visibleFor = Date.now() - this._orbitScoreSince;
         this.dom.scoreCard.style.display = visibleFor < 6500 ? 'block' : 'none';
@@ -804,17 +830,23 @@ export class MissionFlightHUD {
           ? 'STAGE 2 // SUBORBITAL ASCENT'
           : 'STAGE 2 // ORBITAL INSERTION',
         [FLIGHT_PHASES.ORBIT]: `SECO // LOW ${physics.planetProfile?.name || 'MARS'} ORBIT COAST`,
-        [FLIGHT_PHASES.INTERPLANETARY]: `INTERPLANETARY TRANSFER // CRUISE TO ${(physics.destination || 'earth').toUpperCase()}`,
+        [FLIGHT_PHASES.INTERPLANETARY]: `${physics.transferStage || 'TRANSIT'} // ${(physics.destination || 'earth').toUpperCase()}`,
         [FLIGHT_PHASES.DEORBIT]: 'DEORBIT BURN // RETROGRADE FIRING',
         [FLIGHT_PHASES.HYPERSONIC_ENTRY]: 'ATMOSPHERIC ENTRY // PLASMA INTERFACE',
         [FLIGHT_PHASES.BELLYFLOP]: 'SUBSONIC SKYDIVE // FLAP TRIM',
         [FLIGHT_PHASES.LANDING_FLIP]: 'LANDING BURN // FLIP MANEUVER',
-        [FLIGHT_PHASES.TOUCHDOWN]: 'MECHAZILLA APPROACH // TOWER CATCH',
+        [FLIGHT_PHASES.TOUCHDOWN]: physics.planetId === 'miller' ? 'MILLER RAFT // LANDING LEGS' : 'MECHAZILLA APPROACH // TOWER CATCH',
+        [FLIGHT_PHASES.CRASHED]: 'OCEAN IMPACT // MISSION LOST',
         [FLIGHT_PHASES.LANDED]: physics.shipCaughtByTower
           ? 'STARSHIP CAUGHT // MECHAZILLA TOWER'
-          : 'TOUCHDOWN CONFIRMED // MARS SURFACE'
+          : `TOUCHDOWN CONFIRMED // ${(physics.planetProfile?.name || 'MARS').toUpperCase()}`
       };
-      this.dom.phaseBadge.textContent = titles[physics.phase] || physics.phase;
+      const profile = getPlanetProfile(physics.planetId);
+      const orbitLabel = physics.phase !== FLIGHT_PHASES.ORBIT ? null
+        : physics.planetId === 'gargantua' ? 'GARGANTUA WAYPOINT // KERR FIELD NOT INTEGRATED'
+          : !profile.landable ? `${(physics.planetProfile?.name || physics.planetId).toUpperCase()} ORBIT // NO SURFACE LANDING`
+            : null;
+      this.dom.phaseBadge.textContent = orbitLabel || titles[physics.phase] || physics.phase;
     }
 
     if (this.dom.stageBtn) {
@@ -824,7 +856,7 @@ export class MissionFlightHUD {
         this.dom.stageBtn.className = 'flight-stage-btn launch-ready';
       } else if (physics.phase === FLIGHT_PHASES.LANDED) {
         this.dom.stageBtn.style.display = 'inline-flex';
-        this.dom.stageBtn.textContent = 'EVA / ROVER';
+        this.dom.stageBtn.textContent = physics.planetId === 'miller' ? 'EVA // RAFT' : 'EVA / ROVER';
         this.dom.stageBtn.className = 'flight-stage-btn landed-ready';
       } else {
         this.dom.stageBtn.style.display = 'none';
@@ -838,7 +870,12 @@ export class MissionFlightHUD {
       } else if (physics.phase === FLIGHT_PHASES.INTERPLANETARY) {
         promptHtml = `<span class="glow-text">${physics.transferStatus || `INTERPLANETARY CRUISE // ${(physics.destination || 'earth').toUpperCase()} ARRIVAL · ENTRY GUIDANCE ARMED`}</span>`;
       } else if (physics.phase === FLIGHT_PHASES.ORBIT) {
-        promptHtml = `<span class="glow-text">ORBIT OPERATIONS // SELECT DESTINATION · TRANSFER · DEORBIT</span>`;
+        const orbitProfile = getPlanetProfile(physics.planetId);
+        promptHtml = physics.planetId === 'gargantua'
+          ? `<span class="glow-text">GARGANTUA WAYPOINT // SELECT MILLER OR SATURN</span>`
+          : orbitProfile.landable
+            ? `<span class="glow-text">ORBIT OPERATIONS // SELECT DESTINATION · TRANSFER · DEORBIT</span>`
+            : `<span class="glow-text">ORBIT OPERATIONS // GRAVITY AND DRAG LIVE · SELECT DESTINATION · TRANSFER</span>`;
       } else if (!physics.autoMission) {
         promptHtml = `<span class="glow-text">MANUAL FLIGHT ACTIVE // W/S: THROTTLE · ARROWS/AD: PITCH & YAW · Q/E: ROLL · X: STAGE · G: LEGS · B: CARGO</span>`;
       } else if (physics.phase === FLIGHT_PHASES.ON_PAD) {

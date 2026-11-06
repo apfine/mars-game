@@ -4,6 +4,32 @@ import { getPlanetProfile } from '../flight/planetProfiles.js';
 
 // Bundled NASA/JPL maps are shared by the local globe and transfer scene.
 let _cachedMarsTexture = null;
+const otherTextures = new Map();
+
+function createOtherPlanetTexture(id) {
+  if (otherTextures.has(id)) return otherTextures.get(id);
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const bands = {
+    mercury: ['#716b62','#8a8176','#5c5955'], venus: ['#e1c69a','#f1d9aa','#c9a97f'],
+    jupiter: ['#b77e5c','#e9d3b2','#9f6c51','#e1b690'], saturn: ['#c9b78e','#e9d8ae','#aa9777'],
+    uranus: ['#9fcbd1','#b6d9d7','#81b6be'], neptune: ['#31569f','#4873b9','#244684'],
+    miller: ['#254751','#365f67','#132e3d'], gargantua: ['#05070b']
+  }[id] || ['#777777'];
+  for (let y = 0; y < 256; y += 2) {
+    const wobble = 3 * Math.sin(y * .11) + 2 * Math.sin(y * .03);
+    ctx.fillStyle = bands[Math.abs(Math.floor((y + wobble) / (id === 'jupiter' ? 15 : 26))) % bands.length];
+    ctx.fillRect(0, y, 512, 2);
+  }
+  if (id === 'jupiter') {
+    ctx.fillStyle = '#a75f4c'; ctx.beginPath(); ctx.ellipse(363, 155, 42, 16, -.1, 0, Math.PI * 2); ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  otherTextures.set(id, texture);
+  return texture;
+}
 
 export function createProceduralEarthTexture() {
   return typeof document === 'undefined' ? null : getEarthMaps().map;
@@ -62,9 +88,11 @@ export class PostLaunchSpace {
     }
     if (this.planetMat) {
       const u = this.planetMat.uniforms;
-      u.uMap.value = earth ? createProceduralEarthTexture() : this.planetId === 'moon' ? getMoonMap() : createProceduralMarsTexture();
+      u.uMap.value = earth ? createProceduralEarthTexture() : this.planetId === 'moon' ? getMoonMap()
+        : this.planetId === 'mars' ? createProceduralMarsTexture() : createOtherPlanetTexture(this.planetId);
       u.uEarth.value = earth ? 1 : 0;
       u.uMoon.value = this.planetId === 'moon' ? 1 : 0;
+      u.uOther.value = !['earth','mars','moon'].includes(this.planetId) ? 1 : 0;
       u.uAtmosphereColor.value.setHex(earth ? 0x5b9fe8 : 0xc8825c);
       u.uAirglowBlue.value.setHex(earth ? 0x9bd6ff : 0x5ca8e6);
     }
@@ -74,6 +102,14 @@ export class PostLaunchSpace {
     }
     if (this.phobosMesh) this.phobosMesh.visible = this.planetId === 'mars';
     if (this.deimosMesh) this.deimosMesh.visible = this.planetId === 'mars';
+    if (this.ringMesh) { this.group.remove(this.ringMesh); this.ringMesh.geometry.dispose(); this.ringMesh.material.dispose(); this.ringMesh = null; }
+    if (this.planetId === 'saturn' || this.planetId === 'uranus') {
+      this.ringMesh = new THREE.Mesh(new THREE.RingGeometry(radius * 1.3, radius * (this.planetId === 'saturn' ? 2.3 : 1.8), 128),
+        new THREE.MeshBasicMaterial({ color: this.planetId === 'saturn' ? 0xd0ba8e : 0xabc7c5, transparent: true,
+          opacity: .65, side: THREE.DoubleSide, depthWrite: false }));
+      this.ringMesh.rotation.x = -0.35;
+      this.group.add(this.ringMesh);
+    }
   }
 
   ensureInitialized() {
@@ -104,6 +140,7 @@ export class PostLaunchSpace {
         uAirglowBlue: { value: new THREE.Color(0x5ca8e6) },
         uEarth: { value: 0.0 },
         uMoon: { value: 0 },
+        uOther: { value: 0 },
         uTime: { value: 0.0 }
       },
       vertexShader: `
@@ -131,6 +168,7 @@ export class PostLaunchSpace {
         uniform vec3 uAirglowBlue;
         uniform float uEarth;
         uniform float uMoon;
+        uniform float uOther;
         uniform float uTime;
 
         varying vec2 vUv;
@@ -201,7 +239,7 @@ export class PostLaunchSpace {
           vec3 bitangent = normalize(cross(S, tangent));
 
           float h0 = 0.5, hx = 0.5, hy = 0.5;
-          if (uEarth < 0.5 && uMoon < 0.5) {
+          if (uEarth < 0.5 && uMoon < 0.5 && uOther < 0.5) {
             h0 = sampleRelief(S);
             hx = sampleRelief(normalize(S + tangent * eps));
             hy = sampleRelief(normalize(S + bitangent * eps));
@@ -214,14 +252,14 @@ export class PostLaunchSpace {
           // Modulate with geological detail. Mars has stronger canyon/regolith
           // relief; Earth keeps its albedo crisp while retaining cloud relief.
           float microTex = noise3D(S * 210.0);
-          baseAlbedo *= mix(0.78 + 0.32 * h0, 0.93 + 0.12 * h0, earth);
-          baseAlbedo *= mix(0.90 + 0.18 * microTex, 0.96 + 0.08 * microTex, earth);
+          baseAlbedo *= mix(mix(0.78 + 0.32 * h0, 0.93 + 0.12 * h0, earth), 1.0, uOther);
+          baseAlbedo *= mix(mix(0.90 + 0.18 * microTex, 0.96 + 0.08 * microTex, earth), 1.0, uOther);
 
           // Thin cloud cover leaves the orbital imagery legible.
           float latMask = mix(1.0 - smoothstep(0.15, 0.75, abs(S.z)), 1.0, earth);
           float cloudNoise = fbm3D(S * mix(14.0, 10.0, earth) + vec3(uTime * mix(0.002, 0.006, earth), 0.0, uTime * 0.001));
           float cloudFactor = smoothstep(mix(0.68, 0.61, earth), mix(0.86, 0.82, earth), cloudNoise) * latMask * mix(0.08, 0.15, earth);
-          cloudFactor *= 1.0-uMoon;
+          cloudFactor *= (1.0-uMoon)*(1.0-uOther);
           baseAlbedo = mix(baseAlbedo, mix(vec3(0.82, 0.68, 0.58), vec3(0.95, 0.98, 1.0), earth), cloudFactor);
 
           // Day/Night Solar Terminator with calibrated dusty regolith reflectance (never bleaches white!)
@@ -486,6 +524,7 @@ export class PostLaunchSpace {
 
     this.planetMesh.position.set(shipPos.x, globeCenterY, shipPos.z);
     this.airglowMesh.position.copy(this.planetMesh.position);
+    if (this.ringMesh) this.ringMesh.position.copy(this.planetMesh.position);
 
     // Roll the planet surface along its equator (Z-axis polar spin) as the spacecraft travels downrange (+X) and orbits
     this.orbitRotation += dt * speed / this.planetRadius;

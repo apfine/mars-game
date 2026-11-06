@@ -31,7 +31,7 @@ await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, devi
 await call('Page.navigate', { url: process.env.TEST_URL || 'http://localhost:3000' });
 for (let i = 0; i < 45; i++) {
   await delay(1000);
-  if (await evaluate(`!!document.querySelector('canvas') && !document.getElementById('mars-loading-screen')`)) break;
+  if (await evaluate(`!!document.querySelector('canvas')?.game && !document.getElementById('mars-loading-screen')`)) break;
 }
 // Exercise the real launch event and render the flight scene.
 assert.equal(await evaluate(`Array.from(document.querySelectorAll('.compact-drive-pad button')).filter(b=>b.getBoundingClientRect().width>0).length`),4);

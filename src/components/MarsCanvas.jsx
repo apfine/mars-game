@@ -401,12 +401,22 @@ export default function MarsCanvas() {
                 <button className="dropdown-item" data-dest="earth">🌍 EARTH STARBASE</button>
                 <button className="dropdown-item" data-dest="mars">🔴 MARS STARBASE</button>
                 <button className="dropdown-item" data-dest="moon">🌕 MOON STARBASE</button>
+                <div className="dropdown-section-header">SOLAR SYSTEM ORBITS</div>
+                <button className="dropdown-item" data-dest="mercury">MERCURY ORBIT</button>
+                <button className="dropdown-item" data-dest="venus">VENUS ORBIT</button>
+                <button className="dropdown-item" data-dest="jupiter">JUPITER ORBIT</button>
+                <button className="dropdown-item" data-dest="saturn">SATURN ORBIT / WORMHOLE</button>
+                <button className="dropdown-item" data-dest="uranus">URANUS ORBIT</button>
+                <button className="dropdown-item" data-dest="neptune">NEPTUNE ORBIT</button>
+                <div className="dropdown-section-header">GARGANTUA SYSTEM</div>
+                <button className="dropdown-item" data-dest="gargantua">GARGANTUA WAYPOINT</button>
+                <button className="dropdown-item" data-dest="miller">MILLER'S PLANET</button>
               </div>
             </div>
             <div id="flight-dest-switch" style={{ display: 'none' }}></div>
             <div id="flight-traj-switch" style={{ display: 'none' }}></div>
 
-            <button id="flight-trajectory-btn" className="hud-pill-btn flight-trajectory-btn" aria-pressed="false" title="Show the path of the vehicle in the current camera">TRAJECTORY</button>
+            <button id="flight-trajectory-btn" className="hud-pill-btn flight-trajectory-btn" aria-pressed="false" title="Ballistic preview from current gravity, air drag, attitude and throttle">TRAJECTORY</button>
             <div className="spx-dropdown" id="flight-speed-dropdown">
               <button id="flight-speed-btn" className="hud-pill-btn spx-dropdown-trigger flight-speed-btn" aria-label="Simulation time scale" aria-expanded="false">1X <span className="dropdown-arrow">▾</span></button>
               <div className="spx-dropdown-menu" id="flight-speed-menu">
@@ -603,6 +613,7 @@ export default function MarsCanvas() {
             </div>
 
             <div id="spx-mission-clock" className="spx-mission-clock">T- 00:00:00</div>
+            <div id="relativity-clock" className="spx-mission-clock" style={{ display: 'none' }} aria-live="off"></div>
 
             <div className="spx-timeline" id="spx-timeline">
               <div className="spx-tl-step" data-step="LIFTOFF">
