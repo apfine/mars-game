@@ -11,6 +11,20 @@ function createOtherPlanetTexture(id) {
   const canvas = document.createElement('canvas');
   canvas.width = 512; canvas.height = 256;
   const ctx = canvas.getContext('2d');
+  if (id === 'saturn') {
+    for (let y = 0; y < 256; y++) {
+      const latitude = (y - 128) / 128;
+      const band = 0.5 * Math.sin(y * 0.105) + 0.28 * Math.sin(y * 0.029 + 1.3)
+        + 0.12 * Math.sin(y * 0.29);
+      const polar = Math.abs(latitude) * 12;
+      ctx.fillStyle = `rgb(${Math.round(213 + band * 11 - polar)},${Math.round(194 + band * 13 - polar * 0.9)},${Math.round(158 + band * 12 - polar * 0.8)})`;
+      ctx.fillRect(0, y, 512, 1);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    otherTextures.set(id, texture);
+    return texture;
+  }
   const bands = {
     mercury: ['#716b62','#8a8176','#5c5955'], venus: ['#e1c69a','#f1d9aa','#c9a97f'],
     jupiter: ['#b77e5c','#e9d3b2','#9f6c51','#e1b690'], saturn: ['#c9b78e','#e9d8ae','#aa9777'],
@@ -81,7 +95,7 @@ export class PostLaunchSpace {
     if (this.planetRadius !== radius) {
       this.planetRadius = radius;
       this.planetMesh.geometry.dispose();
-      this.planetMesh.geometry = new THREE.SphereGeometry(radius, 192, 128);
+      this.planetMesh.geometry = new THREE.SphereGeometry(radius, 256, 192);
       if (!earth) this.planetMesh.geometry.rotateX(Math.PI / 2);
       this.airglowMesh.geometry.dispose();
       this.airglowMesh.geometry = new THREE.SphereGeometry(radius * 1.014, 64, 48);
@@ -104,7 +118,7 @@ export class PostLaunchSpace {
     if (this.deimosMesh) this.deimosMesh.visible = this.planetId === 'mars';
     if (this.ringMesh) { this.group.remove(this.ringMesh); this.ringMesh.geometry.dispose(); this.ringMesh.material.dispose(); this.ringMesh = null; }
     if (this.planetId === 'saturn' || this.planetId === 'uranus') {
-      this.ringMesh = new THREE.Mesh(new THREE.RingGeometry(radius * 1.3, radius * (this.planetId === 'saturn' ? 2.3 : 1.8), 128),
+      this.ringMesh = new THREE.Mesh(new THREE.RingGeometry(radius * 1.3, radius * (this.planetId === 'saturn' ? 2.3 : 1.8), 512),
         new THREE.MeshBasicMaterial({ color: this.planetId === 'saturn' ? 0xd0ba8e : 0xabc7c5, transparent: true,
           opacity: .65, side: THREE.DoubleSide, depthWrite: false }));
       this.ringMesh.rotation.x = -0.35;

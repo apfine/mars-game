@@ -54,6 +54,8 @@ const result = await evaluate(`(() => {
   const wormhole = game.journey.routeKind;
   for (let step = 0; step < 8 && physics.planetId !== 'gargantua'; step++) game.journey.update(8, 1, 500000);
   const atGargantua = physics.planetId;
+  const saturnHiddenAtGargantua = !game.journey.celestialGroup.visible &&
+    !game.atmosphere.postLaunchSpace.group.visible;
   game.selectDestination('miller');
   game.beginTransfer();
   game.ensureTransferStarted();
@@ -71,6 +73,9 @@ const result = await evaluate(`(() => {
   game.selectDestination('venus');
   game.beginTransfer();
   game.ensureTransferStarted();
+  const departureError = game.journey.pathStart.distanceTo(physics.position);
+  game.journey.updateLocalSky(game.camera);
+  const venusMarkerVisible = game.journey.navigationMarkers.get('venus').visible;
   const initialFuel = physics.starshipFuel;
   game.journey.update(3, 1, 120000);
   let burnSteps = 0;
@@ -78,21 +83,30 @@ const result = await evaluate(`(() => {
   const burnResult = { stage: game.journey.transferStage, fuelUsed: initialFuel - physics.starshipFuel,
     achieved: game.journey.burnDeltaV, required: game.journey.orbit.injectionDeltaV };
   game.journey.update(1, 1, 120000);
-  return { wormhole, atGargantua, localRoute, atMiller,
+  const cruiseProgress = game.journey.progress;
+  game.journey.progress = 0.9995;
+  game.journey.update(0.01, 1, 120000);
+  const encounterDistanceKm = Math.round(game.journey.physics.position.distanceTo(
+    game.journey.solarBodies.get('venus').position) / 180000 * 149597870.7);
+  return { wormhole, atGargantua, saturnHiddenAtGargantua, localRoute, atMiller,
     oceanVisible,
     clock: Boolean(document.getElementById('relativity-clock')),
-    burnResult, cruiseProgress: game.journey.progress };
+    departureError, venusMarkerVisible, burnResult, cruiseProgress, encounterDistanceKm };
 })()`);
 assert.equal(result.wormhole, 'wormhole');
 assert.equal(result.atGargantua, 'gargantua');
+assert.equal(result.saturnHiddenAtGargantua, true);
 assert.equal(result.localRoute, 'gargantua-local');
 assert.equal(result.atMiller, 'miller');
 assert.equal(result.oceanVisible, true);
 assert.equal(result.clock, true);
+assert.ok(result.departureError < 1, 'inward transfer starts at the departing ship');
+assert.equal(result.venusMarkerVisible, true);
 assert.equal(result.burnResult.stage, 'COAST');
 assert.ok(result.burnResult.fuelUsed > 0);
 assert.ok(result.burnResult.achieved >= result.burnResult.required);
 assert.ok(result.cruiseProgress > 0);
+assert.ok(result.encounterDistanceKm < 100000, 'destination grows into view before encounter');
 assert.deepEqual(errors, []);
 console.log('Space route browser check passed:', result);
 ws.close();

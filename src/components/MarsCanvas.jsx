@@ -449,6 +449,8 @@ export default function MarsCanvas() {
           </div>
         </div>
 
+        <div id="flight-planet-locator" className="flight-planet-locator" aria-live="off" />
+
         {/* Interplanetary transfer, local deorbit, roadster and yard ops */}
         <div className="flight-ops-bar">
           <button id="flight-transfer-btn" className="flight-ops-btn" title="Transfer to the selected planet">

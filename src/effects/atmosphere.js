@@ -813,6 +813,7 @@ export class MarsAtmosphere {
     if (this.deimos) this.deimos.visible = isMars && !this.isFlight;
     this.planetId = planetId;
     if (this.postLaunchSpace && planetId !== 'gargantua') this.postLaunchSpace.setPlanet(planetId);
+    if (planetId === 'gargantua' && this.postLaunchSpace) this.postLaunchSpace.group.visible = false;
     // Refresh IBL so steel and paint reflect the world they are standing on.
     this.rebuildEnvironment();
   }
@@ -1408,7 +1409,10 @@ export class MarsAtmosphere {
         this.postLaunchSpace.sunDirection.copy(dynSunDir);
         this.postLaunchSpace.planetMat?.uniforms.uSunDir.value.copy(dynSunDir);
         this.postLaunchSpace.airglowMat?.uniforms.uSunDir.value.copy(dynSunDir);
-        this.postLaunchSpace.update(dt, physics?.altitude || 0, physics?.speed || 0, playerPos, Boolean(physics?.isInterplanetary));
+        // Gargantua has no local Newtonian planet globe. In particular, the
+        // previous Saturn globe must not survive the wormhole chart change.
+        this.postLaunchSpace.update(dt, physics?.altitude || 0, physics?.speed || 0, playerPos,
+          Boolean(physics?.isInterplanetary) || this.planetId === 'gargantua');
       }
       return;
     }

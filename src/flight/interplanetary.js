@@ -104,6 +104,23 @@ function makeGiantTexture(id) {
   const canvas = document.createElement('canvas');
   canvas.width = 512; canvas.height = 256;
   const ctx = canvas.getContext('2d');
+  if (id === 'saturn') {
+    for (let y = 0; y < 256; y++) {
+      const latitude = (y - 128) / 128;
+      const band = 0.5 * Math.sin(y * 0.105) + 0.28 * Math.sin(y * 0.029 + 1.3)
+        + 0.12 * Math.sin(y * 0.29);
+      const polar = Math.abs(latitude) * 12;
+      const r = Math.round(213 + band * 11 - polar);
+      const g = Math.round(194 + band * 13 - polar * 0.9);
+      const b = Math.round(158 + band * 12 - polar * 0.8);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, y, 512, 1);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+  }
   const palette = id === 'jupiter' ? ['#b98b68','#e7d0ad','#a66c51','#f0dfc1','#7f5647']
     : id === 'saturn' ? ['#d7c69f','#ece0bd','#bca77e','#e4d5a9']
       : id === 'uranus' ? ['#90c5c9','#b5dfe0','#78aeb8'] : ['#315aaf','#4d78c5','#27458f'];
@@ -119,6 +136,20 @@ function makeGiantTexture(id) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
+}
+
+function makeNavigationGlowTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const glow = ctx.createRadialGradient(64, 64, 1, 64, 64, 64);
+  glow.addColorStop(0, 'rgba(255,255,255,1)');
+  glow.addColorStop(0.08, 'rgba(255,255,255,0.96)');
+  glow.addColorStop(0.22, 'rgba(255,255,255,0.45)');
+  glow.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(canvas);
 }
 
 function makeInnerPlanetTexture(id) {
@@ -648,12 +679,12 @@ export class InterplanetaryJourney {
       const radius = sceneRadius(body.radius);
       const giant = ['jupiter','saturn','uranus','neptune'].includes(body.id);
       const inner = body.id === 'mercury' || body.id === 'venus';
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 20),
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 48),
         new THREE.MeshStandardMaterial({ color: giant || inner ? 0xffffff : body.color,
           map: giant ? makeGiantTexture(body.id) : inner ? makeInnerPlanetTexture(body.id) : null,
           roughness: 0.9, fog: false }));
       if (body.id === 'saturn' || body.id === 'uranus') {
-        const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 1.35, radius * (body.id === 'saturn' ? 2.35 : 1.9), 128),
+        const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 1.35, radius * (body.id === 'saturn' ? 2.35 : 1.9), 256),
           new THREE.MeshBasicMaterial({ color: body.id === 'saturn' ? 0xc8b58a : 0x91aeb1,
             transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false }));
         ring.rotation.x = body.id === 'saturn' ? -0.45 : -1.2;
@@ -661,6 +692,21 @@ export class InterplanetaryJourney {
       }
       this.solarBodies.set(body.id, mesh);
       this.celestialGroup.add(mesh);
+    }
+    // At astronomical distances a true planetary disk occupies less than a
+    // pixel. A faint optical point source preserves visibility without
+    // changing the planet's physical radius or transfer geometry.
+    this.navigationMarkers = new Map();
+    this._locatorPoint = new THREE.Vector3();
+    const markerTexture = makeNavigationGlowTexture();
+    for (const body of [...SOLAR_BODIES, { id: 'moon', color: 0xd4d7dd }]) {
+      const marker = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: markerTexture, color: body.color, transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: false
+      }));
+      marker.visible = false;
+      this.navigationMarkers.set(body.id, marker);
+      this.celestialGroup.add(marker);
     }
     this._buildGargantuaVisuals();
     this._solarPhases = new Map(SOLAR_BODIES.map((b, i) => [b.id, i * 0.81]));
@@ -693,10 +739,14 @@ export class InterplanetaryJourney {
           float archMask=1.0-smoothstep(0.72,0.82,abs(p.x));
           float upper=band(p.y-arch,0.052)*archMask*smoothstep(0.28,0.39,r);
           float lower=band(p.y+arch*0.91,0.043)*archMask*smoothstep(0.28,0.39,r);
-          float turbulence=0.87+0.08*sin(diskRadius*66.0-a*5.0-uTime*0.3)+0.05*sin(diskRadius*123.0+a*10.0);
+          // Advected plasma features orbit in the disk. The shadow itself
+          // stays dark; spin is visible through the moving emitting gas.
+          float orbitPhase=a*8.0+diskRadius*23.0-uTime*1.05;
+          float turbulence=0.66+0.16*sin(orbitPhase)+0.10*sin(orbitPhase*1.9+diskRadius*31.0);
+          float hotStream=pow(max(0.0,sin(orbitPhase*0.78+diskRadius*9.0)),7.0)*0.52;
           float doppler=mix(0.38,1.7,smoothstep(-0.75,0.75,p.x));
           vec3 amber=mix(vec3(0.49,0.16,0.045),vec3(1.0,0.77,0.44),clamp(1.15-diskRadius,0.0,1.0));
-          vec3 color=amber*(direct*0.94+upper*0.67+lower*0.34)*turbulence*doppler;
+          vec3 color=amber*(direct*0.94+upper*0.67+lower*0.34)*(turbulence+hotStream)*doppler;
           color+=vec3(1.0,0.75,0.54)*photon;
           float halo=band(r-0.38,0.13)*0.10+band(r-0.58,0.27)*0.025;
           color+=vec3(0.39,0.46,0.58)*halo;
@@ -1644,7 +1694,7 @@ export class InterplanetaryJourney {
     if (this.routeKind === 'kepler' && this.orbit.lunar) {
       const departure = sampleTransfer(this.orbit,0);
       this.localTransferOrigin.set(this.physics.position.x-departure.x/AU*SCENE_AU,
-        this.physics.position.y-6000,this.physics.position.z);
+        this.physics.position.y,this.physics.position.z);
       this.solarOrigin.copy(this.localTransferOrigin); this.solarOrigin.x -= SCENE_AU;
       this._solarPhases.set('earth',0);
       this._lunarStartAngle = this.planetId === 'moon' ? Math.PI : Math.PI-this.orbit.seconds*2*Math.PI/(27.32*86400);
@@ -1656,13 +1706,15 @@ export class InterplanetaryJourney {
     this.transferGroup.visible = this.showTrajectory;
     this.transferTrail.material.opacity = 0.7;
 
-    this.celestialGroup.visible = true;
+    this.celestialGroup.visible = this.routeKind === 'kepler' ||
+      (this.routeKind === 'wormhole' && this.planetId === 'saturn');
     this.wormhole.visible = this.routeKind === 'wormhole';
     if (this.wormhole.visible) {
       this.wormhole.position.copy(this.wormholeMouth);
       this.wormhole.scale.setScalar(2.5);
     }
-    this.gargantuaGroup.visible = this.routeKind === 'gargantua-local';
+    this.gargantuaGroup.visible = this.routeKind === 'gargantua-local' ||
+      (this.routeKind === 'wormhole' && this.planetId === 'gargantua');
     this.earth.position.copy(this.earthAnchor);
     this.clouds.position.copy(this.earthAnchor);
     this.earthGlow.position.copy(this.earthAnchor);
@@ -1678,6 +1730,10 @@ export class InterplanetaryJourney {
     this.marsStar.visible = true;
     this.moon.visible = true;
 
+    // setPlanet hides the observer's navigation globe. A new transfer needs
+    // every solar body back before ephemerides and markers are refreshed.
+    for (const mesh of this.solarBodies.values()) mesh.visible = true;
+
     if (this.routeKind === 'kepler') this._updateSolarBodies(0);
     this.sun.visible = this.solarLight.visible = true;
     this.sunGlow.visible = false;
@@ -1686,9 +1742,13 @@ export class InterplanetaryJourney {
   _configureSolarFrame(position) {
     if (this.planetId === 'gargantua' || this.planetId === 'miller') return;
     const from = SOLAR_BODIES.find(b => b.id === (this.planetId === 'moon' ? 'earth' : this.planetId));
-    const angle = this.planetId === 'mars' ? Math.PI : 0;
+    // sampleTransfer starts inward ellipses at negative X and outward ones at
+    // positive X. The solar frame must use that same departure apsis for
+    // *every* world, otherwise inward legs begin two orbital radii away.
+    const angle = this.orbit ? (this.orbit.inward ? Math.PI : 0)
+      : (this.planetId === 'mars' ? Math.PI : 0);
     this.solarOrigin.set(position.x - Math.cos(angle) * from.au * SCENE_AU,
-      position.y - 6000, position.z);
+      position.y, position.z);
     this.solarEpoch = 0;
     if (this.planetId === 'moon' && !this.orbit) this.solarOrigin.x += 384400000/AU*SCENE_AU;
     this._solarPhases.set(from.id, angle);
@@ -1722,11 +1782,50 @@ export class InterplanetaryJourney {
     const profile = PLANET_PROFILES[this.planetId];
     const mesh = body && this.solarBodies.get(body.id);
     if (!mesh || !profile || profile.landable || profile.surfaceType === 'black-hole') return;
-    const base = mesh.geometry.parameters.radius;
-    mesh.visible = true;
-    mesh.position.set(this.padCoords.x, this.padGroundY - body.radius, this.padCoords.y);
-    mesh.scale.setScalar(body.radius / base);
-    mesh.rotation.y = this.time * (body.id === 'jupiter' ? 0.12 : 0.06);
+    // PostLaunchSpace owns the high-detail local globe. Drawing this small
+    // navigation mesh at planetary radius creates a faceted second horizon.
+    mesh.visible = false;
+    return;
+  }
+
+  _updateNavigationMarkers(camera) {
+    for (const [id, marker] of this.navigationMarkers) {
+      const mesh = id === 'moon' ? this.moon : this.solarBodies.get(id);
+      if (!mesh?.visible || !this.celestialGroup.visible) {
+        marker.visible = false;
+        continue;
+      }
+      const distance = Math.max(1, camera.position.distanceTo(mesh.position));
+      const physicalRadius = mesh.geometry.parameters.radius * mesh.scale.x;
+      const angularDiameter = 2 * Math.atan(physicalRadius / distance);
+      const opacity = THREE.MathUtils.clamp((0.02 - angularDiameter) / 0.018, 0, 1);
+      marker.visible = opacity > 0.02;
+      marker.material.opacity = opacity;
+      marker.position.copy(mesh.position);
+      marker.scale.setScalar(distance * 0.017);
+    }
+  }
+
+  _updateTargetLocator(camera) {
+    const label = document.getElementById('flight-planet-locator');
+    if (!label) return;
+    const mesh = this.target === 'moon' ? this.moon : this.solarBodies.get(this.target);
+    if (!this.active || this.routeKind !== 'kepler' || !mesh?.visible) {
+      label.style.display = 'none';
+      return;
+    }
+    camera.updateMatrixWorld();
+    this._locatorPoint.copy(mesh.position).project(camera);
+    const p = this._locatorPoint;
+    if (p.z < -1 || p.z > 1 || Math.abs(p.x) > 0.94 || Math.abs(p.y) > 0.86) {
+      label.style.display = 'none';
+      return;
+    }
+    const distanceKm = Math.round(camera.position.distanceTo(mesh.position) / SCENE_AU * AU / 1000);
+    label.textContent = `${this.target.toUpperCase()} · ${distanceKm.toLocaleString()} KM`;
+    label.style.left = `${(p.x * 0.5 + 0.5) * window.innerWidth}px`;
+    label.style.top = `${(1 - (p.y * 0.5 + 0.5)) * window.innerHeight - 13}px`;
+    label.style.display = 'block';
   }
 
   _updateSolarBodies(seconds) {
@@ -1778,7 +1877,12 @@ export class InterplanetaryJourney {
 
   updateLocalSky(camera) {
     this.gargantuaBillboard.quaternion.copy(camera.quaternion);
-    if (this.active) return;
+    if (this.active) {
+      this._updateNavigationMarkers(camera);
+      this._updateTargetLocator(camera);
+      return;
+    }
+    this._updateTargetLocator(camera);
     if (this.planetId === 'gargantua' || this.planetId === 'miller') {
       this.gargantuaGroup.visible = true;
       this.gargantuaGroup.position.copy(camera.position).add(new THREE.Vector3(0, 9000, -37000));
@@ -1786,7 +1890,9 @@ export class InterplanetaryJourney {
       if (this.wormhole.visible) {
         this.wormhole.scale.setScalar(3);
         this.wormhole.material.uniforms.uFarSide.value = 0;
-        this.wormhole.position.copy(camera.position).add(new THREE.Vector3(-18000, 8500, -42000));
+        // The exit mouth stays opposite Gargantua in the local sky. It should
+        // not read as a second planet beside the black hole after transit.
+        this.wormhole.position.copy(camera.position).add(new THREE.Vector3(10000, 8500, 42000));
       }
       return;
     }
@@ -1821,6 +1927,7 @@ export class InterplanetaryJourney {
       this.moon.scale.setScalar(sceneRadius(1737400)*shell/distance/MOON_RADIUS_SCENE);
     }
     this._placeLocalGlobe();
+    this._updateNavigationMarkers(camera);
   }
 
   _rebuildRouteGeometry() {
@@ -1849,7 +1956,7 @@ export class InterplanetaryJourney {
     const point = sampleTransfer(this.orbit, t);
     const origin = this.orbit.lunar ? this.localTransferOrigin : this.solarOrigin;
     return out.set(origin.x + point.x / AU * SCENE_AU,
-      origin.y + 6000, origin.z + point.z / AU * SCENE_AU);
+      origin.y, origin.z + point.z / AU * SCENE_AU);
   }
 
   _sampleTangent(t, out) {
@@ -1922,8 +2029,9 @@ export class InterplanetaryJourney {
       this.wormhole.visible = leg.phase !== 'emergence' || leg.along < 1.55;
       this.wormhole.position.copy(this.wormholeMouth);
       this.wormhole.material.uniforms.uFarSide.value = towardGargantua ? 1 : 0;
-      this.celestialGroup.visible = towardGargantua ? leg.phase === 'approach' : leg.phase !== 'approach';
-      this.gargantuaGroup.visible = towardGargantua ? leg.phase !== 'approach' : leg.phase === 'approach';
+      const solarSide = towardGargantua ? this.progress < 0.54 : this.progress >= 0.54;
+      this.celestialGroup.visible = solarSide;
+      this.gargantuaGroup.visible = !solarSide;
       if (this.gargantuaGroup.visible) this.gargantuaGroup.position.copy(this.physics.position).add(new THREE.Vector3(0, 9000, -37000));
     } else if (this.routeKind === 'gargantua-local') {
       this.gargantuaGroup.visible = true;
@@ -1997,7 +2105,12 @@ export class InterplanetaryJourney {
     // Sample the Keplerian transfer ellipse at the elapsed mission time.
     const warp = Math.max(1, Math.min(timeScale, 1000));
     this._lastScaleWarp = warp;
-    const advance = Math.min(1 - this.progress, (dt * warp) / this.duration);
+    // Reduce visual time compression near a planet so its real angular size
+    // grows over several frames instead of appearing only on the last tick.
+    // Mission time still advances by the exact corresponding Kepler interval.
+    const approachCompression = this.routeKind === 'kepler' && this.progress > 0.96
+      ? Math.max(0.03, Math.pow((1 - this.progress) / 0.04, 1.3)) : 1;
+    const advance = Math.min(1 - this.progress, (dt * warp * approachCompression) / this.duration);
     this.progress += advance;
     this.elapsedAdvanceSeconds = advance * this.orbit.seconds;
     this.physics.missionTime += advance * this.orbit.seconds;

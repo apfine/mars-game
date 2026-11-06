@@ -41,6 +41,8 @@ for (const world of ['gargantua', 'saturn', 'miller']) {
     if ('${world}' === 'miller') game.missionPhysics.setPlanet('${world}');
     else game.missionPhysics.enterFlybyWaypoint('${world}');
     game.applyPlanetEnvironment('${world}');
+    game.atmosphere.postLaunchSpace.update(0, game.missionPhysics.altitude || 0, 0,
+      game.missionPhysics.position, '${world}' === 'gargantua');
     if ('${world}' === 'miller') game.camera.position.set(game.missionPhysics.padCoords.x, game.missionPhysics.padGroundY + 35, game.missionPhysics.padCoords.y + 75);
     else game.camera.position.copy(game.missionPhysics.position);
     game.camera.fov = 70; game.camera.near = 1; game.camera.far = 8000000;
@@ -55,5 +57,46 @@ for (const world of ['gargantua', 'saturn', 'miller']) {
   const image = await call('Page.captureScreenshot', { format: 'png' });
   await writeFile(`.browser-${world}-review.png`, Buffer.from(image.data, 'base64'));
   console.log(`Captured ${world}`);
+  if (world === 'gargantua') {
+    await evaluate(`(() => { const game=document.querySelector('canvas').game;
+      game.journey.update(6,1,100000);
+      game.journey.updateLocalSky(game.camera);
+      game.renderer.render(game.scene,game.camera); })()`);
+    const motionImage = await call('Page.captureScreenshot', { format: 'png' });
+    await writeFile('.browser-gargantua-motion-review.png', Buffer.from(motionImage.data, 'base64'));
+  }
 }
+await evaluate(`(() => {
+  const game = document.querySelector('canvas').game;
+  game.missionPhysics.enterPlanetOrbit('earth');
+  game.applyPlanetEnvironment('earth');
+  game.missionPhysics.phase = 'INTERPLANETARY';
+  game.journey.start('venus');
+  game.journey.transferStage = 'COAST';
+  game.journey.progress = 0.82;
+  game.journey.update(0.01, 1, 120000);
+  game.atmosphere.postLaunchSpace.update(0, 120000, 0, game.missionPhysics.position, true);
+  game.camera.position.copy(game.missionPhysics.position);
+  game.camera.position.y += 100;
+  game.camera.lookAt(game.journey.solarBodies.get('venus').position);
+  game.journey.updateLocalSky(game.camera);
+  game.flightHud.update(game.missionPhysics);
+  game.renderer.render(game.scene, game.camera);
+})()`);
+const transferImage = await call('Page.captureScreenshot', { format: 'png' });
+await writeFile('.browser-transfer-review.png', Buffer.from(transferImage.data, 'base64'));
+console.log('Captured transfer');
+await evaluate(`(() => {
+  const game = document.querySelector('canvas').game;
+  game.journey.progress = 0.9995;
+  game.journey.update(0.01, 1, 120000);
+  game.camera.position.copy(game.missionPhysics.position);
+  game.camera.position.y += 100;
+  game.camera.lookAt(game.journey.solarBodies.get('venus').position);
+  game.journey.updateLocalSky(game.camera);
+  game.renderer.render(game.scene, game.camera);
+})()`);
+const approachImage = await call('Page.captureScreenshot', { format: 'png' });
+await writeFile('.browser-approach-review.png', Buffer.from(approachImage.data, 'base64'));
+console.log('Captured approach');
 ws.close();

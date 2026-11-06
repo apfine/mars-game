@@ -916,6 +916,23 @@ html, body {
   display: block;
 }
 
+.flight-planet-locator {
+  position: absolute;
+  display: none;
+  transform: translate(-50%, -100%);
+  padding: 5px 8px;
+  border: 1px solid rgba(165, 209, 222, 0.55);
+  border-radius: 5px;
+  background: rgba(5, 13, 20, 0.76);
+  color: #d6f3fa;
+  font: 700 10px/1.25 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  text-shadow: 0 0 8px rgba(110, 209, 240, 0.65);
+  pointer-events: none;
+  z-index: 4;
+}
+
 /* Minimal SpaceX Top Broadcast Bar */
 .spx-top-bar {
   position: absolute;
