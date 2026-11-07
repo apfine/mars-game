@@ -177,7 +177,7 @@ export class InputManager {
       this.state.nitro = true;
       this.state.throttleUp = true;
     }
-    if (this.keys['ControlLeft'] || this.keys['ControlRight']) {
+    if (this.keys['ControlLeft'] || this.keys['ControlRight'] || this.keys['MetaLeft'] || this.keys['MetaRight']) {
       this.state.throttleDown = true;
     }
     if (this.keys['KeyZ']) this.state.fullThrottle = true;

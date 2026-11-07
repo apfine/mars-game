@@ -853,8 +853,8 @@ export class StarshipMissionPhysics {
       // Continuous throttle control at ANY time (even on pad or landed!)
       if (input.fullThrottle) this.throttle = 1.0;
       else if (input.throttleCut) this.throttle = 0.0;
-      else if (input.throttleUp || input.forward) this.throttle = Math.min(1.0, this.throttle + dt * 0.85);
-      else if (input.throttleDown || input.backward) this.throttle = Math.max(0.0, this.throttle - dt * 0.85);
+      else if (input.throttleUp) this.throttle = Math.min(1.0, this.throttle + dt * 0.85);
+      else if (input.throttleDown) this.throttle = Math.max(0.0, this.throttle - dt * 0.85);
 
       // Manual stage separation, landing legs, cargo bay doors at any time
       if (input.stageSeparate && this.vehicle.isMated) {

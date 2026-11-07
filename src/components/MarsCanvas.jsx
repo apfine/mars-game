@@ -118,7 +118,7 @@ export default function MarsCanvas() {
 
             <div className="loading-hint-footer">
               <div className="hint-pill"><span className="key-chip">WASD</span> Drive / Walk</div>
-              <div className="hint-pill"><span className="key-chip">E</span> Exit / Board Rover</div>
+              <div className="hint-pill"><span className="key-chip">E</span> Exit / Board Nearby Vehicle</div>
               <div className="hint-pill"><span className="key-chip">CLICK / F</span> Press Launch Button</div>
               <div className="hint-pill"><span className="key-chip">DRAG</span> 360° Gimbal</div>
             </div>
@@ -135,6 +135,7 @@ export default function MarsCanvas() {
       )}
 
       <div id="canvas-container" ref={containerRef} />
+      <div id="arrival-transition" aria-hidden="true" />
 
       {/* Permanent Live Online Players Counter Badge */}
       <div id="live-players-badge" className="spx-live-badge" title="Active engineers online in real-time">
@@ -181,8 +182,8 @@ export default function MarsCanvas() {
             <button
               id="rover-walk-btn"
               className="hud-pill-btn walk-toggle-btn"
-              aria-label="Exit or Board Rover"
-              title="Exit Rover to Walk on Foot (Key E)"
+              aria-label="Exit or board nearby vehicle"
+              title="Exit or board a nearby vehicle (Key E)"
             >
               WALK [E]
             </button>
@@ -273,7 +274,7 @@ export default function MarsCanvas() {
           {/* Center Bridge: Walk / Board / Physical Pad Launch Trigger & Starbase Distance */}
           <div className="spx-center-bridge">
             <div className="spx-action-row">
-              <button id="rover-primary-action-btn" className="flight-stage-btn" aria-label="Exit or Board Rover">
+              <button id="rover-primary-action-btn" className="flight-stage-btn" aria-label="Exit or board nearby vehicle">
                 EXIT ROVER [E]
               </button>
               <button
@@ -357,6 +358,7 @@ export default function MarsCanvas() {
             <button id="btn-walk-mobile" className="touch-pill-btn" aria-label="Walk Toggle">WALK</button>
             <button id="btn-launch-mobile" className="touch-pill-btn launch-pill" style={{ display: 'none' }} aria-label="Launch Starship">LAUNCH 🚀</button>
           </div>
+          <button id="btn-vehicle-mobile" className="touch-pill-btn mobile-vehicle-btn" aria-label="Board or leave nearby vehicle">EXIT VEHICLE</button>
         </div>
       </div>
 

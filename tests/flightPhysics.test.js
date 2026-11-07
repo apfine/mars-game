@@ -25,6 +25,21 @@ test('Earth and Mars atmosphere use their own gas properties and continuous dens
     }
   }
 });
+
+test('manual pitch keys do not change thrust; dedicated throttle input does', () => {
+  const m = mission();
+  m.autoMission = false;
+  m.throttle = 0.1;
+  m.update(1 / 60, { forward: true, pitch: 1 });
+  assert.equal(m.throttle, 0.1);
+  m.update(1 / 60, { throttleUp: true });
+  assert.ok(m.throttle > 0.1);
+  const increased = m.throttle;
+  m.update(1 / 60, { backward: true, pitch: -1 });
+  assert.equal(m.throttle, increased);
+  m.update(1 / 60, { throttleDown: true });
+  assert.ok(m.throttle < increased);
+});
 test('Earth flight contact follows the visible inland relief', () => {
   const m = mission();
   m.setPlanet('earth');

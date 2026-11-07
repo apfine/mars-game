@@ -25,6 +25,15 @@ html, body {
   z-index: 1;
 }
 
+#arrival-transition {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, #6c9bc8 0%, #0a1525 78%);
+}
+
 #hud-layer {
   position: absolute;
   top: 0;
@@ -3055,13 +3064,17 @@ html, body {
   #flight-hud .dropdown-icon, #flight-hud .dropdown-arrow { display: none; }
   #flight-hud .hud-pill-btn span:not(.dropdown-icon):not(.dropdown-arrow) { display: inline; }
   #flight-hud .spx-top-right { justify-content: space-between; }
-  #flight-hud .spx-dropdown-menu { position: fixed; top: calc(110px + env(safe-area-inset-top)); left: 10px; right: 10px; width: auto; max-width: none; }
+  #flight-hud .spx-dropdown-menu { position: fixed; top: calc(108px + env(safe-area-inset-top)); left: 10px; right: auto; width: min(238px, calc(100vw - 20px)); min-width: 0; max-width: none; max-height: min(52dvh, 390px); }
+  #flight-hud .spx-top-right .spx-dropdown-menu { left: auto; right: 10px; }
+  #flight-hud .spx-dropdown:has(.spx-dropdown-menu.open) { z-index: 300; }
   #flight-hud .spx-broadcast-bar { display: grid !important; height: auto !important; min-height: 106px; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)) !important; gap: 14px !important; }
   #flight-hud .spx-center-bridge { min-width: 0; gap: 5px; grid-column: 1; grid-row: 1; }
-  #flight-hud .spx-ship-wing { grid-column: 2; grid-row: 1; width: 100%; }
+  #flight-hud .spx-ship-wing { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
   #flight-hud .spx-telemetry-col { width: 100%; }
-  #flight-hud .spx-metrics-row { justify-content: space-between; gap: 12px; }
-  #flight-hud .spx-metric-num { font-size: clamp(19px, 6vw, 28px) !important; }
+  #flight-hud .spx-metrics-row { justify-content: space-between; gap: 4px; min-width: 0; }
+  #flight-hud .spx-metric { min-width: 0; gap: 3px; flex-direction: column; align-items: flex-start; }
+  #flight-hud .spx-metric-val-wrap { min-width: 0; white-space: nowrap; }
+  #flight-hud .spx-metric-num { font-size: clamp(14px, 4.2vw, 22px) !important; line-height: 1.1; }
   #flight-hud .spx-metric-lbl { font-size: 9px !important; }
   #flight-hud .spx-prop-stack { display: flex !important; }
   #flight-hud .spx-stage-header, #flight-hud .spx-prop-row:nth-child(2) { display: none; }
@@ -3081,6 +3094,7 @@ html, body {
 }
 @media (max-height: 500px) and (orientation: landscape) {
   #flight-hud .spx-top-bar { display: flex; flex-wrap: nowrap; }
+  #flight-hud .spx-dropdown-menu { top: calc(62px + env(safe-area-inset-top)); max-height: calc(100dvh - 152px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   #flight-hud .flight-phase-badge { max-width: 26vw; }
   #flight-hud .flight-ops-bar { top: 66px; }
   #flight-hud .spx-broadcast-bar { min-height: 80px; padding: 8px 16px; }
@@ -3104,6 +3118,13 @@ html, body {
   #mobile-controls, #flight-mobile-steering { display: none !important; }
 }
 @media (pointer: coarse) {
+  #mobile-controls .mobile-vehicle-btn {
+    position: absolute; right: 12px; bottom: calc(112px + env(safe-area-inset-bottom));
+    max-width: min(46vw, 190px); min-height: 44px; padding: 8px 10px;
+    font-size: 10px; line-height: 1.2; pointer-events: auto; z-index: 170;
+    background: #15202ded; color: #fff; border: 1px solid #80b9ce;
+  }
+  #mobile-controls .mobile-vehicle-btn:disabled { opacity: .58; }
   .compact-drive-pad, #flight-hud .flight-touch-dpad {
     display: grid; grid-template-columns: repeat(3, 40px); grid-auto-rows: 40px; gap: 4px;
   }

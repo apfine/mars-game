@@ -264,7 +264,7 @@ export class FlyingRoadster {
     this.yaw = startYaw;
     this.pitch = 0;
     this.roll = 0;
-    this.group.position.set(startPos.x, startPos.y + 1.5, startPos.z);
+    this.group.position.copy(startPos);
     return true;
   }
 
@@ -340,7 +340,7 @@ export class FlyingRoadster {
 
   update(dt, active) {
     this.time += dt;
-    if (!this.enabled || this.isPiloted) return;
+    if (!this.enabled || this.isPiloted || this.parked) return;
 
     const p = this.physics;
     const inSpace = p.phase === FLIGHT_PHASES.INTERPLANETARY || p.phase === FLIGHT_PHASES.ORBIT;

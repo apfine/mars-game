@@ -26,6 +26,7 @@ const DOCKED_TRANSFER_RATE_KG_S = 5_000;
 const DOCKED_TRANSFER_TIME_COMPRESSION = 30;
 import { StarbaseObstacleSystem } from '../flight/solidCollisions.js';
 import { FlyingRoadster } from '../flight/roadster.js';
+import { StarbaseSupercar } from '../vehicle/supercar.js';
 import { PLANET_PROFILES } from '../flight/planetProfiles.js';
 import { earthSurfaceHeight } from '../terrain/earthSurface.js';
 import { getMoonHeight, getMoonNormal } from '../terrain/moonSurface.js';
@@ -216,12 +217,14 @@ export class MarsGameEngine {
     });
     this.trajectoryVisible = false;
     this.localTrajectory = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({
-      color: 0xb6c7d2, transparent: true, opacity: 0.72, depthWrite: false, depthTest: true
+      color: 0xffcc55, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false,
+      blending: THREE.AdditiveBlending, toneMapped: false
     }));
     this.localTrajectory.visible = false;
     this.localTrajectory.frustumCulled = false;
     this.scene.add(this.localTrajectory);
     this.trajectoryRefresh = 0;
+    this.arrivalFlashTime = 0;
     this.journey.setPlanet('mars');
     this.atmosphere.setPlanet('mars');
 
@@ -245,6 +248,11 @@ export class MarsGameEngine {
 
     this.roadster = new FlyingRoadster(this.scene, this.missionPhysics);
     this.roadster.setPlanet('mars');
+    this.supercars = [0, 1, 2].map((index) => new StarbaseSupercar(
+      this.scene, index, 1344 + index * 8, 1089, 0.35,
+      (x, z) => this.getSurfaceHeight(x, z)
+    ));
+    this.activeCar = null;
 
     // 8. Input & Unified Glassmorphic HUD for Rover & Walking
     this.input = new InputManager();
@@ -381,7 +389,11 @@ export class MarsGameEngine {
         });
       },
       onExit: () => {
-        if (this.missionPhysics.phase === FLIGHT_PHASES.LANDED && PLANET_PROFILES[this.missionPhysics.planetId]?.landable) this.setMode('walking');
+        if ([FLIGHT_PHASES.ON_PAD, FLIGHT_PHASES.LANDED].includes(this.missionPhysics.phase) && PLANET_PROFILES[this.missionPhysics.planetId]?.landable) {
+          const term = this.missionPhysics.terminalPosition;
+          this.walker.position.set(term.x - 3.5, this.getSurfaceHeight(term.x - 3.5, term.z - 3.5), term.z - 3.5);
+          this.setMode('walking');
+        }
       }
     });
 
@@ -748,6 +760,7 @@ export class MarsGameEngine {
     this.journey.active = false;
     this.journey.arrived = true;
     this.journey.hideTransferTrail();
+    this.arrivalFlashTime = 1.35;
     if (planetId === 'miller') {
       this.millerLocalSeconds = 0;
       this.millerDistantSeconds = 0;
@@ -787,6 +800,27 @@ export class MarsGameEngine {
     }
   }
 
+  updateArrivalTransition(dt) {
+    const overlay = document.getElementById('arrival-transition');
+    if (!overlay) return;
+    const approaching = this.journey.active && this.journey.routeKind === 'kepler'
+      && this.journey.transferStage === 'COAST';
+    const target = approaching ? this.journey.target : this.missionPhysics.planetId;
+    const tint = PLANET_PROFILES[target]?.sky?.limb || 0x8fb6d5;
+    if (this._arrivalTint !== tint) {
+      this._arrivalTint = tint;
+      overlay.style.background = `radial-gradient(circle at 50% 50%, #${tint.toString(16).padStart(6, '0')} 0%, #0a1525 78%)`;
+    }
+    if (this.arrivalFlashTime > 0) {
+      this.arrivalFlashTime = Math.max(0, this.arrivalFlashTime - dt);
+      overlay.style.opacity = String(THREE.MathUtils.smoothstep(this.arrivalFlashTime, 0, 1.1));
+    } else {
+      overlay.style.opacity = approaching
+        ? String(THREE.MathUtils.smoothstep(this.journey.progress, 0.9995, 1))
+        : '0';
+    }
+  }
+
   applyPlanetEnvironment(planetId) {
     const isEarth = planetId === 'earth';
     this.atmosphere.setPlanet(planetId);
@@ -799,11 +833,15 @@ export class MarsGameEngine {
     this.journey.setPlanet(planetId);
     this.hud?.map?.setPlanet(planetId, this.missionPhysics.padCoords);
     this.roadster?.setPlanet(planetId);
+    for (const car of this.supercars || []) {
+      car.group.visible = planetId === 'mars' || planetId === 'earth' || planetId === 'moon';
+      if (!car.piloted) car.group.position.y = this.getSurfaceHeight(car.group.position.x, car.group.position.z);
+    }
     if (this.terrain?.group) this.terrain.group.visible = planetId === 'mars' || planetId === 'moon';
     if (this.millerOcean) this.millerOcean.group.visible = planetId === 'miller';
     if (this.starship?.launchPadGroup) this.starship.launchPadGroup.visible = Boolean(PLANET_PROFILES[planetId]?.landable) && planetId !== 'miller';
     if (this.roverModel?.group) this.roverModel.group.visible = planetId !== 'miller' && this.mode === 'rover';
-    if (this.roadster?.group) this.roadster.group.visible = planetId !== 'miller' && this.mode === 'roadster';
+    if (this.roadster?.group) this.roadster.group.visible = planetId !== 'miller' && this.roadster.enabled;
     if (this.mode === 'starship') this.applyFlightCameraClip();
     if (this.scatter?.setVisible) this.scatter.setVisible(planetId === 'mars');
   }
@@ -824,17 +862,20 @@ export class MarsGameEngine {
   toggleRoadster() {
     if (!this.roadster) return;
     if (this.mode === 'roadster') {
-      const exitPos = this.roadster.disembark();
-      const wy = this.getSurfaceHeight(exitPos.x, exitPos.z);
-      this.walker.position.set(exitPos.x, wy, exitPos.z);
-      this.setMode('walking');
+      this.leaveVehicle();
       return;
     }
-    if (this.mode === 'walking' || this.mode === 'rover') {
-      const startPos = this.mode === 'walking' ? this.walker.position : this.physics.position;
-      const startYaw = this.mode === 'walking' ? this.walker.yaw : this.physics.yaw;
-      this.roadster.board(startPos, startYaw);
-      this.setMode('roadster');
+    if (this.mode === 'walking') {
+      const start = this.walker.position;
+      this.roadster.parked = !this.roadster.parked;
+      this.roadster.setEnabled(this.roadster.parked);
+      if (this.roadster.parked) {
+        const x = start.x + Math.cos(this.walker.yaw) * 9;
+        const z = start.z - Math.sin(this.walker.yaw) * 9;
+        this.roadster.group.position.set(x, this.getSurfaceHeight(x, z) + 1.2, z);
+        this.roadster.yaw = this.walker.yaw;
+        this.roadster.group.rotation.y = this.walker.yaw;
+      }
       return;
     }
     const on = this.roadster.toggle();
@@ -846,31 +887,64 @@ export class MarsGameEngine {
     }
   }
 
+  nearestBoardableVehicle() {
+    if (this.mode !== 'walking') return null;
+    const pos = this.walker.position;
+    const candidates = [
+      { type: 'rover', name: 'ROVER', position: this.physics.position, radius: 7 },
+      ...this.supercars.map((car) => ({ type: 'car', name: car.name.toUpperCase(), vehicle: car, position: car.group.position, radius: 5.5 }))
+    ];
+    if ([FLIGHT_PHASES.ON_PAD, FLIGHT_PHASES.LANDED].includes(this.missionPhysics.phase)) {
+      candidates.push({ type: 'ship', name: 'STARSHIP', position: this.missionPhysics.terminalPosition, radius: 8 });
+    }
+    if (this.roadster.enabled && !this.roadster.isPiloted) {
+      candidates.push({ type: 'roadster', name: 'ROADSTER', position: this.roadster.group.position, radius: 5.5 });
+    }
+    return candidates
+      .map((item) => ({ ...item, distance: Math.hypot(pos.x - item.position.x, pos.z - item.position.z), height: Math.abs(pos.y - item.position.y) }))
+      .filter((item) => item.distance <= item.radius && item.height <= 3)
+      .sort((a, b) => a.distance - b.distance)[0] || null;
+  }
+
+  boardNearestVehicle(type = null) {
+    const target = this.nearestBoardableVehicle();
+    if (!target || (type && target.type !== type)) return false;
+    this.cameraController.resetGimbal();
+    if (target.type === 'rover') {
+      this.setMode('rover');
+    } else if (target.type === 'ship') {
+      this.setMode('starship');
+    } else {
+      this.activeCar = target.type === 'car' ? target.vehicle : this.roadster;
+      if (target.type === 'roadster') this.roadster.board(target.position, this.roadster.yaw);
+      else this.activeCar.board();
+      this.setMode('roadster');
+    }
+    return true;
+  }
+
+  leaveVehicle() {
+    const vehicle = this.mode === 'rover' ? this.physics : this.activeCar;
+    if (!vehicle) return;
+    const position = this.mode === 'rover' ? this.physics.position : vehicle.disembark();
+    const yaw = this.mode === 'rover' ? this.physics.yaw : vehicle.yaw;
+    const side = this.mode === 'rover' ? 5.2 : 3.3;
+    const wx = position.x + Math.cos(yaw) * side + Math.sin(yaw) * 1.6;
+    const wz = position.z - Math.sin(yaw) * side + Math.cos(yaw) * 1.6;
+    this.walker.position.set(wx, this.getSurfaceHeight(wx, wz), wz);
+    this.walker.yaw = yaw;
+    this.walker.speed = 0;
+    this.activeCar = null;
+    this.cameraController.resetGimbal();
+    this.setMode('walking');
+  }
+
   // Toggle between rover driving and third-person EVA walking.
   toggleWalkMode() {
-    if (this.mode === 'rover') {
-      // Disembark clear of the rover so the third-person camera does not start
-      // inside a wheel/body with the astronaut hidden behind it.
-      const side = 5.2;
-      const forward = 1.6;
-      const rightX = Math.cos(this.physics.yaw) * side + Math.sin(this.physics.yaw) * forward;
-      const rightZ = -Math.sin(this.physics.yaw) * side + Math.cos(this.physics.yaw) * forward;
-      const wx = this.physics.position.x + rightX;
-      const wz = this.physics.position.z + rightZ;
-      const wy = this.getSurfaceHeight(wx, wz);
-
-      this.walker.position.set(wx, wy, wz);
-      // Face toward the Launch Control Pedestal so the player can immediately walk to the button
-      const dxTerm = this.missionPhysics.terminalPosition.x - wx;
-      const dzTerm = this.missionPhysics.terminalPosition.z - wz;
-      this.walker.yaw = Math.atan2(dxTerm, dzTerm);
-      this.walker.speed = 0;
-      this.walker.bobPhase = 0;
-      this.cameraController.resetGimbal();
-      this.setMode('walking');
+    if (this.mode === 'rover' || this.mode === 'roadster') {
+      this.leaveVehicle();
     } else if (this.mode === 'walking') {
-      this.cameraController.resetGimbal();
-      this.setMode('rover');
+      this.boardNearestVehicle();
     }
   }
 
@@ -920,6 +994,11 @@ export class MarsGameEngine {
 
     const roverHud = document.getElementById('hud-layer');
     const mobileControls = document.getElementById('mobile-controls');
+    const mobileVehicleBtn = document.getElementById('btn-vehicle-mobile');
+    if (mobileVehicleBtn && targetMode !== 'walking') {
+      mobileVehicleBtn.textContent = 'EXIT VEHICLE';
+      mobileVehicleBtn.disabled = false;
+    }
     if (mobileControls) mobileControls.style.display = targetMode !== 'starship' && this.input.detectMobile() ? 'block' : 'none';
 
     if (this.mode === 'starship') {
@@ -957,9 +1036,9 @@ export class MarsGameEngine {
       this.flightHud.show(false);
       if (roverHud) roverHud.style.display = 'block';
       const roverBadge = document.getElementById('rover-mode-badge');
-      if (roverBadge) roverBadge.textContent = 'TESLA ROADSTER // PILOTING';
+      if (roverBadge) roverBadge.textContent = `${this.activeCar?.name?.toUpperCase() || 'ROADSTER'} // PILOTING`;
       const roverTitle = document.getElementById('rover-left-title');
-      if (roverTitle) roverTitle.textContent = 'FLYING ROADSTER';
+      if (roverTitle) roverTitle.textContent = this.activeCar?.name?.toUpperCase() || 'FLYING ROADSTER';
     } else {
       // 'rover' or 'walking'
       this.camera.near = 0.22;
@@ -1013,7 +1092,7 @@ export class MarsGameEngine {
       const cam = document.getElementById('rover-cam-current');
       const modeName = targetMode === 'walking' ? 'EVA' : targetMode === 'roadster' ? 'ROADSTER' : 'ROVER';
       if (badge) badge.textContent = `${modeName} // ${world.toUpperCase()}`;
-      if (title) title.textContent = targetMode === 'walking' ? 'EVA SUIT' : targetMode === 'roadster' ? 'TESLA ROADSTER' : `${world.toUpperCase()} ROVER`;
+      if (title) title.textContent = targetMode === 'walking' ? 'EVA SUIT' : targetMode === 'roadster' ? (this.activeCar?.name?.toUpperCase() || 'TESLA ROADSTER') : `${world.toUpperCase()} ROVER`;
       if (walk) walk.textContent = targetMode === 'walking' ? 'BOARD [E]' : 'EVA [E]';
       if (roadster) roadster.style.display = world === 'miller' ? 'none' : '';
       if (cam) cam.textContent = targetMode === 'walking' ? 'HELMET' : targetMode === 'roadster' ? 'DRIVER' : 'CHASE';
@@ -1286,6 +1365,7 @@ export class MarsGameEngine {
     this.operations.update(dt);
     if (this.missionPhysics.yardControl && this.mode !== 'starship') this.missionPhysics.updateYardVisuals(dt);
     this.journey.update(dt, this.timeScale, camAltNow);
+    this.updateArrivalTransition(dt);
     this.millerOcean?.update(this.missionPhysics.localSurfaceTime);
     this.roadster.update(dt, this.mode === 'starship' ? this.missionPhysics : null);
     if (this.missionPhysics.phase !== FLIGHT_PHASES.INTERPLANETARY && this.journey.active) {
@@ -1411,8 +1491,6 @@ export class MarsGameEngine {
       const distToTerminal = activePos.distanceTo(this.missionPhysics.terminalPosition);
       if (this.mode === 'walking' && distToTerminal <= 9.5) {
         this.triggerPhysicalPadLaunch();
-      } else if (this.mode === 'rover' && distToTerminal <= 65.0) {
-        this.toggleWalkMode();
       }
     }
 
@@ -1466,21 +1544,19 @@ export class MarsGameEngine {
       this.hud.update(this.walker, this.camera, nearbyPOIs, {
         isWalking: true,
         terminalPos: this.missionPhysics.terminalPosition,
-        roverPos: this.physics.position
+        roverPos: this.physics.position,
+        nearbyVehicle: this.nearestBoardableVehicle()
       });
     } else if (this.mode === 'roadster') {
-      if (this.input.consumeSinglePress('walkToggle')) {
-        this.toggleRoadster();
-        return;
-      }
-      this.roadster.updatePiloted(
+      const car = this.activeCar;
+      car.updatePiloted(
         dt,
         this.input.state,
         (x, z) => this.getSurfaceHeight(x, z),
         (pos, r, y) => this.resolveWorldCollisions(pos, r, y)
       );
-      this.cameraController.updateRoadster(scaledDt, this.roadster);
-      const activePos = this.roadster.group.position;
+      this.cameraController.updateRoadster(scaledDt, car);
+      const activePos = car.group.position;
       const onLocalTerrain = this.missionPhysics.planetId !== 'earth';
       const onMars = this.missionPhysics.planetId === 'mars';
       if (onLocalTerrain) {
@@ -1490,15 +1566,15 @@ export class MarsGameEngine {
       }
       this.atmosphere.setViewScale(window.innerHeight * this.renderer.getPixelRatio(), this.camera.fov);
       this.atmosphere.update(scaledDt, activePos, {
-        speed: Math.abs(this.roadster.speed),
-        speedKmh: Math.abs(this.roadster.speed * 3.6),
-        velocity: new THREE.Vector3(Math.sin(this.roadster.yaw) * this.roadster.speed, this.roadster.verticalSpeed, Math.cos(this.roadster.yaw) * this.roadster.speed),
+        speed: Math.abs(car.speed),
+        speedKmh: Math.abs(car.speed * 3.6),
+        velocity: new THREE.Vector3(Math.sin(car.yaw) * car.speed, car.verticalSpeed, Math.cos(car.yaw) * car.speed),
         isNitroActive: Boolean(this.input.state.nitro),
         onGroundCount: 0,
         timeScale: this.timeScale
       });
       const speedNum = document.getElementById('speed-val');
-      if (speedNum) speedNum.textContent = Math.round(Math.abs(this.roadster.speed * 3.6));
+      if (speedNum) speedNum.textContent = Math.round(Math.abs(car.speed * 3.6));
       const altNum = document.getElementById('alt-val');
       if (altNum) altNum.textContent = Math.round(activePos.y - this.missionPhysics.padGroundY);
     } else {
@@ -1551,7 +1627,7 @@ export class MarsGameEngine {
     }
 
     // Keep Starbase visible from anywhere within 1,200m so the 145m Mechazilla tower is a landmark on approach
-    const activeActorPos = this.mode === 'walking' ? this.walker.position : this.physics.position;
+    const activeActorPos = this.mode === 'walking' ? this.walker.position : this.mode === 'roadster' ? this.activeCar.group.position : this.physics.position;
     const sbDx = activeActorPos.x - 1400;
     const sbDz = activeActorPos.z - 1150;
     this.starship.group.visible = (sbDx * sbDx + sbDz * sbDz) <= 1200 * 1200;

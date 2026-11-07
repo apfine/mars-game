@@ -1639,22 +1639,33 @@ export class InterplanetaryJourney {
     this.flybyPoint = null;
     this.flybyBase = null;
     this.flybyDelta = null;
+    this.arrivalOffset = new THREE.Vector3();
+    this.arrivalVisualScale = 1;
     this.transferStatus = '';
 
     this.transferGroup = new THREE.Group();
     this.transferGroup.visible = false;
     this.scene.add(this.transferGroup);
 
+    const trailGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
     this.transferTrail = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      trailGeometry,
       new THREE.LineBasicMaterial({
-        color: 0xb6c7d2,
+        color: 0xffd56a,
         transparent: true,
         opacity: 0.0,
         depthWrite: false,
-        depthTest: true
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false
       })
     );
+    this.transferTrailGlow = new THREE.Line(trailGeometry, new THREE.LineBasicMaterial({
+      color: 0xff9d19, transparent: true, opacity: 0,
+      depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, toneMapped: false
+    }));
+    this.transferTrailGlow.renderOrder = 2;
+    this.transferGroup.add(this.transferTrailGlow);
     this.transferTrail.frustumCulled = false;
     this.transferTrail.renderOrder = 3;
     this.transferGroup.add(this.transferTrail);
@@ -1672,6 +1683,8 @@ export class InterplanetaryJourney {
     this.stageClock = 0;
     this.burnDeltaV = 0;
     this.progress = 0;
+    this.arrivalOffset.set(0, 0, 0);
+    this.arrivalVisualScale = 1;
     this.arrived = false;
     this.active = true;
     this.time = 0;
@@ -1699,12 +1712,26 @@ export class InterplanetaryJourney {
       this._solarPhases.set('earth',0);
       this._lunarStartAngle = this.planetId === 'moon' ? Math.PI : Math.PI-this.orbit.seconds*2*Math.PI/(27.32*86400);
     }
+    if (this.routeKind === 'kepler') {
+      // Finish at the planet's entry interface rather than its center. The
+      // destination disk then grows continuously to the size seen at handoff.
+      const center = this._samplePath(1, new THREE.Vector3());
+      const approach = this._samplePath(0.995, new THREE.Vector3());
+      const profile = PLANET_PROFILES[target];
+      // Navigation coordinates compress an AU into 180 km while the camera
+      // still follows a full-size ship. Expand the destination smoothly in
+      // the last leg so it occupies the same view as the local globe.
+      this.arrivalVisualScale = Math.max(1, 70 / sceneRadius(profile.radius));
+      this.arrivalOffset.subVectors(approach, center).normalize()
+        .multiplyScalar(sceneRadius(profile.radius + profile.entryAltitude) * this.arrivalVisualScale);
+    }
     this._samplePath(0, this.pathStart);
     this._samplePath(1, this.pathEnd);
     this.flybyPoint = null;
     this._rebuildRouteGeometry();
     this.transferGroup.visible = this.showTrajectory;
     this.transferTrail.material.opacity = 0.7;
+    this.transferTrailGlow.material.opacity = 0.38;
 
     this.celestialGroup.visible = this.routeKind === 'kepler' ||
       (this.routeKind === 'wormhole' && this.planetId === 'saturn');
@@ -1867,6 +1894,18 @@ export class InterplanetaryJourney {
     }
   }
 
+  _updateArrivalVisuals(progress) {
+    if (this.routeKind !== 'kepler' || progress <= 0.97) return;
+    const mesh = this.target === 'moon' ? this.moon : this.solarBodies.get(this.target);
+    if (!mesh) return;
+    const zoom = THREE.MathUtils.lerp(1, this.arrivalVisualScale, THREE.MathUtils.smoothstep(progress, 0.97, 1));
+    mesh.scale.multiplyScalar(zoom);
+    if (this.target === 'earth') {
+      this.clouds.scale.copy(mesh.scale);
+      this.earthGlow.scale.copy(mesh.scale);
+    }
+  }
+
   _marsAnchor() {
     return new THREE.Vector3(
       this.padCoords.x - 180000,
@@ -1937,7 +1976,9 @@ export class InterplanetaryJourney {
       points.push(this._samplePath(i / n, new THREE.Vector3()));
     }
     this.transferTrail.geometry.dispose();
-    this.transferTrail.geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    this.transferTrail.geometry = geometry;
+    this.transferTrailGlow.geometry = geometry;
 
   }
 
@@ -1955,8 +1996,12 @@ export class InterplanetaryJourney {
     }
     const point = sampleTransfer(this.orbit, t);
     const origin = this.orbit.lunar ? this.localTransferOrigin : this.solarOrigin;
-    return out.set(origin.x + point.x / AU * SCENE_AU,
+    out.set(origin.x + point.x / AU * SCENE_AU,
       origin.y, origin.z + point.z / AU * SCENE_AU);
+    if (this.arrivalOffset && t > 0.97) {
+      out.addScaledVector(this.arrivalOffset, THREE.MathUtils.smoothstep(t, 0.97, 1));
+    }
+    return out;
   }
 
   _sampleTangent(t, out) {
@@ -1972,6 +2017,7 @@ export class InterplanetaryJourney {
   hideTransferTrail() {
     if (this.transferGroup) this.transferGroup.visible = false;
     if (this.transferTrail) this.transferTrail.material.opacity = 0;
+    if (this.transferTrailGlow) this.transferTrailGlow.material.opacity = 0;
   }
 
   update(dt, timeScale = 1, currentAltitude = 0) {
@@ -2120,7 +2166,10 @@ export class InterplanetaryJourney {
     this._sampleTangent(t, this._pathTangent);
     this.physics.position.copy(this._pathPoint);
 
-    if (this.routeKind === 'kepler') this._updateSolarBodies(t * this.orbit.seconds);
+    if (this.routeKind === 'kepler') {
+      this._updateSolarBodies(t * this.orbit.seconds);
+      this._updateArrivalVisuals(t);
+    }
     this._flightDir.copy(this._pathTangent);
     this.physics.quaternion.setFromUnitVectors(
       this._upAxis,

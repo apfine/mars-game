@@ -90,6 +90,8 @@ export class MarsHUD {
 
     const mobileWalkBtn = document.getElementById('btn-walk-mobile');
     if (mobileWalkBtn) mobileWalkBtn.addEventListener('click', handleWalkToggle);
+    const mobileVehicleBtn = document.getElementById('btn-vehicle-mobile');
+    if (mobileVehicleBtn) mobileVehicleBtn.addEventListener('click', handleWalkToggle);
 
     const mobileLaunchBtn = document.getElementById('btn-launch-mobile');
     if (mobileLaunchBtn) {
@@ -301,6 +303,7 @@ export class MarsHUD {
     const isWalking = Boolean(context.isWalking);
     const terminalPos = context.terminalPos;
     const roverPos = context.roverPos;
+    const nearbyVehicle = context.nearbyVehicle;
 
     // 1. Mode-Specific UI State (Rover vs Third-Person EVA)
     if (this._lastWalkingState !== isWalking) {
@@ -327,6 +330,20 @@ export class MarsHUD {
       if (this.dom.camBar) {
         this.dom.camBar.style.display = isWalking ? 'none' : 'flex';
       }
+    }
+    if (isWalking) {
+      const label = nearbyVehicle ? `BOARD ${nearbyVehicle.name} [E]` : 'APPROACH VEHICLE';
+      if (this.dom.walkBtn) this.dom.walkBtn.textContent = label;
+      if (this.dom.primaryActionBtn) this.dom.primaryActionBtn.textContent = label;
+      const mobileWalkBtn = document.getElementById('btn-walk-mobile');
+      if (mobileWalkBtn) mobileWalkBtn.textContent = nearbyVehicle ? `BOARD ${nearbyVehicle.name}` : 'BOARD';
+    }
+    const mobileVehicleBtn = document.getElementById('btn-vehicle-mobile');
+    if (mobileVehicleBtn) {
+      mobileVehicleBtn.textContent = isWalking
+        ? nearbyVehicle ? `BOARD ${nearbyVehicle.name}` : 'NEAR VEHICLE TO BOARD'
+        : 'EXIT VEHICLE';
+      mobileVehicleBtn.disabled = isWalking && !nearbyVehicle;
     }
 
     // 2. Speedometer, Velocity & Proper G-Force
@@ -377,7 +394,10 @@ export class MarsHUD {
       if (this.dom.padPrompt) {
         if (canPressButton) {
           this.dom.padPrompt.style.display = 'block';
-          this.dom.padPrompt.textContent = 'LAUNCH PEDESTAL ARMED // CLICK RED PHYSICAL BUTTON ON CONSOLE OR PRESS [F] TO LAUNCH';
+          this.dom.padPrompt.textContent = 'STARSHIP ACCESS // PRESS [E] TO BOARD OR [F] TO LAUNCH FROM THE PEDESTAL';
+        } else if (isWalking && nearbyVehicle) {
+          this.dom.padPrompt.style.display = 'block';
+          this.dom.padPrompt.textContent = `${nearbyVehicle.name} IN RANGE // PRESS [E] OR TAP BOARD`;
         } else if (isWalking && distToTerminal <= 45.0) {
           this.dom.padPrompt.style.display = 'block';
           this.dom.padPrompt.textContent = `WALK TO RED LAUNCH CONTROL PEDESTAL (${Math.round(distToTerminal)}m AHEAD) & CLICK BUTTON`;
