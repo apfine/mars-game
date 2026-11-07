@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { MarsMap } from './map.js';
 
+export function badgeOverlapsVehicle(screenX, screenY, width, height) {
+  return Math.abs(screenX - width * 0.5) < Math.max(130, width * 0.23)
+    && screenY > height * 0.38 && screenY < height * 0.89;
+}
+
 // Unified SpaceX Glassmorphic HUD for Mars Rover & First-Person Walking Mode
 export class MarsHUD {
   constructor(inputManager, options = {}) {
@@ -468,6 +473,8 @@ export class MarsHUD {
     if (!this._badgePool) {
       this._badgePool = [];
       this._tempVec = new THREE.Vector3();
+      this._cameraForward = new THREE.Vector3();
+      this._badgeDirection = new THREE.Vector3();
       this.dom.badgeContainer.innerHTML = '';
       for (let i = 0; i < 6; i++) {
         const el = document.createElement('div');
@@ -514,27 +521,36 @@ export class MarsHUD {
     });
 
     const tempVec = this._tempVec;
+    camera.getWorldDirection(this._cameraForward);
     const w = window.innerWidth;
     const h = window.innerHeight;
     const halfW = w * 0.5;
     const halfH = h * 0.5;
 
     let activeIdx = 0;
+    const placed = [];
     const limit = Math.min(6, candidates.length);
     for (let i = 0; i < limit; i++) {
       const wp = candidates[i];
+      this._badgeDirection.subVectors(wp.position, camera.position);
+      if (this._badgeDirection.dot(this._cameraForward) <= 0) continue;
       tempVec.copy(wp.position).project(camera);
-      if (tempVec.z > 1.0) continue;
+      if (tempVec.z < -1.0 || tempVec.z > 1.0) continue;
 
       const screenX = (tempVec.x * halfW) + halfW;
       const screenY = -(tempVec.y * halfH) + halfH;
       if (screenX < 20 || screenX > w - 20 || screenY < 20 || screenY > h - 60) continue;
+      if (badgeOverlapsVehicle(screenX, screenY, w, h)) continue;
 
       const distLabel = wp.dist < 1000 ? `${Math.round(wp.dist)}m` : `${(wp.dist / 1000).toFixed(1)}km`;
+      const text = `${wp.name} · ${distLabel}`;
+      const width = Math.min(w - 20, text.length * 7 + 20);
+      const rect = { left: screenX - width / 2, right: screenX + width / 2, top: screenY - 25, bottom: screenY };
+      if (placed.some((other) => rect.left < other.right + 8 && rect.right > other.left - 8 && rect.top < other.bottom + 6 && rect.bottom > other.top - 6)) continue;
+      placed.push(rect);
       const el = this._badgePool[activeIdx++];
       el.style.display = 'block';
-      el.style.transform = `translate3d(${screenX | 0}px, ${screenY | 0}px, 0)`;
-      const text = `${wp.name} · ${distLabel}`;
+      el.style.transform = `translate3d(${screenX | 0}px, ${screenY | 0}px, 0) translate(-50%, -100%)`;
       if (el._lastText !== text) {
         el._lastText = text;
         el.textContent = text;

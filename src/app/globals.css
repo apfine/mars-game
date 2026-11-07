@@ -25,6 +25,35 @@ html, body {
   z-index: 1;
 }
 
+.camera-zoom-controls {
+  position: fixed;
+  top: 50%;
+  right: max(12px, env(safe-area-inset-right));
+  transform: translateY(-50%);
+  z-index: 180;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: auto;
+}
+.camera-zoom-controls button {
+  width: 46px;
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid #8aa9b6;
+  border-radius: 8px;
+  background: #101923dd;
+  color: #f6e8d5;
+  font-size: 23px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.camera-zoom-controls #camera-zoom-reset { font-size: 9px; letter-spacing: .4px; }
+.camera-zoom-controls button:focus-visible { outline: 2px solid #ffcf79; outline-offset: 2px; }
+body:has(#map-modal.active) .camera-zoom-controls,
+body:has(#settings-modal.active) .camera-zoom-controls { display: none; }
+
 #arrival-transition {
   position: fixed;
   inset: 0;
@@ -660,7 +689,7 @@ html, body {
   height: 100%;
   background: rgba(12, 10, 14, 0.75);
   backdrop-filter: blur(12px);
-  z-index: 100;
+  z-index: 220;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -795,7 +824,13 @@ html, body {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.12);
   background: rgba(20, 12, 10, 0.4);
 }
-.map-card { width: min(92vw, 92vh, 820px); max-width: none; }
+.map-card { width: min(92vw, calc(92dvh - 140px), 820px); max-width: none; max-height: 94dvh; overflow-y: auto; touch-action: pan-y; }
+.map-view-switch { display: flex; gap: 8px; margin: -8px 0 12px; }
+.map-view-switch button {
+  flex: 1; min-height: 40px; border: 1px solid #765241; border-radius: 8px;
+  color: #f3d9c6; background: #211b20; font-weight: 800; letter-spacing: 1px; cursor: pointer;
+}
+.map-view-switch button.active { background: #b85e35; color: #fff; border-color: #f8ad69; }
 #map-full {
   display: block;
   width: 100%;
@@ -803,6 +838,13 @@ html, body {
   aspect-ratio: 1 / 1;
   border-radius: 14px;
   background: #2a1610;
+}
+@media (max-width: 768px) {
+  .camera-zoom-controls { top: 47%; right: 8px; }
+  .camera-zoom-controls button { width: 40px; min-height: 38px; }
+  .map-card { padding: 14px; }
+  .map-card .modal-header { margin-bottom: 14px; }
+  .map-card .modal-footer { margin-top: 10px; padding-top: 8px; }
 }
 
 /* ===== Sleek phone / touch layout ===== */
@@ -892,7 +934,7 @@ html, body {
   }
   .nitro-pill { background: rgba(0, 170, 220, 0.4); border-color: #35e8ff; box-shadow: 0 0 16px rgba(53, 232, 255, 0.45); }
   .waypoint-badge { font-size: 10px; padding: 3px 8px; }
-  .map-card { width: 94vw; max-height: 94vh; }
+  .map-card { width: min(94vw, calc(94dvh - 140px)); max-height: 94dvh; }
 }
 
 @media (max-height: 520px) and (orientation: landscape) {

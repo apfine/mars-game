@@ -202,6 +202,9 @@ export class MarsGameEngine {
 
     // 6. Camera Controller (Universal 360° Gimbal across all cameras)
     this.cameraController = new MarsCameraController(this.camera, this.renderer.domElement);
+    document.getElementById('camera-zoom-in')?.addEventListener('click', () => this.cameraController.zoomBy(-180));
+    document.getElementById('camera-zoom-out')?.addEventListener('click', () => this.cameraController.zoomBy(180));
+    document.getElementById('camera-zoom-reset')?.addEventListener('click', () => this.cameraController.resetView());
 
     // 7. SpaceX Starship & Mission Flight System (Placed at Starbase 1400, 1150)
     this.reportProgress(92, 'ERECTING 145M MECHAZILLA TOWER & LAUNCH PEDESTAL...');
@@ -294,9 +297,10 @@ export class MarsGameEngine {
         this.cameraController.adjustGimbal(dYaw, dPitch);
       },
       onGimbalReset: () => {
-        this.cameraController.resetGimbal();
+        this.cameraController.resetView();
       }
     });
+    this.hud.map.journey = this.journey;
 
     // 9. SpaceX Flight HUD
     this.flightHud = new MissionFlightHUD({
@@ -334,7 +338,7 @@ export class MarsGameEngine {
         this.cameraController.adjustGimbal(dYaw, dPitch);
       },
       onResetGimbal: () => {
-        this.cameraController.resetGimbal();
+        this.cameraController.resetView();
       },
       onResetMission: () => {
         const planet = this.missionPhysics.planetId;
@@ -1422,6 +1426,7 @@ export class MarsGameEngine {
       const scaledDt = Math.min(dt * Math.min(warp, 8), 0.25);
 
       this.cameraController.updateFlight(scaledDt, this.missionPhysics);
+      this.hud.map.update(this.missionPhysics, [], { flight: true });
       this.updateTrajectory(dt);
       this.flightHud.update(this.missionPhysics);
       this.audio.updateRocket(this.missionPhysics.throttle, this.missionPhysics.altitude, this.missionPhysics.heat);
@@ -1577,6 +1582,7 @@ export class MarsGameEngine {
       if (speedNum) speedNum.textContent = Math.round(Math.abs(car.speed * 3.6));
       const altNum = document.getElementById('alt-val');
       if (altNum) altNum.textContent = Math.round(activePos.y - this.missionPhysics.padGroundY);
+      this.hud.map.update({ position: activePos, yaw: car.yaw, altitude: activePos.y - this.missionPhysics.padGroundY }, [], { flight: false });
     } else {
       // Rover Driving Mode
       for (let s = 0; s < steps; s++) {

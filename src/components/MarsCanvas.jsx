@@ -137,6 +137,11 @@ export default function MarsCanvas() {
       )}
 
       <div id="canvas-container" ref={containerRef} />
+      <div id="camera-zoom-controls" className="camera-zoom-controls" aria-label="Camera zoom controls">
+        <button id="camera-zoom-in" type="button" aria-label="Zoom camera in" title="Zoom in">+</button>
+        <button id="camera-zoom-reset" type="button" aria-label="Reset camera view" title="Reset camera view">RESET</button>
+        <button id="camera-zoom-out" type="button" aria-label="Zoom camera out" title="Zoom out">−</button>
+      </div>
       <div id="arrival-transition" aria-hidden="true" />
 
       {/* Permanent Live Online Players Counter Badge */}
@@ -447,6 +452,7 @@ export default function MarsCanvas() {
                 <button className="dropdown-item" id="flight-reset-btn">🔄 RESET TO PAD</button>
                 <button className="dropdown-item" id="flight-hide-ui-btn">👁️ TOGGLE HUD [H]</button>
                 <button className="dropdown-item" id="flight-roadster-btn">🏎️ TESLA ROADSTER</button>
+                <button className="dropdown-item" id="flight-map-btn">🗺️ LOCATION MAP [M]</button>
                 <button className="dropdown-item" id="flight-exit-btn">🧑‍🚀 RETURN TO EVA</button>
               </div>
             </div>
@@ -782,12 +788,16 @@ export default function MarsCanvas() {
       <div id="map-modal" className="modal-backdrop">
         <div className="modal-card map-card">
           <div className="modal-header">
-            <h2>STARBASE & MARS EXPEDITION MAP</h2>
+            <h2 id="map-title">LOCATION MAP</h2>
             <button id="close-map" className="close-btn">&times;</button>
+          </div>
+          <div className="map-view-switch" role="group" aria-label="Map view">
+            <button id="map-local-btn" className="active" type="button" aria-pressed="true">LOCAL</button>
+            <button id="map-universal-btn" type="button" aria-pressed="false">UNIVERSAL</button>
           </div>
           <canvas id="map-full" width="760" height="760"></canvas>
           <div className="modal-footer">
-            <p>Cyan: Starbase & Landmarks · Drive Rover to Starbase (1400, 1150) & walk to Launch Pedestal</p>
+            <p id="map-status">Centered on your current position.</p>
           </div>
         </div>
       </div>

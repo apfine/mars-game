@@ -33,6 +33,7 @@ export class MarsCameraController {
     this.orbitRadius = 90.0;
     this._walkTarget = new THREE.Vector3();
     this.roverOrbitRadius = 11.0;
+    this.zoomFactor = 1;
 
     // 360-degree Gimbal angles for stationary Ground Cam & Tower Cam
     this.groundGimbalYaw = Math.atan2(110, 95); // ~0.858 rad pointing directly at launch pad
@@ -57,8 +58,15 @@ export class MarsCameraController {
   }
 
   initPointerDrag() {
+    const pointers = new Map();
+    let pinchDistance = 0;
     this.domElement.addEventListener('pointerdown', (e) => {
       if (e.target && (e.target.tagName === 'BUTTON' || e.target.closest('button'))) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+      }
       this.isDragging = true;
       this.dragMoved = false;
       this.lastPointerX = e.clientX;
@@ -66,6 +74,17 @@ export class MarsCameraController {
     });
 
     window.addEventListener('pointermove', (e) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size >= 2) {
+        const [a, b] = [...pointers.values()];
+        const nextDistance = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchDistance) this.zoomBy((pinchDistance - nextDistance) * 3);
+        pinchDistance = nextDistance;
+        this.lastPointerX = e.clientX;
+        this.lastPointerY = e.clientY;
+        return;
+      }
       if (!this.isDragging) return;
       const dx = e.clientX - this.lastPointerX;
       const dy = e.clientY - this.lastPointerY;
@@ -78,17 +97,39 @@ export class MarsCameraController {
       this.adjustGimbal(-dx * 0.0055, -dy * 0.0055);
     });
 
-    window.addEventListener('pointerup', () => {
-      this.isDragging = false;
-    });
+    const release = (e) => {
+      pointers.delete(e.pointerId);
+      pinchDistance = 0;
+      this.isDragging = pointers.size > 0;
+      if (this.isDragging) {
+        const [remaining] = pointers.values();
+        this.lastPointerX = remaining.x;
+        this.lastPointerY = remaining.y;
+      }
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
 
     this.domElement.addEventListener('wheel', (e) => {
-      if (this.activeSimMode === 'starship') {
-        this.orbitRadius = THREE.MathUtils.clamp(this.orbitRadius + e.deltaY * 0.08, 25.0, 320.0);
-      } else if (this.activeSimMode === 'rover') {
-        this.roverOrbitRadius = THREE.MathUtils.clamp(this.roverOrbitRadius + e.deltaY * 0.015, 5.0, 42.0);
-      }
-    }, { passive: true });
+      e.preventDefault();
+      this.zoomBy(e.deltaY);
+    }, { passive: false });
+  }
+
+  zoomBy(delta) {
+    this.zoomFactor = THREE.MathUtils.clamp(this.zoomFactor * Math.exp(delta * 0.0012), 0.5, 2.5);
+    return this.zoomFactor;
+  }
+
+  zoomFov(base) {
+    return THREE.MathUtils.clamp(base * this.zoomFactor, 30, 105);
+  }
+
+  resetView() {
+    this.zoomFactor = 1;
+    this.orbitRadius = 90;
+    this.roverOrbitRadius = 11;
+    this.resetGimbal();
   }
 
   adjustGimbal(dYaw, dPitch) {
@@ -175,7 +216,7 @@ export class MarsCameraController {
     const totalYaw = walker.yaw + this.gimbalYaw;
     const orbitPitch = THREE.MathUtils.clamp(0.17 + this.gimbalPitch, -0.5, 0.95);
     const lookPitch = THREE.MathUtils.clamp(this.gimbalPitch, -0.9, 0.9);
-    const distance = 5.4;
+    const distance = 5.4 * this.zoomFactor;
 
     // Position the camera on a sphere behind the suit. The camera sits slightly
     // over the shoulder so the boots and terrain are both visible.
@@ -215,11 +256,13 @@ export class MarsCameraController {
   updateRoadster(dt, roadster) {
     if (dt <= 0 || !roadster?.group) return;
     this.activeSimMode = 'roadster';
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 65, Math.min(1, dt * 8));
+    this.camera.updateProjectionMatrix();
     const rPos = roadster.group.position;
     const rYaw = roadster.yaw || 0;
     const totalYaw = rYaw + this.gimbalYaw;
-    const chaseDist = 8.5;
-    const chaseHeight = 2.8;
+    const chaseDist = 8.5 * this.zoomFactor;
+    const chaseHeight = 2.8 * this.zoomFactor;
 
     this.targetPos.set(
       rPos.x - Math.sin(totalYaw) * chaseDist,
@@ -250,7 +293,7 @@ export class MarsCameraController {
 
     // Dynamic FOV widening during high speed & nitro
     const targetFov = this.baseFov + speedRatio * 14 + nitroFactor * 10;
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1.0, dt * 6.0));
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, mode === 'COCKPIT' ? this.zoomFov(targetFov) : targetFov, Math.min(1.0, dt * 6.0));
     this.camera.updateProjectionMatrix();
 
     if (!this.initialized) {
@@ -270,8 +313,8 @@ export class MarsCameraController {
     const sinY = Math.sin(viewYaw);
 
     if (mode === 'CHASE') {
-      const dist = (8.8 + speedRatio * 2.0) * Math.cos(viewPitch * 0.65);
-      const heightAbove = 3.6 - Math.sin(viewPitch) * 6.5;
+      const dist = (8.8 + speedRatio * 2.0) * this.zoomFactor * Math.cos(viewPitch * 0.65);
+      const heightAbove = 3.6 * this.zoomFactor - Math.sin(viewPitch) * 6.5;
 
       this.targetPos.set(
         roverPos.x - sinY * dist,
@@ -315,7 +358,7 @@ export class MarsCameraController {
 
     } else if (mode === 'ORBIT') {
       // Full 360-degree spherical gimbal orbit around the Rover
-      const rad = this.roverOrbitRadius;
+      const rad = this.roverOrbitRadius * this.zoomFactor;
       const pitchAngle = THREE.MathUtils.clamp(0.32 - viewPitch, 0.05, 1.45);
       const horizRad = rad * Math.cos(pitchAngle);
       this.targetPos.set(
@@ -391,7 +434,7 @@ export class MarsCameraController {
         this.currentPos.z + lookDirZ * 150.0
       );
 
-      this.camera.fov = 58.0;
+      this.camera.fov = this.zoomFov(58);
       this.camera.updateProjectionMatrix();
       this.camera.position.copy(this.currentPos);
       this.camera.lookAt(this.currentLook);
@@ -416,7 +459,7 @@ export class MarsCameraController {
         this.currentPos.z + lookDirZ * 150.0
       );
 
-      this.camera.fov = 66.0;
+      this.camera.fov = this.zoomFov(66);
       this.camera.updateProjectionMatrix();
       this.camera.position.copy(this.currentPos);
       this.camera.lookAt(this.currentLook);
@@ -427,7 +470,7 @@ export class MarsCameraController {
       // Dedicated Super Heavy Booster tracking camera with full 360° gimbal orbit around Booster
       const isSeparated = physics.boosterState && physics.boosterState !== 'ATTACHED';
       const bPos = isSeparated ? physics.boosterPosition : shipPos;
-      const rad = (physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT') ? 68.0 : 82.0;
+      const rad = ((physics.boosterState === 'APPROACH' || physics.boosterState === 'CAUGHT') ? 68.0 : 82.0) * this.zoomFactor;
       const ox = Math.cos(this.orbitPhi) * Math.sin(this.orbitTheta) * rad;
       const oy = Math.sin(this.orbitPhi) * rad;
       const oz = Math.cos(this.orbitPhi) * Math.cos(this.orbitTheta) * rad;
@@ -445,7 +488,7 @@ export class MarsCameraController {
 
     // FOV for Starship vehicle-mounted/chase modes
     const targetFov = this.baseFov + Math.min(14, (parseFloat(physics.mach) || 0) * 1.1);
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1.0, dt * 4.0));
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, mode === 'COCKPIT' ? this.zoomFov(targetFov) : targetFov, Math.min(1.0, dt * 4.0));
     this.camera.updateProjectionMatrix();
 
     if (mode === 'CHASE') {
@@ -457,11 +500,11 @@ export class MarsCameraController {
       const basePitch = (phase === 'HYPERSONIC_ENTRY' || phase === 'BELLYFLOP') ? 0.22 : 0.16;
       const totalPitch = THREE.MathUtils.clamp(basePitch - this.gimbalPitch, -1.35, 1.35);
 
-      const camDist = (phase === 'ON_PAD' || phase === 'COUNTDOWN')
+      const camDist = ((phase === 'ON_PAD' || phase === 'COUNTDOWN')
         ? 96.0
         : (phase === 'HYPERSONIC_ENTRY' || phase === 'BELLYFLOP')
           ? 68.0
-          : 86.0 + Math.min(35.0, alt * 0.0005);
+          : 86.0 + Math.min(35.0, alt * 0.0005)) * this.zoomFactor;
 
       const horizDist = camDist * Math.cos(totalPitch);
       const offsetX = Math.sin(totalYaw) * horizDist;
@@ -486,9 +529,9 @@ export class MarsCameraController {
       const lookDir = new THREE.Vector3(0, 1, 0).applyEuler(lookEuler).normalize();
       this.currentLook.copy(nosePos).addScaledVector(lookDir, 150.0);
     } else if (mode === 'FREE_ORBIT') {
-      const ox = Math.cos(this.orbitPhi) * Math.sin(this.orbitTheta) * this.orbitRadius;
-      const oy = Math.sin(this.orbitPhi) * this.orbitRadius;
-      const oz = Math.cos(this.orbitPhi) * Math.cos(this.orbitTheta) * this.orbitRadius;
+      const ox = Math.cos(this.orbitPhi) * Math.sin(this.orbitTheta) * this.orbitRadius * this.zoomFactor;
+      const oy = Math.sin(this.orbitPhi) * this.orbitRadius * this.zoomFactor;
+      const oz = Math.cos(this.orbitPhi) * Math.cos(this.orbitTheta) * this.orbitRadius * this.zoomFactor;
 
       this.currentPos.set(shipPos.x + ox, shipPos.y + stackCenterY + oy, shipPos.z + oz);
       this.currentLook.set(shipPos.x, shipPos.y + stackCenterY, shipPos.z);
