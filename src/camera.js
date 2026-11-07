@@ -5,6 +5,7 @@ import { getMarsHeight } from './terrain/noise.js';
 // third-person EVA walking camera.
 export class MarsCameraController {
   constructor(camera, domElement) {
+    this.events = new AbortController();
     this.camera = camera;
     this.domElement = domElement;
     this.surfaceHeight = getMarsHeight;
@@ -71,7 +72,7 @@ export class MarsCameraController {
       this.dragMoved = false;
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
-    });
+    }, { signal: this.events.signal });
 
     window.addEventListener('pointermove', (e) => {
       if (!pointers.has(e.pointerId)) return;
@@ -95,7 +96,7 @@ export class MarsCameraController {
       this.lastPointerY = e.clientY;
 
       this.adjustGimbal(-dx * 0.0055, -dy * 0.0055);
-    });
+    }, { signal: this.events.signal });
 
     const release = (e) => {
       pointers.delete(e.pointerId);
@@ -107,13 +108,13 @@ export class MarsCameraController {
         this.lastPointerY = remaining.y;
       }
     };
-    window.addEventListener('pointerup', release);
-    window.addEventListener('pointercancel', release);
+    window.addEventListener('pointerup', release, { signal: this.events.signal });
+    window.addEventListener('pointercancel', release, { signal: this.events.signal });
 
     this.domElement.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.zoomBy(e.deltaY);
-    }, { passive: false });
+    }, { passive: false, signal: this.events.signal });
   }
 
   zoomBy(delta) {
@@ -566,4 +567,6 @@ export class MarsCameraController {
 
     this.camera.lookAt(this.currentLook);
   }
+
+  dispose() { this.events.abort(); }
 }

@@ -9,6 +9,7 @@ export function badgeOverlapsVehicle(screenX, screenY, width, height) {
 // Unified SpaceX Glassmorphic HUD for Mars Rover & First-Person Walking Mode
 export class MarsHUD {
   constructor(inputManager, options = {}) {
+    this.events = new AbortController();
     this.inputManager = inputManager;
     this.options = options;
     this.userBeacons = [];
@@ -140,8 +141,8 @@ export class MarsHUD {
       };
       el.addEventListener('mousedown', start);
       el.addEventListener('touchstart', start, { passive: false });
-      window.addEventListener('mouseup', stop);
-      window.addEventListener('touchend', stop);
+      window.addEventListener('mouseup', stop, { signal: this.events.signal });
+      window.addEventListener('touchend', stop, { signal: this.events.signal });
     };
 
     bindGimbalHold('rover-gimbal-left', 0.06, 0);
@@ -190,7 +191,7 @@ export class MarsHUD {
           el.classList.remove('active');
           onUp();
         }
-      });
+      }, { signal: this.events.signal });
     };
 
     setupTouchBtn('btn-left',
@@ -236,10 +237,11 @@ export class MarsHUD {
     }
 
     window.addEventListener('keydown', (e) => {
+      if (document.querySelector('.career-panel.open') || e.target?.closest?.('input, textarea, select')) return;
       if (e.code === 'Escape' || e.code === 'KeyP') {
         this.toggleSettings();
       }
-    });
+    }, { signal: this.events.signal });
 
     const gridCheckbox = document.getElementById('toggle-grid');
     if (gridCheckbox) {
@@ -561,4 +563,6 @@ export class MarsHUD {
       this._badgePool[i].style.display = 'none';
     }
   }
+
+  dispose() { this.events.abort(); }
 }

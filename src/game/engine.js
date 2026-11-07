@@ -340,22 +340,8 @@ export class MarsGameEngine {
         this.cameraController.resetView();
       },
       onResetMission: () => {
-        const planet = this.missionPhysics.planetId;
-        this.missionPhysics.setPlanet(planet);
-        this.missionPhysics.resetToPad();
-        this.missionPhysics.destination = planet === 'earth' ? 'mars' : 'earth';
-        this.journey.reset();
-        this.pendingRoute = [];
-        this.millerLocalSeconds = 0;
-        this.millerDistantSeconds = 0;
-        this.tankerOps = { active: false, phase: 'idle', timer: 0, progress: 0, target: null, fromFuel: 0, targetFuel: 0 };
-        this.missionPhysics.tankerActive = false;
-        this.missionPhysics.tankerStatus = '';
-        this.missionPhysics.opsMessage = '';
-        this.operations?.reset();
-        this.applyPlanetEnvironment(planet);
-        this.setTimeScale(1);
-        this.cameraController.resetGimbal();
+        this.resetMission();
+        this.career?.dispatch({ type: 'new_mission' });
       },
       getRecoveryState: () => this.operations?.state,
       onRestack: () => {
@@ -947,6 +933,26 @@ export class MarsGameEngine {
     }
   }
 
+  resetMission() {
+    const planet = ['mars', 'earth', 'moon'].includes(this.missionPhysics.planetId) ? this.missionPhysics.planetId : 'mars';
+    this.missionPhysics.setPlanet(planet);
+    this.missionPhysics.resetToPad();
+    this.missionPhysics.setDestination(planet === 'earth' ? 'mars' : 'earth');
+    this.journey.reset();
+    this.journey.setPlanet(planet);
+    this.pendingRoute = [];
+    this.millerLocalSeconds = 0;
+    this.millerDistantSeconds = 0;
+    this.tankerOps = { active: false, phase: 'idle', timer: 0, progress: 0, target: null, fromFuel: 0, targetFuel: 0 };
+    this.missionPhysics.tankerActive = false;
+    this.missionPhysics.tankerStatus = '';
+    this.missionPhysics.opsMessage = '';
+    this.operations?.reset();
+    this.applyPlanetEnvironment(planet);
+    this.setTimeScale(1);
+    this.cameraController.resetGimbal();
+  }
+
   // Triggered when clicking the physical red launch button on the Starbase Launch Control Pedestal (or pressing [F] next to it)
   triggerPhysicalPadLaunch() {
     if (this.missionPhysics.yardControl) return;
@@ -1181,6 +1187,15 @@ export class MarsGameEngine {
       pointerDownPos = null;
       if (moveDist > 10) return; // Ignore camera gimbal drags
 
+      if (this.career?.placement) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        this.pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        this.raycaster.setFromCamera(this.pointerNDC, this.camera);
+        this.career.pickWorldPlot(this.raycaster);
+        return;
+      }
+
       if (this.mode !== 'walking' && this.mode !== 'rover') return;
       if (!this.starship?.launchTerminalGroup) return;
 
@@ -1327,12 +1342,22 @@ export class MarsGameEngine {
     }
   }
 
+  nearbySurfacePOIs(position, onMars) {
+    if (!onMars) return [];
+    const nearby = this.scatter.getNearbyPOIs(position);
+    const base = this.career?.world?.anchor;
+    if (base && this.career.state.buildings.length) nearby.push({ id: 'ares_expansion', name: 'Ares Expansion Base',
+      position: base, distance: position.distanceTo(base) });
+    return nearby;
+  }
+
   animate() {
     if (this.disposed) return;
     this.animId = requestAnimationFrame(this.animate);
 
     const rawDt = this.clock.getDelta();
     const dt = Math.min(rawDt, 0.05);
+    this.career?.pollEngine(dt);
 
     // Adaptive resolution for smooth 60 FPS on all devices
     this.avgDt += (Math.min(rawDt, 0.1) - this.avgDt) * 0.08;
@@ -1539,7 +1564,7 @@ export class MarsGameEngine {
         timeScale: this.timeScale
       });
 
-      const nearbyPOIs = onMars ? this.scatter.getNearbyPOIs(activePos) : [];
+      const nearbyPOIs = this.nearbySurfacePOIs(activePos, onMars);
       this.hud.update(this.walker, this.camera, nearbyPOIs, {
         isWalking: true,
         terminalPos: this.missionPhysics.terminalPosition,
@@ -1576,7 +1601,7 @@ export class MarsGameEngine {
       if (speedNum) speedNum.textContent = Math.round(Math.abs(car.speed * 3.6));
       const altNum = document.getElementById('alt-val');
       if (altNum) altNum.textContent = Math.round(activePos.y - this.missionPhysics.padGroundY);
-      this.hud.map.update({ position: activePos, yaw: car.yaw, altitude: activePos.y - this.missionPhysics.padGroundY }, [], { flight: false });
+      this.hud.map.update({ position: activePos, yaw: car.yaw, altitude: activePos.y - this.missionPhysics.padGroundY }, this.nearbySurfacePOIs(activePos, onMars), { flight: false });
     } else {
       // Rover Driving Mode
       for (let s = 0; s < steps; s++) {
@@ -1618,7 +1643,7 @@ export class MarsGameEngine {
       this.audio.update(this.physics);
       this.cameraController.update(scaledDt, this.physics);
 
-      const nearbyPOIs = onMars ? this.scatter.getNearbyPOIs(this.physics.position) : [];
+      const nearbyPOIs = this.nearbySurfacePOIs(this.physics.position, onMars);
       this.hud.update(this.physics, this.camera, nearbyPOIs, {
         isWalking: false,
         terminalPos: this.missionPhysics.terminalPosition,
@@ -1653,6 +1678,11 @@ export class MarsGameEngine {
   destroy() {
     this.disposed = true;
     cancelAnimationFrame(this.animId);
+    this.career?.dispose();
+    this.input?.dispose();
+    this.hud?.dispose();
+    this.flightHud?.dispose();
+    this.cameraController?.dispose();
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.startAudio);
     window.removeEventListener('touchstart', this.startAudio);

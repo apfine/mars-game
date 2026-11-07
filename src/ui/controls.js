@@ -69,7 +69,8 @@ export class InputManager {
   }
 
   initKeyboard() {
-    window.addEventListener('keydown', (e) => {
+    this.onKeyDown = (e) => {
+      if (this.suspended || e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
       if (e.repeat) return;
       this.keys[e.code] = true;
 
@@ -88,22 +89,33 @@ export class InputManager {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
         e.preventDefault();
       }
-    });
+    };
+    window.addEventListener('keydown', this.onKeyDown);
 
-    window.addEventListener('keyup', (e) => {
+    this.onKeyUp = (e) => {
       this.keys[e.code] = false;
-    });
+    };
+    window.addEventListener('keyup', this.onKeyUp);
   }
 
   initGamepad() {
     this.gamepadIndex = null;
-    window.addEventListener('gamepadconnected', (e) => {
+    this.onGamepadConnected = (e) => {
       this.gamepadIndex = e.gamepad.index;
       console.log('Gamepad connected:', e.gamepad.id);
-    });
-    window.addEventListener('gamepaddisconnected', () => {
+    };
+    this.onGamepadDisconnected = () => {
       this.gamepadIndex = null;
-    });
+    };
+    window.addEventListener('gamepadconnected', this.onGamepadConnected);
+    window.addEventListener('gamepaddisconnected', this.onGamepadDisconnected);
+  }
+
+  dispose() {
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('gamepadconnected', this.onGamepadConnected);
+    window.removeEventListener('gamepaddisconnected', this.onGamepadDisconnected);
   }
 
   pollGamepad() {
@@ -139,6 +151,12 @@ export class InputManager {
   }
 
   update() {
+    if (this.suspended) {
+      this.keys = {};
+      this.clearTouchFlightInput();
+      for (const key of Object.keys(this.state)) this.state[key] = typeof this.state[key] === 'number' ? 0 : false;
+      return;
+    }
     // Reset continuous single-frame pulses
     this.state.throttle = 0;
     this.state.steer = 0;

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { getPresenceClient } from '../utils/presenceClient.js';
+import CareerPanel from './CareerPanel.jsx';
 
 export default function MarsCanvas() {
   const containerRef = useRef(null);
@@ -10,6 +11,7 @@ export default function MarsCanvas() {
   const [loadingFade, setLoadingFade] = useState(false);
   const [progress, setProgress] = useState(12);
   const [statusText, setStatusText] = useState('ESTABLISHING SATELLITE UPLINK...');
+  const [career, setCareer] = useState(null);
 
   const dismissLoading = () => {
     setLoadingFade(true);
@@ -18,6 +20,7 @@ export default function MarsCanvas() {
 
   useEffect(() => {
     let engine = null;
+    let careerController = null;
     let isMounted = true;
     getPresenceClient();
 
@@ -61,6 +64,13 @@ export default function MarsCanvas() {
           }, 200);
         }
       });
+      import('../progression/controller.js').then(async ({ CareerController }) => {
+        if (!isMounted || !engine) return;
+        careerController = new CareerController(engine);
+        await careerController.init();
+        if (isMounted) setCareer(careerController);
+        else careerController.dispose();
+      }).catch((error) => console.error('Career initialization error:', error));
     }).catch((err) => {
       console.error('Engine initialization error:', err);
       clearInterval(timer);
@@ -137,6 +147,7 @@ export default function MarsCanvas() {
       )}
 
       <div id="canvas-container" ref={containerRef} />
+      {career && <CareerPanel career={career} />}
       <div id="camera-zoom-controls" className="camera-zoom-controls" aria-label="Camera zoom controls">
         <button id="camera-zoom-in" type="button" aria-label="Zoom camera in" title="Zoom in">+</button>
         <button id="camera-zoom-reset" type="button" aria-label="Reset camera view" title="Reset camera view">RESET</button>

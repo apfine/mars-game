@@ -5,6 +5,7 @@ import { getPlanetProfile } from './planetProfiles.js';
 // SpaceX Glassmorphic Broadcast Flight HUD & Universal 360° Gimbal / Manual Controls
 export class MissionFlightHUD {
   constructor(options = {}) {
+    this.events = new AbortController();
     this.options = options;
     this.currentCamMode = 'CHASE';
 
@@ -244,7 +245,7 @@ export class MissionFlightHUD {
     if (typeof window !== 'undefined') {
       window.addEventListener('click', () => {
         document.querySelectorAll('.spx-dropdown-menu').forEach((m) => m.classList.remove('open'));
-      });
+      }, { signal: this.events.signal });
     }
 
     // Trajectory Mode Selection Buttons (Orbital vs Suborbital)
@@ -349,8 +350,9 @@ export class MissionFlightHUD {
     }
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', (e) => {
+        if (document.querySelector('.career-panel.open') || e.target?.closest?.('input, textarea, select')) return;
         if (e.code === 'KeyH' && !e.repeat) this.toggleVitalsOnly();
-      });
+      }, { signal: this.events.signal });
     }
 
     if (this.dom.btnStageNow) {
@@ -907,4 +909,6 @@ export class MissionFlightHUD {
       }
     }
   }
+
+  dispose() { this.events.abort(); }
 }
