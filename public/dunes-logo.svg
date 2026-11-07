@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" role="img" aria-labelledby="title desc">
+  <title id="title">DUNES</title>
+  <desc id="desc">A sculpted D with a sun rising over Martian dunes, beside the DUNES wordmark.</desc>
+  <rect x="3" y="3" width="90" height="90" rx="22" fill="#101820" stroke="#b65a37" stroke-width="3" transform="translate(10 12)"/>
+  <path d="M25 19h18c23 0 36 12 36 29S66 77 43 77H25V19Z" fill="#f6e8d5" transform="translate(10 12)"/>
+  <path d="M37 31h6c15 0 24 7 24 17S58 65 43 65h-6V31Z" fill="#101820" transform="translate(10 12)"/>
+  <circle cx="54" cy="41" r="7" fill="#ffb35b" transform="translate(10 12)"/>
+  <path d="M37 59c7-11 14-10 21-6 3 2 6 2 9-1v13H37v-6Z" fill="#e56c3c" transform="translate(10 12)"/>
+  <path d="M39 59c6-7 12-7 19-3" fill="none" stroke="#ffcf79" stroke-width="2" stroke-linecap="round" transform="translate(10 12)"/>
+  <text x="128" y="78" fill="#f6e8d5" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="900" letter-spacing="6">DUNES</text>
+  <text x="134" y="103" fill="#ed9c67" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" letter-spacing="5">MARS · BEYOND</text>
+</svg>

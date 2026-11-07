@@ -2117,6 +2117,13 @@ html, body {
   margin-bottom: 6px;
 }
 
+.loading-brand-logo {
+  display: block;
+  width: min(100%, 390px);
+  height: auto;
+  margin: 0 auto 8px;
+}
+
 .loading-title {
   font-size: 38px;
   font-weight: 900;
@@ -2125,6 +2132,11 @@ html, body {
   margin: 0;
   line-height: 1.1;
   text-shadow: 0 0 24px rgba(255, 110, 40, 0.5);
+}
+
+.loading-title.loading-subtitle {
+  font-size: 18px;
+  letter-spacing: 5px;
 }
 
 .loading-badge {

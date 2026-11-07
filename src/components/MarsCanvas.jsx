@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { getPresenceClient } from '../utils/presenceClient.js';
 
 export default function MarsCanvas() {
@@ -97,7 +98,8 @@ export default function MarsCanvas() {
             </div>
 
             <div className="loading-title-box">
-              <h1 className="loading-title">STARBASE MARS</h1>
+              <Image className="loading-brand-logo" src="/dunes-logo.svg" alt="DUNES" width={560} height={120} priority />
+              <h1 className="loading-title loading-subtitle">STARBASE MARS</h1>
               <div className="loading-badge">OLYMPUS EXPEDITION // FLIGHT & ROVER SIMULATOR</div>
             </div>
 
