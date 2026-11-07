@@ -14,6 +14,7 @@ export class MissionFlightHUD {
       autoBtn: document.getElementById('flight-auto-btn'),
       trackBoosterBtn: document.getElementById('flight-track-booster-btn'),
       resetBtn: document.getElementById('flight-reset-btn'),
+      restackBtn: document.getElementById('flight-restack-btn'),
       camBar: document.getElementById('flight-cam-bar'),
       trajSwitch: document.getElementById('flight-traj-switch'),
       trajectoryPrompt: document.getElementById('flight-trajectory-prompt'),
@@ -124,6 +125,10 @@ export class MissionFlightHUD {
         if (this.options.onResetMission) this.options.onResetMission();
       });
     }
+    this.dom.restackBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (!this.dom.restackBtn.disabled) this.options.onRestack?.();
+    });
 
     const destBtns = document.querySelectorAll('[data-dest]');
     destBtns.forEach((btn) => {
@@ -516,6 +521,13 @@ export class MissionFlightHUD {
   }
 
   update(physics) {
+    if (this.dom.restackBtn) {
+      const recovery = this.options.getRecoveryState?.() || 'IDLE';
+      const landed = physics.phase === FLIGHT_PHASES.LANDED;
+      this.dom.restackBtn.style.display = landed ? '' : 'none';
+      this.dom.restackBtn.disabled = recovery !== 'SERVICED';
+      this.dom.restackBtn.textContent = recovery === 'SERVICED' ? 'RESTACK AT STARBASE' : 'RESTACK · RECOVERY IN PROGRESS';
+    }
     if (!this.dom.container || !this.dom.container.classList.contains('active')) return;
 
     // 1. Sync Orbital / Suborbital Trajectory Selector & Pre-Space Decision Banner

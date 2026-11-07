@@ -54,15 +54,6 @@ html, body {
 body:has(#map-modal.active) .camera-zoom-controls,
 body:has(#settings-modal.active) .camera-zoom-controls { display: none; }
 
-#arrival-transition {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  opacity: 0;
-  pointer-events: none;
-  background: radial-gradient(circle at 50% 50%, #6c9bc8 0%, #0a1525 78%);
-}
-
 #hud-layer {
   position: absolute;
   top: 0;
@@ -2671,8 +2662,8 @@ body:has(#settings-modal.active) .camera-zoom-controls { display: none; }
 
 .flight-attitude-gauge {
   position: absolute;
-  right: 24px;
-  bottom: 196px;
+  right: 20px;
+  bottom: 5px;
   width: 198px;
   padding: 8px 9px 7px;
   border: 1px solid rgba(160, 210, 240, 0.2);
@@ -2683,6 +2674,13 @@ body:has(#settings-modal.active) .camera-zoom-controls { display: none; }
   pointer-events: none;
   z-index: 105;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+@media (min-width: 901px) {
+  #flight-hud .spx-broadcast-bar {
+    height: 145px;
+    padding-right: 238px;
+  }
 }
 
 .att-gauge-head {

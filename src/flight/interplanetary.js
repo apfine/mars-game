@@ -1682,6 +1682,7 @@ export class InterplanetaryJourney {
     this._alignStartQuaternion.copy(this.physics.quaternion);
     this.stageClock = 0;
     this.burnDeltaV = 0;
+    this.captureDeltaV = 0;
     this.progress = 0;
     this.arrivalOffset.set(0, 0, 0);
     this.arrivalVisualScale = 1;
@@ -1694,6 +1695,12 @@ export class InterplanetaryJourney {
       seconds: this.routeKind === 'wormhole' ? 90 : 7200,
       lunar: false, injectionDeltaV: 0, arrivalRelativeSpeed: 0, phaseAngle: 0
     };
+    const destination = PLANET_PROFILES[target];
+    const orbitRadius = destination?.radius + destination?.entryAltitude;
+    const circularSpeed = destination && orbitRadius
+      ? Math.sqrt(destination.gravity * destination.radius ** 2 / orbitRadius) : 0;
+    this.captureRequiredDeltaV = this.routeKind === 'kepler' && circularSpeed
+      ? Math.sqrt(this.orbit.arrivalRelativeSpeed ** 2 + 2 * circularSpeed ** 2) - circularSpeed : 0;
     // One transfer day per real second on interplanetary routes; two lunar
     // transfer hours per second. The player-controlled time scale multiplies
     // this baseline. Cruise duration therefore follows the orbital period.
@@ -2069,6 +2076,32 @@ export class InterplanetaryJourney {
     }
 
     if (!this.active) return;
+    if (this.transferStage === 'CAPTURE') {
+      const priorDeltaV = this.captureDeltaV;
+      const burnDt = Math.min(4, dt * 35);
+      const substeps = Math.max(1, Math.ceil(burnDt / .25));
+      for (let i = 0; i < substeps && this.captureDeltaV < this.captureRequiredDeltaV; i++) {
+        if (this.physics.starshipFuel <= .001) break;
+        const before = this.physics.getShipMass();
+        this.physics.burnPropellant(false, 6, 1, burnDt / substeps);
+        const after = this.physics.getShipMass();
+        this.captureDeltaV += 378 * 9.80665 * Math.log(before / after);
+      }
+      this.physics.missionTime += burnDt;
+      this.physics.velocity.addScaledVector(this._pathTangent, -(this.captureDeltaV - priorDeltaV));
+      this.physics.speed = this.physics.velocity.length();
+      this.vehicle.setStarshipThrottle(1, true);
+      this.transferStatus = `ORBIT INSERTION BURN // ${Math.round(Math.min(this.captureDeltaV, this.captureRequiredDeltaV))}/${Math.round(this.captureRequiredDeltaV)} M/S · SHIP TANK ${Math.round(this.physics.starshipFuel)}%`;
+      this.physics.transferStatus = this.transferStatus;
+      if (this.captureDeltaV >= this.captureRequiredDeltaV || this.physics.starshipFuel <= .001) {
+        this.arrived = true;
+        this.active = false;
+        this.hideTransferTrail();
+        this.vehicle.setStarshipThrottle(0, false);
+        this.options.onArrive?.(this.target, Math.max(0, this.captureRequiredDeltaV - this.captureDeltaV));
+      }
+      return;
+    }
     if (this.routeKind === 'wormhole') {
       const leg = wormholeTransit(this.progress);
       const towardGargantua = this.target === 'gargantua';
@@ -2229,6 +2262,11 @@ export class InterplanetaryJourney {
     this.physics.transferStatus = status;
 
     if (t >= 1 && !this.arrived) {
+      if (this.routeKind === 'kepler' && this.captureRequiredDeltaV > 0) {
+        this.transferStage = 'CAPTURE';
+        this.physics.transferStage = 'CAPTURE';
+        return;
+      }
       this.arrived = true;
       this.active = false;
       this.hideTransferTrail();

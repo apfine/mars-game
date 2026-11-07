@@ -142,7 +142,6 @@ export default function MarsCanvas() {
         <button id="camera-zoom-reset" type="button" aria-label="Reset camera view" title="Reset camera view">RESET</button>
         <button id="camera-zoom-out" type="button" aria-label="Zoom camera out" title="Zoom out">−</button>
       </div>
-      <div id="arrival-transition" aria-hidden="true" />
 
       {/* Permanent Live Online Players Counter Badge */}
       <div id="live-players-badge" className="spx-live-badge" title="Active engineers online in real-time">
@@ -450,6 +449,7 @@ export default function MarsCanvas() {
                 <button className="dropdown-item traj-opt-btn" data-traj="SUBORBITAL">🎯 SUBORBITAL (50 KM)</button>
 
                 <button className="dropdown-item" id="flight-reset-btn">🔄 RESET TO PAD</button>
+                <button className="dropdown-item" id="flight-restack-btn" style={{ display: 'none' }}>RESTACK AT STARBASE</button>
                 <button className="dropdown-item" id="flight-hide-ui-btn">👁️ TOGGLE HUD [H]</button>
                 <button className="dropdown-item" id="flight-roadster-btn">🏎️ TESLA ROADSTER</button>
                 <button className="dropdown-item" id="flight-map-btn">🗺️ LOCATION MAP [M]</button>

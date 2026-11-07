@@ -117,11 +117,16 @@ test('Earth arrival waits in orbit for deorbit and brings no booster to the dest
   for (let i = 0; i < 60 * 30; i++) m.update(1 / 60);
   assert.equal(m.phase, FLIGHT_PHASES.ORBIT);
   assert.equal(m.vehicle.boosterGroup.visible, false);
+  const orbitalPosition = m.position.clone();
+  const orbitalVelocity = m.velocity.clone();
   m.triggerDeorbit();
-  assert.equal(m.phase, FLIGHT_PHASES.HYPERSONIC_ENTRY);
+  assert.equal(m.phase, FLIGHT_PHASES.DEORBIT);
+  assert.ok(m.position.distanceTo(orbitalPosition) < 0.001);
+  assert.ok(m.velocity.distanceTo(orbitalVelocity) < 0.001);
   for (let i = 0; i < 60 * 1800 && m.phase !== FLIGHT_PHASES.LANDED; i++) m.update(1 / 60);
   assert.equal(m.phase, FLIGHT_PHASES.LANDED);
-  assert.equal(m.shipCaughtByTower, true);
+  assert.ok(Math.hypot(m.position.x-m.shipCatchCoords.x, m.position.z-m.shipCatchCoords.y) < 1000,
+    'ship should land inside the Starbase recovery area');
   assert.equal(m.boosterState, 'LEFT_BEHIND');
   assert.equal(m.vehicle.boosterGroup.visible, false);
 });
@@ -172,7 +177,9 @@ test('manual transfer also leaves the booster on the departure world', () => {
   const m = mission();
   m.autoMission = false;
   m.phase = FLIGHT_PHASES.ORBIT;
+  m.velocity.set(0, 0, 3400);
   assert.equal(m.triggerInterplanetary('earth'), true);
+  assert.equal(m.velocity.z, 3400);
   assert.equal(m.boosterState, 'LEFT_BEHIND');
   assert.equal(m.vehicle.boosterGroup.visible, false);
   assert.equal(m.vehicle.isMated, false);

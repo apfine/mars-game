@@ -30,3 +30,22 @@ test('orbital tanker docking conserves propellant and starts transfer afterward'
   assert.ok(events.indexOf('docked') < events.indexOf('transfer'));
   assert.ok(events.includes('transfer:mars'));
 });
+
+test('destination orbit tanker replenishes landing propellant without launching another transfer', () => {
+  const events = [];
+  const game = {
+    missionPhysics: { phase: 'ORBIT', starshipFuel: 5, tankerActive: false, tankerStatus: '', opsMessage: '' },
+    tankerOps: { active: false },
+    getTransferFuelRequirement() { return 0; },
+    journey: { startTankerRendezvous() {}, setTankerPhase() {}, endTanker() {} },
+    setTimeScale() {},
+    startInterplanetaryTransfer() { events.push('transfer'); }
+  };
+  MarsGameEngine.prototype.beginOrbitalRefuel.call(game, null);
+  for (let i = 0; i < 100 && game.tankerOps.active; i++) {
+    MarsGameEngine.prototype.updateTankerOperations.call(game, .5);
+  }
+  assert.equal(game.missionPhysics.starshipFuel, 94);
+  assert.equal(game.tankerOps.active, false);
+  assert.deepEqual(events, []);
+});

@@ -60,7 +60,7 @@ export class StarbaseOperations {
       this.updateTrack(this.booster, dt); this.updateTrack(this.ship, dt);
       if ([this.ship.stage, this.booster.stage].every(s => s === 'DONE')) {
         this.state = 'SERVICED';
-        this.message = 'MEGA BAY // PARKED & SECURED · RESET MISSION FOR A NEW STACK';
+        this.message = 'MEGA BAY // VEHICLE SERVICED · RESTACK AVAILABLE IN ACTIONS';
       }
     }
     p.opsMessage = this.message;

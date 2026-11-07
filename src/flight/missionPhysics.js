@@ -477,7 +477,7 @@ export class StarshipMissionPhysics {
     this.scriptedControl = true;
     this.yardControl = false;
     this.throttle = 0;
-    this.velocity.set(0, 0, 0);
+    // Preserve the orbital velocity through the transfer-frame handoff.
     this.boosterVelocity.set(0, 0, 0);
     this.vehicle.boosterGroup.visible = false;
     this.vehicle.setStarshipThrottle(0, true);
@@ -569,7 +569,7 @@ export class StarshipMissionPhysics {
     // A final landable arrival keeps the guided landing reserve. A staging
     // stop or a world with no surface keeps the propellant the injection
     // burn actually left in the tanks.
-    this.starshipFuel = options.preserveFuel ? preservedFuel : 18;
+    this.starshipFuel = options.preserveFuel ? preservedFuel : 35;
     this.starshipFlameout = false;
     this.shipCaughtByTower = false;
     this.cargoDoorsDeployed = false;
@@ -577,9 +577,10 @@ export class StarshipMissionPhysics {
     const entryAlt = profile.entryAltitude;
     const orbitalRadius = profile.radius + entryAlt;
     this.position.set(this.shipCatchCoords.x, this.padElevation + entryAlt,
-      this.shipCatchCoords.y - entryAlt * (ENTRY_DOWNRANGE[planetId] ?? 6.42));
+      this.shipCatchCoords.y - entryAlt * 10);
     // Inverse-square circular speed, the speed localCentralAcceleration balances.
-    this.velocity.set(0, 0, Math.sqrt(profile.gravity * profile.radius * profile.radius / orbitalRadius));
+    this.velocity.set(0, 0, Math.sqrt(profile.gravity * profile.radius * profile.radius / orbitalRadius)
+      + Math.max(0, options.residualDeltaV || 0));
     this.altitude = entryAlt;
     this.speed = this.velocity.length();
     this.horizontalSpeed = this.speed;
@@ -736,13 +737,8 @@ export class StarshipMissionPhysics {
   triggerDeorbit() {
     if (!this.planetProfile.landable) return;
     if (!this.vehicle.isMated && this.phase !== FLIGHT_PHASES.ON_PAD && this.phase !== FLIGHT_PHASES.LANDED) {
-      if (this.arrivalOrbit) {
-        // The local scene compresses the orbital coast to the next entry pass.
-        // Enter the calibrated forward corridor only after the pilot commits.
-        this.enterPlanetEntry(this.planetId);
-        this.opsMessage = 'DEORBIT COMMITTED // GUIDED ENTRY';
-        return;
-      }
+      this.arrivalOrbit = false;
+      this.opsMessage = 'DEORBIT BURN // RETURNING TO ENTRY INTERFACE';
       this.phase = FLIGHT_PHASES.DEORBIT;
       this.orbitTimer = 0;
       if (this.autoMission) {
