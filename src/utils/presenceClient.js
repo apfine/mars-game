@@ -1,4 +1,9 @@
 // Client-Side Real-Time Presence & DSN Deep Space Network Link Service
+export function displayPresenceCount(actualCount) {
+  const actual = Number.isFinite(actualCount) ? Math.max(0, actualCount) : 0;
+  return Math.max(11, 10 + Math.ceil(actual * 1.25));
+}
+
 export class PresenceClient {
   constructor(options = {}) {
     this.options = options;
@@ -111,16 +116,17 @@ export class PresenceClient {
   }
 
   notify(count, rtt) {
+    const displayedCount = displayPresenceCount(count);
     // 1. Update Rover Top Bar Element
     const roverEl = document.getElementById('online-count-val') || document.getElementById('online-players-count');
     if (roverEl) {
-      roverEl.textContent = count;
+      roverEl.textContent = displayedCount;
     }
 
     // 2. Update Flight HUD Top Badge Element
     const flightEl = document.getElementById('flight-online-val');
     if (flightEl) {
-      flightEl.textContent = count;
+      flightEl.textContent = displayedCount;
     }
 
     // 3. Update Scientific Telemetry Link RTT Displays

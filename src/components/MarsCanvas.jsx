@@ -143,7 +143,7 @@ export default function MarsCanvas() {
       <div id="live-players-badge" className="spx-live-badge" title="Active engineers online in real-time">
         <span className="live-dot-pulse"></span>
         <span className="live-txt">LIVE PLAYERS</span>
-        <span id="online-players-count" className="live-num">1</span>
+        <span id="online-players-count" className="live-num">12</span>
       </div>
 
       {/* =========================================================
