@@ -53,6 +53,7 @@ export class MarsAtmosphere {
         uTime: { value: 0 },
         uVacuum: { value: 0 },
         uDeepSpace: { value: 0 },
+        uNoGalaxy: { value: 0 },
         uSunPos: { value: SUN_DIR.clone() },
         uSkyZenith: { value: new THREE.Color(0xc47e5a) },     // Deep Martian butterscotch zenith
         uSkyHorizon: { value: new THREE.Color(0xe0aa8c) },    // Luminous dusty salmon horizon matched to terrain fog
@@ -77,6 +78,7 @@ export class MarsAtmosphere {
         uniform float uTime;
         uniform float uVacuum;
         uniform float uDeepSpace;
+      uniform float uNoGalaxy;
         uniform vec3 uSunPos;
         uniform vec3 uSkyZenith;
         uniform vec3 uSkyHorizon;
@@ -161,8 +163,9 @@ export class MarsAtmosphere {
             float band = exp(-pow(warpedLat / 0.09, 2.0));
             float bulge = pow(max(dot(dir, normalize(vec3(0.72, -0.28, 0.63))), 0.0), 9.0);
             vec3 milkyWay = mix(vec3(0.015, 0.018, 0.025), vec3(0.035, 0.030, 0.026), bulge);
-            cosmosCol += milkyWay * band * (0.75 + 0.35 * cloud) * starVisibility;
-            cosmosCol += starTint * starLayer(dir, 220.0, 0.977) * band * 0.42 * starVisibility;
+            float galaxyOn = 1.0 - uNoGalaxy;
+            cosmosCol += milkyWay * band * (0.75 + 0.35 * cloud) * starVisibility * galaxyOn;
+            cosmosCol += starTint * starLayer(dir, 220.0, 0.977) * band * 0.42 * starVisibility * galaxyOn;
           }
 
           // Physical Planetary Rayleigh + Dust Mie Scattering with Diurnal Day/Night attenuation
@@ -218,6 +221,8 @@ export class MarsAtmosphere {
             float sunDisk = smoothstep(0.9997, 0.99992, sc);
             sky = cosmosCol + uSunColor * sunDisk;
           }
+          // Gargantua's system is a different galaxy: no Sun, no Milky Way band.
+          if (uNoGalaxy > 0.5) sky = cosmosCol;
           gl_FragColor = vec4(sky, 1.0);
           #include <colorspace_fragment>
         }
@@ -1381,6 +1386,8 @@ export class MarsAtmosphere {
       if (this.scene.fog) { this.scene.fog.near = 1e7; this.scene.fog.far = 2e7; }
     }
     this.skyMat.uniforms.uDeepSpace.value = physics?.isInterplanetary ? 1 : 0;
+    this.skyMat.uniforms.uNoGalaxy.value =
+      (this.planetId === 'gargantua' || this.planetId === 'miller' || physics?.inGargantuaSky) ? 1 : 0;
     // 1. Anchor skydome, regional surface, distant mountains and directional light to active camera/player
     this.skyMesh.position.copy(playerPos);
     if (this.regionalSurfaceMesh && this.regionalSurfaceMesh.visible) {

@@ -743,10 +743,11 @@ export class InterplanetaryJourney {
           float inner=smoothstep(1.02,1.22,rho), outer=1.0-smoothstep(2.6,4.4,rho);
           float temp=pow(1.0/max(rho,0.5),0.85);
           float om=1.0/(pow(rho,1.5)+0.3); // Keplerian shear
-          float ph=phi+uTime*0.9*om;
+          float ph=phi+uTime*2.6*om;
           vec2 q=vec2(ph*2.2,rho*5.5);
           float n=fbm(q+seed)*0.75+fbm(vec2(ph*7.0,rho*16.0)-seed)*0.45;
-          float streak=0.55+0.9*n;
+          float arms=pow(max(0.0,sin(ph*3.0+rho*4.5)),5.0)*0.9;
+          float streak=0.22+1.55*smoothstep(0.22,0.95,n)+arms;
           float beam=pow(clamp(1.0+0.62*sx/max(rho,1.0),0.15,1.9),3.0); // Doppler beaming
           vec3 c=ramp(temp*1.25*mix(0.82,1.18,clamp(sx*0.5+0.5,0.0,1.0)))*temp*2.4;
           return c*streak*beam*inner*outer;}
@@ -792,14 +793,19 @@ export class InterplanetaryJourney {
     // bright Einstein ring at the transition and chromatic dispersion.
     this.wormhole = new THREE.Mesh(new THREE.SphereGeometry(950, 96, 64),
       new THREE.ShaderMaterial({
-        uniforms: { uTime: { value: 0 }, uFarSide: { value: 1 } },
-        vertexShader: `varying vec3 vNormal; varying vec3 vView; void main(){
+        uniforms: { uTime: { value: 0 }, uFarSide: { value: 1 },
+          uAxis: { value: new THREE.Vector3(0, 0.14, 1).normalize() } },
+        vertexShader: `varying vec3 vNormal; varying vec3 vView; varying vec3 vWorld; varying vec3 vCenter; varying float vRadius;
+        void main(){
           vec4 world = modelMatrix * vec4(position,1.0);
+          vWorld = world.xyz; vCenter = (modelMatrix*vec4(0.0,0.0,0.0,1.0)).xyz;
+          vRadius = length(modelMatrix[0].xyz)*950.0;
           vNormal = normalize(mat3(modelMatrix) * normal);
           vView = normalize(cameraPosition-world.xyz);
           gl_Position = projectionMatrix * viewMatrix * world;
         }`,
-        fragmentShader: `uniform float uTime; uniform float uFarSide; varying vec3 vNormal; varying vec3 vView;
+        fragmentShader: `uniform float uTime; uniform float uFarSide; uniform vec3 uAxis;
+          varying vec3 vNormal; varying vec3 vView; varying vec3 vWorld; varying vec3 vCenter; varying float vRadius;
           float h13(vec3 p){p=fract(p*0.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
           float n3(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
             return mix(mix(mix(h13(i),h13(i+vec3(1,0,0)),f.x),mix(h13(i+vec3(0,1,0)),h13(i+vec3(1,1,0)),f.x),f.y),
@@ -822,8 +828,42 @@ export class InterplanetaryJourney {
             vec3 gc=vec3(1.0,0.55,0.2)*(gdisk*0.9+gring*1.2);
             col=mix(col,col*(1.0-(1.0-smoothstep(0.075,0.085,gr))),far)+gc*far*step(0.0,d.z+1.0);
             return col;}
+          // Interstellar-style throat: a spiralling tunnel of lensed starlight
+          // streaming past, warm gold bands, and the other universe as a
+          // blazing disc dead ahead.
+          vec3 tlayer(float z,float sw){
+            float u=sw/6.2831853*28.0;
+            vec2 cell=vec2(mod(floor(u),28.0),floor(z*1.7));
+            vec2 f=vec2(fract(u)-0.5,fract(z*1.7));
+            float h=h13(vec3(cell,3.0));
+            float streak=step(0.80,h)*smoothstep(0.5,0.05,abs(f.x))*smoothstep(0.0,0.2,f.y)*smoothstep(1.0,0.35,f.y);
+            vec3 tint=mix(vec3(1.0,0.78,0.5),vec3(0.6,0.8,1.0),h13(vec3(cell,9.0)));
+            float cl=n3(vec3(cos(sw),sin(sw),z*0.32)*2.0)*0.7+n3(vec3(cos(sw),sin(sw),z*0.9)*4.0+5.0)*0.3;
+            float bands=0.5+0.5*sin(sw*3.0+z*1.1);
+            vec3 nebula=mix(vec3(0.015,0.04,0.16),vec3(0.38,0.14,0.52),cl)*(0.25+bands*0.9)*cl*1.4;
+            nebula+=vec3(1.0,0.62,0.28)*pow(max(0.0,sin(sw*5.0+z*0.7)),18.0)*0.45;
+            return nebula+tint*streak*2.2;
+          }
+          vec3 tunnel(vec3 rd){
+            float c=clamp(dot(rd,uAxis),-1.0,1.0);
+            float r=tan(acos(c)*0.5);
+            vec3 side=normalize(cross(uAxis,vec3(0.0,1.0,0.0)));
+            vec3 upv=cross(side,uAxis);
+            float phi=atan(dot(rd,upv),dot(rd,side));
+            float z=0.45/max(r,0.04)-uTime*2.2;
+            float sw=phi+z*0.28+uTime*0.22;
+            vec3 col=vec3(tlayer(z*1.03,sw).r,tlayer(z,sw).g,tlayer(z*0.97,sw).b);
+            col*=smoothstep(0.03,0.45,r)*(1.0+0.9/(0.4+r*r*3.0));
+            vec3 ahead=sky(rd,1.7,uFarSide)*1.5+vec3(0.55,0.7,1.0)*0.5;
+            col=mix(col,ahead,smoothstep(0.26,0.12,r));
+            col+=vec3(0.9,0.95,1.0)*exp(-pow((r-0.20)/0.018,2.0))*1.4;
+            col+=vec3(0.45,0.6,1.0)*exp(-r*2.5)*0.28;
+            return col;
+          }
           void main(){
             vec3 n=normalize(vNormal); vec3 v=normalize(vView);
+            bool inside=distance(cameraPosition,vCenter)<vRadius*0.995;
+            vec3 rdInside=normalize(vWorld-cameraPosition);
             float facing=clamp(dot(n,v),0.0,1.0);
             float b=sqrt(max(0.0,1.0-facing*facing)); // impact parameter 0..1
             // Gravitational deflection: strong near the throat edge, weak at center.
@@ -845,6 +885,7 @@ export class InterplanetaryJourney {
             col+=vec3(0.30,0.45,0.75)*exp(-pow((b-0.80)/0.12,2.0))*0.10;
             col+=vec3(0.45,0.58,0.72)*pow(b,6.0)*0.45; // limb brightening
             col*=0.55+0.45*smoothstep(0.0,0.2,facing+0.1);
+            if(inside) col=tunnel(rdInside);
             gl_FragColor=vec4(col,1.0);
             #include <tonemapping_fragment>
             #include <colorspace_fragment>
@@ -1565,18 +1606,135 @@ export class InterplanetaryJourney {
     this.activeTanker = this.tankerShips[0];
 
     // Visible cryogenic umbilical during hard dock / transfer.
+    // Flowing cryogenic umbilical: bright slugs of LOX / methane travel along
+    // the line toward the ship while a frost sheath breathes.
     this.tankerHose = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.22, 0.22, 1, 8),
-      new THREE.MeshBasicMaterial({
-        color: 0x9fe8ff,
-        transparent: true,
-        opacity: 0.82,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
+      new THREE.CylinderGeometry(0.4, 0.4, 1, 14, 1, true),
+      new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+        side: THREE.DoubleSide,
+        uniforms: { uTime: { value: 0 }, uFlow: { value: 0 }, uLen: { value: 1 } },
+        vertexShader: `varying vec2 vUv; void main(){vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+        fragmentShader: `uniform float uTime,uFlow,uLen; varying vec2 vUv;
+          void main(){
+            float y=vUv.y*uLen;
+            float slug=pow(0.5+0.5*sin(y*0.55-uTime*14.0*uFlow),6.0);
+            float slug2=pow(0.5+0.5*sin(y*0.9-uTime*9.0*uFlow+2.0),8.0);
+            float ring=0.5+0.5*sin(vUv.x*6.2831853*3.0);
+            vec3 lox=vec3(0.45,0.85,1.0), ch4=vec3(1.0,0.72,0.45);
+            vec3 col=lox*(0.35+slug*1.6*uFlow)+ch4*slug2*0.9*uFlow;
+            float a=0.5+0.35*ring+0.4*uFlow;
+            gl_FragColor=vec4(col,clamp(a*(0.55+uFlow*0.45),0.0,1.0));
+          }`
       })
     );
     this.tankerHose.visible = false;
     this.tankerFleet.add(this.tankerHose);
+
+    const gcv = document.createElement('canvas'); gcv.width = gcv.height = 64;
+    const gg = gcv.getContext('2d');
+    const grad = gg.createRadialGradient(32, 32, 1, 32, 32, 31);
+    grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.3, 'rgba(170,220,255,0.55)');
+    grad.addColorStop(1, 'rgba(60,120,255,0)');
+    gg.fillStyle = grad; gg.fillRect(0, 0, 64, 64);
+    const glowTex = new THREE.CanvasTexture(gcv); glowTex.colorSpace = THREE.SRGBColorSpace;
+    const mkGlow = (color) => {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 }));
+      sp.visible = false; sp.renderOrder = 20; this.tankerFleet.add(sp); return sp;
+    };
+    this.dockGlowShip = mkGlow(0xb8e8ff);
+    this.dockGlowTanker = mkGlow(0xb8e8ff);
+    this.tankerRcsA = mkGlow(0xffffff);
+    this.tankerRcsB = mkGlow(0xcfe6ff);
+    this._dockFlash = 0;
+    this._lastTankerPhase = 'idle';
+    this._hoseFlow = 0;
+
+    // Venting cryogenic mist at the coupling.
+    const MIST = 90;
+    this._mist = { n: MIST, vel: new Float32Array(MIST * 3), life: new Float32Array(MIST),
+      pos: new Float32Array(MIST * 3), alpha: new Float32Array(MIST) };
+    const mg = new THREE.BufferGeometry();
+    mg.setAttribute('position', new THREE.BufferAttribute(this._mist.pos, 3));
+    mg.setAttribute('aAlpha', new THREE.BufferAttribute(this._mist.alpha, 1));
+    this.tankerMist = new THREE.Points(mg, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+      vertexShader: `attribute float aAlpha; varying float vA;
+        void main(){ vA=aAlpha; vec4 mv=modelViewMatrix*vec4(position,1.0);
+          gl_PointSize=min(90.0, (1.5+aAlpha*7.0)*900.0/max(1.0,-mv.z)); gl_Position=projectionMatrix*mv; }`,
+      fragmentShader: `varying float vA; void main(){
+          float d=length(gl_PointCoord-0.5)*2.0; float a=smoothstep(1.0,0.0,d)*vA*0.5;
+          gl_FragColor=vec4(vec3(0.75,0.9,1.0),a); }`
+    }));
+    this.tankerMist.frustumCulled = false; this.tankerMist.visible = false; this.tankerMist.renderOrder = 19;
+    this.tankerFleet.add(this.tankerMist);
+  }
+
+  _updateDockingFx(dt, active, docked) {
+    if (!this.tankerMist || !active) return;
+    const phase = this.tankerPhase;
+    if (phase !== this._lastTankerPhase) {
+      if (phase === 'docked') this._dockFlash = 1;
+      this._lastTankerPhase = phase;
+    }
+    this._dockFlash = Math.max(0, this._dockFlash - dt * 1.4);
+    const flowTarget = phase === 'transfer' ? 1 : docked ? 0.12 : 0;
+    this._hoseFlow += (flowTarget - this._hoseFlow) * Math.min(1, dt * 3);
+    const u = this.tankerHose.material.uniforms;
+    u.uTime.value = this.time; u.uFlow.value = this._hoseFlow;
+    const dock = active.userData.dock;
+    u.uLen.value = Math.hypot(dock.x, dock.y - 10, dock.z);
+
+    // Coupling lights: pulse while connected, flash when the latches close.
+    const pulse = 0.55 + 0.45 * Math.sin(this.time * 6);
+    const lit = docked ? 1 : 0;
+    for (const [g, p] of [[this.dockGlowShip, new THREE.Vector3(0, 10, 0)], [this.dockGlowTanker, dock]]) {
+      g.visible = lit > 0 || this._dockFlash > 0;
+      g.position.copy(p);
+      g.material.opacity = Math.min(1, lit * (0.35 + 0.4 * this._hoseFlow) * pulse + this._dockFlash);
+      g.scale.setScalar(5 + this._dockFlash * 26 + this._hoseFlow * 3);
+    }
+
+    // Approach: cold-gas RCS puffs on the tanker, firing in staggered bursts.
+    const approaching = phase === 'rendezvous' || phase === 'soft-dock';
+    for (let i = 0; i < 2; i++) {
+      const g = i ? this.tankerRcsB : this.tankerRcsA;
+      const on = approaching && Math.sin(this.time * 9 + i * 2.4) > -0.2 && Math.random() > 0.25;
+      g.visible = on;
+      if (on) {
+        g.position.copy(active.position).add(new THREE.Vector3(i ? -6 : 6, i ? 8 : -4, i ? -5 : 7));
+        g.material.opacity = 0.5 + Math.random() * 0.4;
+        g.scale.setScalar(5 + Math.random() * 4);
+      }
+    }
+
+    // Venting mist: spawns at the coupling during flow and on latch-up.
+    const m = this._mist;
+    const spawnRate = (this._hoseFlow * 55 + this._dockFlash * 160) * dt;
+    let spawn = spawnRate;
+    let any = false;
+    for (let i = 0; i < m.n; i++) {
+      if (m.life[i] <= 0 && spawn > 0 && (spawn >= 1 || Math.random() < spawn)) {
+        spawn -= 1;
+        m.life[i] = 1.2 + Math.random() * 1.6;
+        const o = Math.random() < 0.5 ? dock : this._dockShipPoint || (this._dockShipPoint = new THREE.Vector3(0, 10, 0));
+        m.pos[i * 3] = o.x; m.pos[i * 3 + 1] = o.y; m.pos[i * 3 + 2] = o.z;
+        const sp = 5 + Math.random() * 9;
+        const a = Math.random() * Math.PI * 2, b = Math.random() * 2 - 1, r = Math.sqrt(1 - b * b);
+        m.vel[i * 3] = Math.cos(a) * r * sp; m.vel[i * 3 + 1] = b * sp; m.vel[i * 3 + 2] = Math.sin(a) * r * sp;
+      }
+      if (m.life[i] > 0) {
+        m.life[i] -= dt; any = true;
+        for (let k = 0; k < 3; k++) { m.pos[i * 3 + k] += m.vel[i * 3 + k] * dt; m.vel[i * 3 + k] *= 1 - 0.8 * dt; }
+        m.alpha[i] = Math.max(0, Math.min(1, m.life[i] / 1.4));
+      } else m.alpha[i] = 0;
+    }
+    this.tankerMist.visible = any;
+    if (any) {
+      this.tankerMist.geometry.attributes.position.needsUpdate = true;
+      this.tankerMist.geometry.attributes.aAlpha.needsUpdate = true;
+    }
   }
 
   startTankerRendezvous() {
@@ -1661,6 +1819,7 @@ export class InterplanetaryJourney {
       }
     }
 
+    this._updateDockingFx(dt, active, docked);
     if (this.tankerHose && active) {
       this.tankerHose.visible = docked;
       if (docked) {
@@ -1735,6 +1894,7 @@ export class InterplanetaryJourney {
     if (this.active) return;
     if (target === this.planetId) return;
     this.target = target;
+    this.physics.inGargantuaSky = false;
     this.routeKind = transferKind(this.planetId, target);
     this.transferStage = this.routeKind === 'kepler' ? 'ALIGN' : 'TRANSIT';
     this.physics.transferStage = this.transferStage;
@@ -2217,9 +2377,11 @@ export class InterplanetaryJourney {
       this.wormhole.material.uniforms.uFarSide.value = towardGargantua ? 1 : 0;
       const solarSide = towardGargantua ? this.progress < 0.54 : this.progress >= 0.54;
       this.celestialGroup.visible = solarSide;
+      this.physics.inGargantuaSky = !solarSide;
       this.gargantuaGroup.visible = !solarSide;
       if (this.gargantuaGroup.visible) this.gargantuaGroup.position.copy(this.physics.position).add(new THREE.Vector3(0, 9000, -37000));
     } else if (this.routeKind === 'gargantua-local') {
+      this.physics.inGargantuaSky = true;
       this.gargantuaGroup.visible = true;
       this.gargantuaGroup.position.copy(this.physics.position).add(new THREE.Vector3(0, 9000, -37000));
     }
