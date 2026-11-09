@@ -541,27 +541,34 @@ function createPlumeMaterial({ core = 0xffffff, mid = 0xffaa33, outer = 0xff4411
       varying vec3 vN;
       varying vec3 vV;
 
+      float ph(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float pn(vec2 p){
+        vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(ph(i), ph(i + vec2(1.0, 0.0)), f.x), mix(ph(i + vec2(0.0, 1.0)), ph(i + vec2(1.0, 1.0)), f.x), f.y);
+      }
       void main() {
         if (uThrottle <= 0.004) discard;
         float t = 1.0 - vUv.y;
         float ang = vUv.x * 6.2831853;
-        float turb = sin(ang * 3.0 + uTime * 47.0) * sin(ang * 5.0 - uTime * 31.0 + 1.7);
-        float flicker = 0.82 + 0.18 * turb;
-        float diamonds = pow(max(0.0, sin(t * 34.0 - uTime * 20.0)), 8.0) * smoothstep(0.0, 0.10, t) * (1.0 - t);
-        
-        // Diffused plume geometry without strict cone boundary:
-        // Soft interior-weighted core with gentle exponential feathering to the boundary
+        // Seam-free turbulence advected down the plume (Kelvin-Helmholtz shear).
+        vec2 q = vec2(t * 5.5 - uTime * 11.0, cos(ang) * 1.5 + sin(ang) * 1.1);
+        float n = pn(q) * 0.55 + pn(q * 2.3 + 4.7) * 0.30 + pn(q * 5.1 - uTime * 3.0) * 0.15;
         float viewDot = max(0.0, dot(normalize(vN), normalize(vV)));
-        float edgeSoft = smoothstep(0.02, 0.52, viewDot);
-        float turbulentEdge = 0.85 + 0.15 * sin(ang * 4.0 + t * 14.0 - uTime * 18.0);
-        float diffuseProfile = pow(edgeSoft * turbulentEdge, 0.85);
-
-        float body = smoothstep(0.0, 0.055, t) * pow(1.0 - t, 1.22);
-        vec3 col = mix(uCore, uMid, smoothstep(0.0, 0.45, t));
-        col = mix(col, uOuter, smoothstep(0.45, 1.0, t));
-        col += uCore * diamonds * 1.5;
-        col *= (1.0 + uVacuum * 0.35) * (1.20 + diffuseProfile * 0.85);
-        float alpha = (body * (0.35 + 0.65 * diffuseProfile) * flicker + diamonds * 0.85) * uThrottle * 0.64 * diffuseProfile;
+        // Density is high on the axis and breaks into ragged wisps at the rim.
+        float axis = smoothstep(0.0, 0.85, viewDot);
+        float rim = smoothstep(0.02, 0.5, viewDot);
+        float ragged = smoothstep(0.18, 0.78, n + axis * 0.55 - t * 0.25);
+        // Mach disks: bright compressions only inside the supersonic core.
+        float disks = pow(max(0.0, sin(t * 30.0 + 0.4)), 10.0) * smoothstep(0.55, 0.95, viewDot)
+                      * smoothstep(0.02, 0.12, t) * pow(1.0 - t, 1.6);
+        float body = smoothstep(0.0, 0.05, t) * pow(1.0 - t, 1.35);
+        float heat = clamp(axis * (1.0 - t * 1.25), 0.0, 1.0);
+        vec3 col = mix(uOuter, uMid, smoothstep(0.0, 0.7, heat + (1.0 - t) * 0.15));
+        col = mix(col, uCore, pow(heat, 2.2));
+        col += uCore * disks * 1.8;
+        col *= (1.0 + uVacuum * 0.35) * (1.0 + axis * 0.9);
+        float flicker = 0.88 + 0.12 * sin(uTime * 63.0 + t * 9.0);
+        float alpha = (body * (0.25 + 0.75 * ragged) * rim * flicker + disks * 0.9) * uThrottle * 0.72;
         gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
       }
     `
@@ -2183,14 +2190,38 @@ export class StarshipMissionVehicle {
 
     // Cold-gas RCS Thruster Plumes (for attitude rotation & translation pulses)
     this.rcsPlumes = [];
-    const rcsMat = new THREE.MeshBasicMaterial({
-      color: 0xe6f4ff,
+    const rcsMat = new THREE.ShaderMaterial({
       transparent: true,
-      opacity: 0.0,
       depthWrite: false,
-      blending: THREE.AdditiveBlending
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      uniforms: { uI: { value: 0 }, uTime: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+        void main() {
+          vUv = uv;
+          vN = normalize(normalMatrix * normal);
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vV = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        uniform float uI; uniform float uTime;
+        varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
+        void main() {
+          if (uI <= 0.01) discard;
+          float along = vUv.y;                       // 1 at the tip
+          float view = abs(dot(normalize(vN), normalize(vV)));
+          float n = h(floor(vec2(vUv.x * 14.0, along * 9.0 - uTime * 40.0)));
+          float core = pow(view, 1.6) * pow(1.0 - along, 0.8);
+          float a = core * (0.55 + 0.45 * n) * uI;
+          vec3 col = mix(vec3(0.55, 0.72, 1.0), vec3(1.0, 0.97, 0.92), pow(core, 2.0));
+          gl_FragColor = vec4(col * 1.4, clamp(a, 0.0, 0.85));
+        }`
     });
-    const rcsConeGeo = new THREE.ConeGeometry(0.35, 1.6, 8);
+    const rcsConeGeo = new THREE.ConeGeometry(0.5, 2.6, 12, 4, true);
     rcsConeGeo.rotateX(Math.PI / 2);
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
@@ -2518,17 +2549,33 @@ export class StarshipMissionVehicle {
         varying vec3 vNormal;
         varying vec3 vPos;
 
+        float rh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float rn(vec2 p){
+          vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(rh(i), rh(i + vec2(1.0, 0.0)), f.x), mix(rh(i + vec2(0.0, 1.0)), rh(i + vec2(1.0, 1.0)), f.x), f.y);
+        }
         void main() {
           if (uHeat <= 0.005) discard;
           // Local-space windward mask stays attached to the heatshield as the camera moves.
           float belly = smoothstep(0.0, 4.8, vPos.z);
           float ends = smoothstep(0.0, 5.0, vPos.y) * (1.0 - smoothstep(40.0, 49.0, vPos.y));
-          float stream = 0.82 + 0.12 * sin(vPos.y * 0.9 - uTime * 13.0 + sin(vPos.x * 3.0));
-          float sheath = pow(belly, 1.7) * ends;
-          vec3 plasmaCol = mix(vec3(0.9, 0.14, 0.025), vec3(1.0, 0.62, 0.22), uHeat);
-          plasmaCol = mix(plasmaCol, vec3(1.0, 0.89, 0.7), pow(uHeat * belly, 3.0));
-          float alpha = sheath * stream * uHeat * 0.42;
-          gl_FragColor = vec4(plasmaCol, alpha);
+          // Air streams nose -> tail (down -Y): elongated, fast-advected filaments
+          // plus slower turbulent billows in the boundary layer.
+          vec2 fl = vec2(vPos.x * 1.7, vPos.y * 0.16 + uTime * 14.0);
+          float streak = rn(fl) * 0.6 + rn(fl * 2.7 + 3.1) * 0.4;
+          float billow = rn(vec2(vPos.x * 0.7 + uTime * 0.6, vPos.y * 0.09 + uTime * 5.0));
+          float tex = mix(0.45, 1.25, streak) * mix(0.8, 1.15, billow);
+          float sheath = pow(belly, 1.5) * ends;
+          // Temperature ramp: ionized violet shock edge -> orange -> white-hot at stagnation (nose).
+          float nose = smoothstep(14.0, 44.0, vPos.y);
+          float core = clamp(uHeat * (0.35 + belly * 0.75) * (0.5 + nose * 0.9), 0.0, 1.0);
+          vec3 edge = vec3(0.62, 0.25, 0.95);
+          vec3 hot = vec3(1.0, 0.45, 0.12);
+          vec3 white = vec3(1.0, 0.93, 0.78);
+          vec3 plasmaCol = mix(edge, hot, smoothstep(0.1, 0.55, core));
+          plasmaCol = mix(plasmaCol, white, smoothstep(0.55, 1.0, core));
+          float alpha = sheath * tex * uHeat * (0.34 + nose * 0.22);
+          gl_FragColor = vec4(plasmaCol * (1.0 + core * 0.8), clamp(alpha, 0.0, 1.0));
         }
       `
     });
@@ -2753,14 +2800,30 @@ export class StarshipMissionVehicle {
 
     // Fire cold-gas RCS jets during steering / attitude maneuvers
     const turning = Math.abs(pitch) > 0.05 || Math.abs(roll) > 0.05;
-    if (this.rcsPlumes) {
-      for (let i = 0; i < this.rcsPlumes.length; i++) {
-        const p = this.rcsPlumes[i];
-        p.visible = turning;
-        if (turning) {
-          p.material.opacity = 0.6 + Math.random() * 0.35;
-          p.scale.set(1.0 + Math.random() * 0.3, 1.0 + Math.random() * 0.4, 1.0);
-        }
+    this._rcsFlap = turning ? 1 : 0;
+    this._applyRcs();
+  }
+
+  // Attitude-slew thrusters driven by flight logic (e.g. transfer alignment).
+  setRcsActivity(level) {
+    this._rcsExternal = THREE.MathUtils.clamp(level, 0, 1);
+    this._applyRcs();
+  }
+
+  _applyRcs() {
+    if (!this.rcsPlumes) return;
+    const level = Math.max(this._rcsFlap || 0, this._rcsExternal || 0);
+    const now = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000;
+    for (let i = 0; i < this.rcsPlumes.length; i++) {
+      const p = this.rcsPlumes[i];
+      // Pulse-width modulation: thrusters fire in short, staggered bursts.
+      const on = level > 0.01 && Math.sin(now * 37 + i * 1.9) > -0.55;
+      p.visible = on;
+      if (on) {
+        p.material.uniforms.uI.value = level * (0.7 + Math.random() * 0.3);
+        p.material.uniforms.uTime.value = now;
+        const grow = 1.0 + Math.random() * 0.5;
+        p.scale.set(grow, 1.0 + Math.random() * 0.6, grow);
       }
     }
   }

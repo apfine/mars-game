@@ -1794,7 +1794,28 @@ export class InterplanetaryJourney {
     this._samplePath(0, this.pathStart);
     this._samplePath(1, this.pathEnd);
     this.flybyPoint = null;
-    this._rebuildRouteGeometry();
+    // Departure: the origin world starts huge (matching the local globe the
+    // pilot just left) and recedes as the ship accelerates away, mirroring the
+    // arrival zoom. Before the burn the ship still moves along its parking
+    // orbit (d0); the plotted trajectory bends from that heading onto the
+    // transfer ellipse as delta-v accumulates.
+    this.departureOffset = new THREE.Vector3();
+    this.departureScale = 1;
+    this._trailClock = 0;
+    this._d0 = new THREE.Vector3(0, 1, 0).applyQuaternion(this._alignStartQuaternion).normalize();
+    this._t0 = new THREE.Vector3(0, 1, 0);
+    this._vdir = new THREE.Vector3();
+    if (this.routeKind === 'kepler') {
+      const fromProfile = PLANET_PROFILES[this.planetId];
+      this._sampleTangent(0, this._t0);
+      if (fromProfile) {
+        this.departureScale = Math.max(1, 70 / sceneRadius(fromProfile.radius));
+        this.departureOffset.copy(this._t0).multiplyScalar(-0.45)
+          .add(new THREE.Vector3(0, -0.85, 0)).normalize()
+          .multiplyScalar(sceneRadius(fromProfile.radius + fromProfile.entryAltitude) * this.departureScale);
+      }
+    }
+    this._rebuildRouteGeometry(0);
     this.transferGroup.visible = this.showTrajectory;
     this.transferTrail.material.opacity = 0.7;
     this.transferTrailGlow.material.opacity = 0.38;
@@ -1827,7 +1848,7 @@ export class InterplanetaryJourney {
     // every solar body back before ephemerides and markers are refreshed.
     for (const mesh of this.solarBodies.values()) mesh.visible = true;
 
-    if (this.routeKind === 'kepler') this._updateSolarBodies(0);
+    if (this.routeKind === 'kepler') { this._updateSolarBodies(0); this._updateDepartureVisuals(0); }
     this.sun.visible = this.solarLight.visible = true;
     this.sunGlow.visible = false;
   }
@@ -1960,6 +1981,22 @@ export class InterplanetaryJourney {
     }
   }
 
+  _updateDepartureVisuals(progress) {
+    if (this.routeKind !== 'kepler' || progress >= 0.05 || !this.departureOffset) return;
+    const mesh = this.planetId === 'moon' ? this.moon : this.solarBodies.get(this.planetId);
+    if (!mesh) return;
+    const e = THREE.MathUtils.smootherstep(progress, 0, 0.05);
+    const zoom = THREE.MathUtils.lerp(this.departureScale, 1, e);
+    mesh.scale.multiplyScalar(zoom);
+    mesh.position.addScaledVector(this.departureOffset, 1 - e);
+    if (this.planetId === 'earth') {
+      this.clouds.scale.copy(mesh.scale);
+      this.earthGlow.scale.copy(mesh.scale);
+      this.clouds.position.copy(mesh.position);
+      this.earthGlow.position.copy(mesh.position);
+    }
+  }
+
   _updateArrivalVisuals(progress) {
     if (this.routeKind !== 'kepler' || progress <= 0.97) return;
     const mesh = this.target === 'moon' ? this.moon : this.solarBodies.get(this.target);
@@ -2035,11 +2072,22 @@ export class InterplanetaryJourney {
     this._updateNavigationMarkers(camera);
   }
 
-  _rebuildRouteGeometry() {
+  _rebuildRouteGeometry(burnFraction = 1) {
     const points = [];
     const n = 190;
     for (let i = 0; i <= n; i++) {
       points.push(this._samplePath(i / n, new THREE.Vector3()));
+    }
+    if (this.routeKind === 'kepler' && burnFraction < 0.999 && this._d0) {
+      let length = 0;
+      for (let i = 1; i < points.length; i++) length += points[i].distanceTo(points[i - 1]);
+      const delta = this._vdir.copy(this._d0).lerp(this._t0, burnFraction).sub(this._t0);
+      for (let i = 1; i < points.length; i++) {
+        const s = i / n;
+        // w(s) has unit slope at the ship and decays, so the curve leaves along
+        // the current velocity and merges smoothly into the true ellipse.
+        points[i].addScaledVector(delta, length * s * Math.exp(-s / 0.04));
+      }
     }
     this.transferTrail.geometry.dispose();
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -2184,19 +2232,33 @@ export class InterplanetaryJourney {
     if (this.routeKind === 'kepler' && this.transferStage !== 'COAST') {
       this._sampleTangent(0, this._pathTangent);
       this._alignTargetQuaternion.setFromUnitVectors(this._upAxis, this._pathTangent);
+      const ALIGN_SECONDS = 7;
       if (this.transferStage === 'ALIGN') {
+        // Smootherstep slew: gentle angular acceleration and deceleration,
+        // driven by cold-gas RCS bursts at the start and end of the rotation.
+        const u = Math.min(1, this.stageClock / ALIGN_SECONDS);
         this.physics.quaternion.slerpQuaternions(this._alignStartQuaternion,
-          this._alignTargetQuaternion, Math.min(1, this.stageClock / 3));
-      } else this.physics.quaternion.copy(this._alignTargetQuaternion);
+          this._alignTargetQuaternion, THREE.MathUtils.smootherstep(u, 0, 1));
+        const slewing = u < 1 && (u < 0.2 || u > 0.78);
+        this.vehicle.setRcsActivity?.(slewing ? 1 : 0);
+      } else {
+        this.physics.quaternion.copy(this._alignTargetQuaternion);
+        this.vehicle.setRcsActivity?.(0);
+      }
+      // Thrust points along the transfer tangent but the velocity vector only
+      // bends toward it as delta-v accumulates (thrust != velocity mid-burn).
+      const burnFrac = this.orbit.injectionDeltaV > 0
+        ? THREE.MathUtils.clamp(this.burnDeltaV / this.orbit.injectionDeltaV, 0, 1) : 1;
+      this._vdir.copy(this._d0).lerp(this._pathTangent, burnFrac).normalize();
       const postBurnSpeed = sampleTransfer(this.orbit, 0).speed;
-      this.physics.velocity.copy(this._pathTangent).multiplyScalar(
+      this.physics.velocity.copy(this._vdir).multiplyScalar(
         Math.max(0, postBurnSpeed - this.orbit.injectionDeltaV) + this.burnDeltaV);
       this.physics.speed = this.physics.velocity.length();
       this.stageClock += dt;
       if (this.transferStage === 'ALIGN') {
         this.vehicle.setStarshipThrottle(0, true);
         this.physics.transferStatus = `TRANSFER ALIGNMENT // TANGENT VECTOR LOCKED · INJECTION ΔV ${Math.round(this.orbit.injectionDeltaV)} M/S`;
-        if (this.stageClock >= 3) { this.transferStage = 'INJECTION'; this.stageClock = 0; }
+        if (this.stageClock >= ALIGN_SECONDS) { this.transferStage = 'INJECTION'; this.stageClock = 0; }
       } else {
         // Simulated burn time is compressed for the view, but propellant mass
         // and achieved delta-v follow the rocket equation in physical seconds.
@@ -2218,9 +2280,20 @@ export class InterplanetaryJourney {
         this.physics.position.copy(this._pathPoint);
         this._updateSolarBodies(this.progress * this.orbit.seconds);
         this.physics.transferProgress = this.progress;
-        this.vehicle.setStarshipThrottle(1, true);
+        // Engine spool-up, then throttle down as the target delta-v nears.
+        const remainingFrac = 1 - burnFrac;
+        const throttle = Math.min(THREE.MathUtils.smoothstep(this.stageClock, 0, 1.5),
+          THREE.MathUtils.clamp(remainingFrac / 0.06, 0.25, 1));
+        this.vehicle.setStarshipThrottle(Math.max(0.2, throttle), true);
+        this._updateDepartureVisuals(this.progress);
+        this._trailClock += dt;
+        if (this.showTrajectory && this._trailClock > 0.12) {
+          this._trailClock = 0;
+          this._rebuildRouteGeometry(burnFrac);
+        }
         this.physics.transferStatus = `INJECTION BURN // ${Math.round(Math.min(this.burnDeltaV, this.orbit.injectionDeltaV))}/${Math.round(this.orbit.injectionDeltaV)} M/S · SHIP TANK ${Math.round(this.physics.starshipFuel)}%`;
         if (this.burnDeltaV >= this.orbit.injectionDeltaV) {
+          this._rebuildRouteGeometry(1);
           this.transferStage = 'COAST';
           this.vehicle.setStarshipThrottle(0, true);
         } else if (this.physics.starshipFuel <= .001) {
@@ -2248,7 +2321,9 @@ export class InterplanetaryJourney {
     // Mission time still advances by the exact corresponding Kepler interval.
     const approachCompression = this.routeKind === 'kepler' && this.progress > 0.96
       ? Math.max(0.03, Math.pow((1 - this.progress) / 0.04, 1.3)) : 1;
-    const advance = Math.min(1 - this.progress, (dt * warp * approachCompression) / this.duration);
+    const departCompression = this.routeKind === 'kepler' && this.progress < 0.04
+      ? Math.max(0.08, Math.pow(this.progress / 0.04, 1.3)) : 1;
+    const advance = Math.min(1 - this.progress, (dt * warp * approachCompression * departCompression) / this.duration);
     this.progress += advance;
     this.elapsedAdvanceSeconds = advance * this.orbit.seconds;
     this.physics.missionTime += advance * this.orbit.seconds;
@@ -2260,6 +2335,7 @@ export class InterplanetaryJourney {
 
     if (this.routeKind === 'kepler') {
       this._updateSolarBodies(t * this.orbit.seconds);
+      this._updateDepartureVisuals(t);
       this._updateArrivalVisuals(t);
     }
     this._flightDir.copy(this._pathTangent);
