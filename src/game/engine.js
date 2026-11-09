@@ -416,7 +416,11 @@ export class MarsGameEngine {
       });
     }
 
-    const optimalPreset = this.detectOptimalQuality();
+    let optimalPreset = this.detectOptimalQuality();
+    try {
+      const saved = localStorage.getItem('mars.quality');
+      if (['Cinematic', 'Ultra', 'High', 'Medium', 'Low', 'Safe'].includes(saved)) optimalPreset = saved;
+    } catch (_) {}
     this.applyQuality(optimalPreset);
     const qualitySelect = document.getElementById('quality-select');
     if (qualitySelect) qualitySelect.value = optimalPreset;
@@ -1121,6 +1125,8 @@ export class MarsGameEngine {
     const isMed = renderPreset === 'Medium';
     const isHigh = renderPreset === 'High';
     const isUltra = renderPreset === 'Ultra';
+    const isCinematic = renderPreset === 'Cinematic';
+    this.lockResolution = isUltra || isCinematic;
 
     if (isSafe) {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
@@ -1144,15 +1150,26 @@ export class MarsGameEngine {
       this.renderer.shadowMap.enabled = true;
       this.atmosphere.sunLight.castShadow = true;
       this.atmosphere.sunLight.shadow.mapSize.set(2048, 2048);
+    } else if (isCinematic) {
+      // Supersampled: render above native resolution (clamped to 2.5x) for a
+      // crisp hull, clean atmosphere edges and no adaptive downscaling.
+      const ss = Math.max(window.devicePixelRatio || 1, 1.5);
+      this.renderer.setPixelRatio(Math.min(ss * 1.25, 2.5));
+      this.minDynPR = this.renderer.getPixelRatio();
+      this.renderer.shadowMap.enabled = true;
+      this.atmosphere.sunLight.castShadow = true;
+      this.atmosphere.sunLight.shadow.mapSize.set(4096, 4096);
     } else if (isUltra) {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.0));
-      this.minDynPR = 1.0;
+      this.renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2.0));
+      this.minDynPR = this.renderer.getPixelRatio();
       this.renderer.shadowMap.enabled = true;
       this.atmosphere.sunLight.castShadow = true;
       this.atmosphere.sunLight.shadow.mapSize.set(2048, 2048);
     }
     this.pixelBase = this.renderer.getPixelRatio();
     this.dynPR = this.pixelBase;
+    try { localStorage.setItem('mars.quality', preset); } catch (_) {}
+    document.body.dataset.quality = preset;
   }
 
   initEvents() {
@@ -1361,7 +1378,7 @@ export class MarsGameEngine {
 
     // Adaptive resolution for smooth 60 FPS on all devices
     this.avgDt += (Math.min(rawDt, 0.1) - this.avgDt) * 0.08;
-    if (++this.perfTick >= 35) {
+    if (!this.lockResolution && ++this.perfTick >= 35) {
       this.perfTick = 0;
       let next = this.dynPR;
       const floor = this.minDynPR ?? 0.9;

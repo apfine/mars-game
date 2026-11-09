@@ -3270,3 +3270,71 @@ body:has(.career-panel.open) .camera-zoom-controls { display: none; }
   #flight-hud .spx-top-bar { gap: 4px; }
   #flight-hud .spx-dropdown-menu { max-height: 60dvh; overflow: auto; touch-action: pan-y; }
 }
+
+/* ===== Organised, conditional HUD (panel manager) ===== */
+.ui-movable {
+  outline: 1px dashed rgba(120, 220, 255, 0.85) !important;
+  outline-offset: 3px;
+  cursor: move !important;
+  pointer-events: auto !important;
+  user-select: none;
+  z-index: 200 !important;
+}
+.ui-movable::after {
+  content: 'MOVE · double-click to lock';
+  position: absolute;
+  top: -18px; left: 0;
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  color: #7fdcff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.setting-item small { display: block; margin-top: 6px; opacity: 0.6; font-size: 11px; }
+
+/* Secondary telemetry fades when idle (auto) and hides in minimal mode. */
+.spx-wing, .spx-timeline, .flight-ops-status, .flight-attitude-gauge, .spx-gimbal-bar {
+  transition: opacity 0.6s ease;
+}
+body[data-hud-detail='auto'].hud-idle .spx-wing,
+body[data-hud-detail='auto'].hud-idle .spx-timeline,
+body[data-hud-detail='auto'].hud-idle .flight-attitude-gauge,
+body[data-hud-detail='auto'].hud-idle .flight-ops-status { opacity: 0.18; }
+body[data-hud-detail='auto'] .spx-broadcast-bar:hover .spx-wing,
+body[data-hud-detail='auto'] .spx-broadcast-bar:hover .spx-timeline { opacity: 1; }
+body[data-hud-detail='minimal'] .spx-wing,
+body[data-hud-detail='minimal'] .spx-timeline,
+body[data-hud-detail='minimal'] .flight-attitude-gauge,
+body[data-hud-detail='minimal'] .flight-ops-status,
+body[data-hud-detail='minimal'] .spx-gimbal-bar { display: none !important; }
+body[data-hud-detail='minimal'] .spx-broadcast-bar { height: auto !important; min-height: 0; padding: 6px 12px; }
+
+/* No overlap: stack top bar groups, push ops/score below, keep bottom clear. */
+.spx-top-bar { flex-wrap: wrap; row-gap: 6px; }
+.spx-top-left, .spx-top-right { flex-wrap: wrap; max-width: 100%; }
+.flight-score-card { top: 140px; max-height: calc(100vh - 280px); overflow: auto; }
+@media (max-width: 900px) {
+  .spx-top-bar { left: 8px; right: 8px; top: 8px; }
+  .spx-top-right { justify-content: flex-end; margin-left: auto; }
+  .flight-ops-bar { top: auto; bottom: 124px; flex-wrap: wrap; justify-content: center; }
+  .flight-score-card { top: 100px; width: calc(100vw - 24px); max-width: 420px; padding: 10px 14px; }
+  .flight-attitude-gauge { display: none; }
+  .spx-timeline { display: none; }
+  .ui-movable::after { display: none; }
+}
+@media (pointer: coarse) { .ui-movable { cursor: auto !important; outline: none !important; } }
+
+/* Guided builder */
+.build-guide { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 4px; }
+.build-guide li { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; font-size: 12px; opacity: 0.55; border: 1px solid rgba(255,255,255,0.08); }
+.build-guide li b { display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,0.14); font-size: 10px; }
+.build-guide li.now { opacity: 1; border-color: rgba(127,220,255,0.7); background: rgba(127,220,255,0.1); }
+.build-guide li.done { opacity: 0.8; }
+.build-guide em { color: #7fdcff; font-style: normal; font-weight: 700; }
+.career-card.suggested { border-color: rgba(127,220,255,0.7) !important; box-shadow: 0 0 0 1px rgba(127,220,255,0.35); }
+.career-card.locked { opacity: 0.6; }
+.career-lock { color: #ffb36b; display: block; margin-bottom: 4px; }
+@media (max-width: 700px) {
+  .career-panel { max-height: calc(100vh - 150px); }
+  .career-launchers { max-width: 100%; flex-wrap: wrap; }
+}

@@ -23,6 +23,8 @@ export default function MarsCanvas() {
     let careerController = null;
     let isMounted = true;
     getPresenceClient();
+    let disposePanels = () => {};
+    import('../ui/panelManager.js').then((m) => { if (isMounted) disposePanels = m.initPanelManager(); });
 
     const timer = setInterval(() => {
       setProgress((prev) => {
@@ -80,6 +82,7 @@ export default function MarsCanvas() {
 
     return () => {
       isMounted = false;
+      disposePanels();
       clearInterval(timer);
       clearTimeout(safetyTimeout);
       if (engine) {
@@ -824,12 +827,28 @@ export default function MarsCanvas() {
             <div className="setting-item">
               <label htmlFor="quality-select">Graphics Quality</label>
               <select id="quality-select" defaultValue="High">
+                <option value="Cinematic">Cinematic (Supersampled, Crispest)</option>
                 <option value="Ultra">Ultra (High Shadow & Particles)</option>
                 <option value="High">High (Optimized PC)</option>
                 <option value="Medium">Medium (Balanced Mobile/PC)</option>
                 <option value="Low">Low (Maximum Mobile FPS)</option>
                 <option value="Safe">Safe Render (Compatibility / No Black Screen)</option>
               </select>
+            </div>
+
+            <div className="setting-item">
+              <label htmlFor="hud-detail-select">HUD Detail</label>
+              <select id="hud-detail-select" defaultValue="auto">
+                <option value="auto">Auto (show only when needed)</option>
+                <option value="full">Full telemetry</option>
+                <option value="minimal">Minimal (cinematic)</option>
+              </select>
+            </div>
+
+            <div className="setting-item">
+              <label>Menu Layout</label>
+              <button id="btn-reset-layout" className="btn-action">Reset moved menus</button>
+              <small>PC: double-click a panel to move it, double-click again to lock.</small>
             </div>
 
             <div className="setting-item">

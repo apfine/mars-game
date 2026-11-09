@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PLANET_PROFILES, getPlanetProfile } from './planetProfiles.js';
 import { getEarthMaps, getMoonMap } from '../effects/earthMaps.js';
 import { earthSurfaceHeight, earthCoastDistance, EARTH_RADIUS } from '../terrain/earthSurface.js';
+import { buildEarthCities } from '../terrain/earthCities.js';
 import { STARBASE_LAYOUT as L } from './starbaseLayout.js';
 import { createProceduralEarthTexture, createProceduralMarsTexture } from '../effects/postLaunchSpace.js';
 
@@ -691,6 +692,19 @@ export class InterplanetaryJourney {
         mesh.add(ring);
       }
       this.solarBodies.set(body.id, mesh);
+      const atmoTint = { venus: [1.0, 0.78, 0.45, 0.9], mars: [0.95, 0.62, 0.45, 0.45], jupiter: [0.85, 0.7, 0.55, 0.5],
+        saturn: [0.9, 0.8, 0.6, 0.5], uranus: [0.55, 0.9, 0.95, 0.8], neptune: [0.3, 0.5, 1.0, 0.9] }[body.id];
+      if (atmoTint) {
+        // Limb-brightened Fresnel haze, sun-side weighted, so the disk reads as
+        // a real world with an atmosphere instead of a flat shaded ball.
+        const haze = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.035, 64, 48), new THREE.ShaderMaterial({
+          transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.FrontSide,
+          uniforms: { uTint: { value: new THREE.Vector4(...atmoTint) } },
+          vertexShader: 'varying vec3 vN; varying vec3 vW; void main(){ vN=normalize(mat3(modelMatrix)*normal); vec4 w=modelMatrix*vec4(position,1.0); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }',
+          fragmentShader: 'uniform vec4 uTint; varying vec3 vN; varying vec3 vW; void main(){ vec3 v=normalize(cameraPosition-vW); float f=pow(1.0-abs(dot(normalize(vN),v)),3.2); gl_FragColor=vec4(uTint.rgb*f*uTint.a*0.8, f*0.85); }'
+        }));
+        mesh.add(haze);
+      }
       this.celestialGroup.add(mesh);
     }
     // At astronomical distances a true planetary disk occupies less than a
@@ -1530,6 +1544,14 @@ export class InterplanetaryJourney {
     }
     this.earthSurface.add(this.earthCloudSprites);
 
+    // Inland cities: distant skylines with lit windows and street grids.
+    this.earthCities = buildEarthCities({
+      padCoords: this.padCoords,
+      padGroundY: this.padGroundY,
+      surfaceHeight: earthSurfaceHeight,
+      coastDistance: earthCoastDistance
+    });
+    this.earthSurface.add(this.earthCities);
     // Earth Starbase marquee on two posts near the south gate.
     const sign = new THREE.Mesh(
       new THREE.PlaneGeometry(44, 11),

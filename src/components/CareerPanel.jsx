@@ -40,6 +40,23 @@ export default function CareerPanel({ career }) {
   const indicators = baseCapacity(state);
   const pinned = OBJECTIVES.find(item => item.id === state.settings.pinned && !state.objectives[item.id]?.complete) || nextObjectives(state)[0];
   const choices = nextObjectives(state);
+  const builtTypes = new Set(state.buildings.map(item => item.type));
+  const nextBuild = ['solar', 'water', 'greenhouse', 'habitat', 'lab'].find(type => !builtTypes.has(type));
+  const lockReason = type => {
+    const module = MODULES[type];
+    const missing = (module.requires || []).filter(key => !builtTypes.has(key));
+    if (missing.length) return `Build first: ${missing.map(key => MODULES[key].name).join(' + ')}`;
+    const short = Object.entries(module.cost).find(([key, value]) => (state.resources[key] || 0) < value);
+    if (short) return `Need ${short[1]} ${short[0]} (have ${state.resources[short[0]] || 0})`;
+    if (state.buildings.length >= BASE_PLOTS.length) return 'All plots used';
+    return '';
+  };
+  const catalog = Object.entries(MODULES).sort(([a], [b]) => (b === nextBuild) - (a === nextBuild));
+  useEffect(() => {
+    if (!placement || placement.plotId) return;
+    const free = BASE_PLOTS.find(plot => !state.buildings.some(item => item.plotId === plot.id));
+    if (free) career.selectPlot(free.id);
+  }, [career, placement, state.buildings]);
   const stop = event => event.stopPropagation();
   const action = (type, extra = {}) => career.dispatch({ type, ...extra });
   const exportSave = () => {
@@ -93,12 +110,17 @@ export default function CareerPanel({ career }) {
         </>}
         {tab === 'Build' && <>
           <div className="career-resource-row"><span>Inventory <b>{inventoryUsed(state)}/{inventoryCapacity(state)}</b></span><span>Power <b>{indicators.power} spare</b></span><span>Water <b>{indicators.water} spare</b></span><span>Settlement <b>{indicators.settlement}</b></span></div>
-          <p className="career-muted">Ares expansion apron · 9 surveyed plots. Select a module, then tap a plot marker or a plot below. Camera drags still move the view.</p>
-          <div className="career-catalog">{Object.entries(MODULES).map(([type, module]) => <article className="career-card" key={type}>
-            <div className="career-card-title"><b>{module.name}</b><small>{formatReward(module.cost)}</small></div>
-            <p>{module.purpose}. {module.requires?.length ? `Requires ${module.requires.map(key => MODULES[key].name).join(' and ')}.` : ''}</p>
-            <button type="button" onClick={() => { setMoveId(null); career.startPlacement(type); }}>PLACE {module.name.toUpperCase()}</button>
-          </article>)}</div>
+          <ol className="build-guide" aria-label="Build steps">
+            <li className={!placement ? 'now' : 'done'}><b>1</b> Pick a module{nextBuild ? <> — suggested: <em>{MODULES[nextBuild].name}</em></> : ' — your base is complete, expand freely'}</li>
+            <li className={placement && !placement.plotId ? 'now' : placement ? 'done' : ''}><b>2</b> Choose a plot (or tap a marker on the map)</li>
+            <li className={placement?.plotId ? 'now' : ''}><b>3</b> Rotate if needed, then Confirm</li>
+          </ol>
+          <div className="career-catalog">{catalog.map(([type, module]) => { const lock = lockReason(type); return <article className={`career-card${type === nextBuild ? ' suggested' : ''}${lock ? ' locked' : ''}`} key={type}>
+            <div className="career-card-title"><b>{module.name}{type === nextBuild ? ' · NEXT' : ''}</b><small>{formatReward(module.cost)}</small></div>
+            <p>{module.purpose}.</p>
+            {lock && <small className="career-lock">{lock}</small>}
+            <button type="button" disabled={Boolean(lock)} onClick={() => { setMoveId(null); career.startPlacement(type); }}>PLACE {module.name.toUpperCase()}</button>
+          </article>; })}</div>
           {placement && <div className="career-placement" role="group" aria-label="Placement controls">
             <b>PLACEMENT MODE · {MODULES[placement.type].name}</b>
             <div className="career-plot-grid">{BASE_PLOTS.map(plot => <button key={plot.id} type="button" className={placement.plotId === plot.id ? 'selected' : ''} onClick={() => career.selectPlot(plot.id)}>{plot.id.toUpperCase()}</button>)}</div>
