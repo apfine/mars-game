@@ -718,41 +718,68 @@ export class InterplanetaryJourney {
     this.gargantuaGroup = new THREE.Group();
     this.scene.add(this.gargantuaGroup);
     this.gargantuaGroup.visible = false;
-    // Screen-space approximation of a shadow, photon ring, direct disk and
-    // the lensed image of the far side of the disk (cf. DNGR). The near and
-    // far bands share one continuous brightness field, avoiding flat toruses.
+    // Analytic, loop-free approximation of Gargantua (cf. DNGR/Interstellar):
+    // opaque shadow, razor photon ring, Doppler-beamed turbulent accretion disk
+    // with differential rotation, and the gravitationally lensed far side of the
+    // disk arching over and under the shadow. Premultiplied emission over an
+    // opaque shadow keeps it cheap (single quad, no ray marching).
     const blackHoleMaterial = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 } }, transparent: true, depthWrite: false,
       side: THREE.DoubleSide, fog: false,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
       vertexShader: `varying vec2 vUv; void main(){vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
       fragmentShader: `uniform float uTime; varying vec2 vUv;
-        float band(float x,float width){return exp(-pow(x/width,2.0));}
+        float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+        float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+          return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);}
+        float fbm(vec2 p){return vn(p)*0.5+vn(p*2.03+7.1)*0.28+vn(p*4.1+3.7)*0.14+vn(p*8.3+1.3)*0.08;}
+        vec3 ramp(float t){ // blackbody-like: deep orange -> gold -> hot white
+          t=clamp(t,0.0,1.0);
+          return mix(mix(vec3(0.30,0.07,0.015),vec3(1.0,0.50,0.14),smoothstep(0.0,0.45,t)),
+                     mix(vec3(1.0,0.50,0.14),vec3(1.0,0.90,0.74),smoothstep(0.45,1.0,t)),step(0.45,t));}
+        // Disk emission at disk-plane radius rho (in shadow radii) and azimuth phi.
+        vec3 disk(float rho,float phi,float sx,float seed){
+          float inner=smoothstep(1.02,1.22,rho), outer=1.0-smoothstep(2.6,4.4,rho);
+          float temp=pow(1.0/max(rho,0.5),0.85);
+          float om=1.0/(pow(rho,1.5)+0.3); // Keplerian shear
+          float ph=phi+uTime*0.9*om;
+          vec2 q=vec2(ph*2.2,rho*5.5);
+          float n=fbm(q+seed)*0.75+fbm(vec2(ph*7.0,rho*16.0)-seed)*0.45;
+          float streak=0.55+0.9*n;
+          float beam=pow(clamp(1.0+0.62*sx/max(rho,1.0),0.15,1.9),3.0); // Doppler beaming
+          vec3 c=ramp(temp*1.25*mix(0.82,1.18,clamp(sx*0.5+0.5,0.0,1.0)))*temp*2.4;
+          return c*streak*beam*inner*outer;}
         void main(){
-          vec2 p=(vUv-0.5)*2.0; p.x*=1.58;
-          float r=length(p); float a=atan(p.y,p.x);
-          float shadow=1.0-smoothstep(0.295,0.314,r);
-          float photon=band(r-0.322,0.009)*0.42+band(r-0.355,0.028)*0.12;
-          float diskRadius=length(vec2(p.x,p.y*3.55));
-          float diskMask=smoothstep(0.35,0.43,diskRadius)*(1.0-smoothstep(0.98,1.33,diskRadius));
-          float direct=band(p.y+0.035+0.02*sin(p.x*2.5),0.075+0.018*abs(p.x))*diskMask;
-          float arch=0.055+0.37*sqrt(max(0.0,1.0-pow(p.x/0.78,2.0)));
-          float archMask=1.0-smoothstep(0.72,0.82,abs(p.x));
-          float upper=band(p.y-arch,0.052)*archMask*smoothstep(0.28,0.39,r);
-          float lower=band(p.y+arch*0.91,0.043)*archMask*smoothstep(0.28,0.39,r);
-          // Advected plasma features orbit in the disk. The shadow itself
-          // stays dark; spin is visible through the moving emitting gas.
-          float orbitPhase=a*8.0+diskRadius*23.0-uTime*1.05;
-          float turbulence=0.66+0.16*sin(orbitPhase)+0.10*sin(orbitPhase*1.9+diskRadius*31.0);
-          float hotStream=pow(max(0.0,sin(orbitPhase*0.78+diskRadius*9.0)),7.0)*0.52;
-          float doppler=mix(0.38,1.7,smoothstep(-0.75,0.75,p.x));
-          vec3 amber=mix(vec3(0.49,0.16,0.045),vec3(1.0,0.77,0.44),clamp(1.15-diskRadius,0.0,1.0));
-          vec3 color=amber*(direct*0.94+upper*0.67+lower*0.34)*(turbulence+hotStream)*doppler;
-          color+=vec3(1.0,0.75,0.54)*photon;
-          float halo=band(r-0.38,0.13)*0.10+band(r-0.58,0.27)*0.025;
-          color+=vec3(0.39,0.46,0.58)*halo;
-          color*=1.0-shadow;
-          float alpha=clamp(max(max(direct,upper),max(lower,photon))+halo+shadow,0.0,1.0);
-          gl_FragColor=vec4(color,alpha);
+          vec2 p=(vUv-0.5)*2.0; p.x*=1.575;
+          float R=0.30; vec2 s=p/R; float r=length(s); float a=atan(s.y,s.x);
+          float shadow=1.0-smoothstep(0.985,1.0,r);
+          vec3 col=vec3(0.0);
+          // Direct disk (inclined ~6deg): near half crosses in front of the shadow.
+          vec2 d=vec2(s.x,(s.y+0.10)*5.2);
+          float rhoD=length(d); float phiD=atan(d.y,d.x);
+          float thick=exp(-pow(d.y*0.0+(s.y+0.10-0.0)*0.0,2.0));
+          float frontMask=step(0.0,-(s.y+0.10))+step(1.0,abs(s.x));
+          float vert=smoothstep(0.0,0.05,abs(s.y+0.10)+0.05*rhoD/ max(rhoD,1.0));
+          col+=disk(rhoD,phiD,s.x/ max(rhoD,0.01)*rhoD,1.7)*clamp(frontMask,0.0,1.0)*(1.0-shadow)*1.0;
+          // Lensed far-side image: wraps the shadow, thickness shrinks away from it.
+          float lensR=1.0+ (r-1.0);
+          float up=max(s.y+0.06,0.0), dn=max(-s.y-0.20,0.0);
+          float arc=exp(-(r-1.03)*3.4)*smoothstep(1.0,1.05,r)*(1.0-smoothstep(1.9,2.9,r));
+          float rhoL=1.0+(r-1.0)*2.6+0.15; // image radius maps to larger disk radius
+          float pos=smoothstep(-0.3,0.9,s.y);
+          vec3 up3=disk(rhoL,a*1.0,s.x*0.9,5.3)*arc*(0.35+0.9*pos);
+          vec3 dn3=disk(rhoL*1.1,-a,s.x*0.9,9.1)*arc*(1.0-pos)*0.35*smoothstep(0.0,0.7,-s.y);
+          col+=up3+dn3;
+          // Photon ring (razor thin) + soft secondary ring + faint lensed halo.
+          float ring=exp(-pow((r-1.035)/0.012,2.0))*1.5+exp(-pow((r-1.09)/0.05,2.0))*0.22;
+          float ringBeam=0.75+0.5*clamp(s.x/ max(r,0.01)*0.5+0.5,0.0,1.0);
+          col+=vec3(1.0,0.82,0.58)*ring*ringBeam;
+          col+=vec3(0.55,0.62,0.80)*exp(-pow((r-1.35)/0.45,2.0))*0.05;
+          col*=1.0-shadow;
+          float edge=1.0-smoothstep(0.78,1.0,max(abs(vUv.x-0.5),abs(vUv.y-0.5))*2.0);
+          col*=edge;
+          gl_FragColor=vec4(col,shadow*edge);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }`
@@ -760,7 +787,10 @@ export class InterplanetaryJourney {
     this.gargantuaBillboard = new THREE.Mesh(new THREE.PlaneGeometry(85000, 54000), blackHoleMaterial);
     this.gargantuaBillboard.frustumCulled = false;
     this.gargantuaGroup.add(this.gargantuaBillboard);
-    this.wormhole = new THREE.Mesh(new THREE.SphereGeometry(950, 64, 48),
+    // Ellis-style wormhole: the throat shows the other universe (refracted,
+    // mirrored sky) while the rim shows our own sky smeared by lensing, with a
+    // bright Einstein ring at the transition and chromatic dispersion.
+    this.wormhole = new THREE.Mesh(new THREE.SphereGeometry(950, 96, 64),
       new THREE.ShaderMaterial({
         uniforms: { uTime: { value: 0 }, uFarSide: { value: 1 } },
         vertexShader: `varying vec3 vNormal; varying vec3 vView; void main(){
@@ -770,22 +800,51 @@ export class InterplanetaryJourney {
           gl_Position = projectionMatrix * viewMatrix * world;
         }`,
         fragmentShader: `uniform float uTime; uniform float uFarSide; varying vec3 vNormal; varying vec3 vView;
-          float hash(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+          float h13(vec3 p){p=fract(p*0.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
+          float n3(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+            return mix(mix(mix(h13(i),h13(i+vec3(1,0,0)),f.x),mix(h13(i+vec3(0,1,0)),h13(i+vec3(1,1,0)),f.x),f.y),
+                       mix(mix(h13(i+vec3(0,0,1)),h13(i+vec3(1,0,1)),f.x),mix(h13(i+vec3(0,1,1)),h13(i+vec3(1,1,1)),f.x),f.y),f.z);}
+          vec3 stars(vec3 d,float sc,float thr){
+            vec3 c=floor(d*sc); vec3 f=fract(d*sc)-0.5; float h=h13(c);
+            float s=step(thr,h)*pow(max(0.0,1.0-length(f)*2.2),6.0);
+            vec3 tint=mix(vec3(1.0,0.72,0.55),vec3(0.65,0.8,1.0),h13(c+9.7));
+            return tint*s*(0.6+1.6*h13(c+3.1));}
+          vec3 sky(vec3 d,float seed,float far){
+            vec3 col=stars(d,60.0,0.93)+stars(d,140.0,0.95)*0.8+stars(d,320.0,0.965)*0.6;
+            float neb=n3(d*2.3+seed)*0.6+n3(d*5.1-seed)*0.3;
+            col+=mix(vec3(0.02,0.03,0.07),vec3(0.07,0.04,0.09),n3(d*1.7+seed*2.0))*pow(neb,2.2)*2.2;
+            float band=exp(-pow((d.y+0.2*sin(d.x*2.2+seed))*4.0,2.0));
+            col+=vec3(0.05,0.055,0.075)*band*(0.5+n3(d*9.0));
+            // Gargantua seen through the far mouth (lensed disk ring + shadow).
+            vec2 g=d.xy-vec2(0.05,0.03); float gr=length(g);
+            float gdisk=exp(-pow((d.y-0.03+0.0)*30.0,2.0))*smoothstep(0.08,0.12,abs(d.x-0.05))*(1.0-smoothstep(0.24,0.34,abs(d.x-0.05)));
+            float gring=exp(-pow((gr-0.085)/0.006,2.0))+exp(-pow((gr-0.11)/0.04,2.0))*0.25;
+            vec3 gc=vec3(1.0,0.55,0.2)*(gdisk*0.9+gring*1.2);
+            col=mix(col,col*(1.0-(1.0-smoothstep(0.075,0.085,gr))),far)+gc*far*step(0.0,d.z+1.0);
+            return col;}
           void main(){
             vec3 n=normalize(vNormal); vec3 v=normalize(vView);
-            float facing=max(dot(n,v),0.0); float rim=pow(1.0-facing,5.0);
-            vec3 ray=normalize(reflect(-v,n)*0.28+n*0.72);
-            vec3 cell=floor(ray*280.0); vec3 point=fract(ray*280.0)-0.5;
-            float star=step(0.955,hash(cell))*pow(max(0.0,1.0-length(point)*2.4),8.0);
-            vec3 sky=vec3(0.002,0.004,0.009);
-            sky+=0.018*exp(-pow((ray.y+0.12*sin(ray.x*3.0))*5.0,2.0))*vec3(0.7,0.8,1.0);
-            sky+=star*vec3(0.88,0.91,1.0);
-            float farShadow=1.0-smoothstep(0.07,0.085,length(ray.xy-vec2(0.04,0.03)));
-            float farDisk=exp(-pow((ray.y-0.03)*26.0,2.0))*smoothstep(0.08,0.13,abs(ray.x))*(1.0-smoothstep(0.22,0.29,abs(ray.x)));
-            sky=mix(sky,sky+vec3(0.8,0.38,0.12)*farDisk, uFarSide);
-            sky*=1.0-farShadow*uFarSide;
-            vec3 col=sky+vec3(0.43,0.54,0.62)*rim*0.45;
-            col+=vec3(0.04,0.06,0.09)*pow(1.0-facing,2.0);
+            float facing=clamp(dot(n,v),0.0,1.0);
+            float b=sqrt(max(0.0,1.0-facing*facing)); // impact parameter 0..1
+            // Gravitational deflection: strong near the throat edge, weak at center.
+            float defl=0.28+1.55*pow(b,3.0);
+            vec3 refr=normalize(refract(-v,n,0.55)+n*(-0.2));
+            vec3 other=normalize(mix(-v,refr,0.75)+cross(n,v)*0.04*sin(uTime*0.2));
+            vec3 rim=normalize(reflect(-v,n)*(0.4+defl*0.5)+n*0.5+vec3(0.0,0.0,sin(b*6.0)*0.06));
+            float split=smoothstep(0.78,0.90,b); // 0: far-universe center, 1: own-sky rim
+            // chromatic dispersion of the lensed rim
+            vec3 colO=sky(other,1.7,uFarSide);
+            vec3 rimR=sky(normalize(rim+vec3(0.014,0.0,0.0)),4.2,0.0);
+            vec3 rimG=sky(rim,4.2,0.0);
+            vec3 rimB=sky(normalize(rim-vec3(0.014,0.0,0.0)),4.2,0.0);
+            vec3 colR=vec3(rimR.r,rimG.g,rimB.b);
+            vec3 col=mix(colO,colR,split);
+            // Einstein ring + throat glow
+            float ring=exp(-pow((b-0.84)/0.018,2.0));
+            col+=vec3(0.85,0.92,1.0)*ring*1.15;
+            col+=vec3(0.30,0.45,0.75)*exp(-pow((b-0.80)/0.12,2.0))*0.10;
+            col+=vec3(0.45,0.58,0.72)*pow(b,6.0)*0.45; // limb brightening
+            col*=0.55+0.45*smoothstep(0.0,0.2,facing+0.1);
             gl_FragColor=vec4(col,1.0);
             #include <tonemapping_fragment>
             #include <colorspace_fragment>
